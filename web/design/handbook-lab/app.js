@@ -1,4 +1,9 @@
 // Progressive enhancement only. Pages and every navigation link work without scripts.
+// Pointer feedback stays quiet; keyboard input clears pointer markers before
+// the browser moves focus. Programmatic restoration clears its target too.
+document.addEventListener('pointerdown', event => event.target.closest('button')?.setAttribute('data-pointer-focus',''));
+document.addEventListener('keydown', () => document.querySelectorAll('[data-pointer-focus]').forEach(element => element.removeAttribute('data-pointer-focus')), {capture:true});
+const freezePageScroll = () => window.scrollTo({left:window.scrollX,top:window.scrollY,behavior:'instant'});
 const root = document.body.dataset.root || './';
 const dialog = document.querySelector('.search-dialog');
 const input = document.querySelector('#handbook-query');
@@ -16,6 +21,8 @@ const normalize = s => s.toLocaleLowerCase().normalize('NFKD').replace(/\p{Diacr
 const openSearch = async (trigger, pointer = false) => {
   if (!dialog || typeof dialog.showModal !== 'function' || document.querySelector('dialog[open]')) return;
   origin = trigger || document.activeElement;
+  searchDestination = null;
+  freezePageScroll();
   dialog.showModal();
   input.toggleAttribute('data-pointer-focus', pointer);
   input.value = '';
@@ -45,7 +52,7 @@ dialog?.addEventListener('close', () => {
   const destination = searchDestination || origin;
   searchDestination = null;
   origin = null;
-  if (destination?.isConnected) destination.focus({ preventScroll: true });
+  if (!document.querySelector('dialog[open]') && destination?.isConnected) { destination.removeAttribute('data-pointer-focus'); destination.focus({ preventScroll: true }); }
 });
 // Preserve native links/history while completing same-page search navigation.
 results?.addEventListener('click', event => {
@@ -131,57 +138,115 @@ document.querySelectorAll('a.citation-ref,a.figure-source-ref,a.citation-return'
     event.preventDefault();
     if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex','-1');
     target.focus({ preventScroll:true });
-    if (location.hash === link.hash) target.scrollIntoView();
-    else location.hash = link.hash;
+    if (location.hash !== link.hash) location.hash = link.hash;
+    target.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'instant' : 'smooth'});
   });
 });
-// Keep native disclosure behavior, but dismiss overlays after a choice.
-const menus = [...document.querySelectorAll('.reader-controls details')];
-for (const menu of menus) {
-  menu.addEventListener('toggle', () => {
-    if (menu.open) for (const other of menus) if (other !== menu) other.open = false;
-  });
-  menu.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && menu.open) {
-      event.preventDefault();
-      menu.open = false;
-      menu.querySelector('summary').focus({ preventScroll: true });
-    }
-  });
-  menu.addEventListener('click', event => {
-    const link = event.target.closest('a');
-    if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    menu.open = false;
-    if (link.pathname === location.pathname && link.hash) {
-      const target = document.getElementById(decodeFragment(link.hash));
-      if (target) {
-        if (!target.hasAttribute('tabindex')) target.tabIndex = -1;
-        target.focus({ preventScroll: true });
-      }
-    }
-  });
-}
-document.addEventListener('click', event => {
-  for (const menu of menus) if (!menu.contains(event.target)) menu.open = false;
+// Keep the footer's current-page return explicit, including repeated activation.
+document.querySelector('.site-footer a[href="#page-top"]')?.addEventListener('click', event => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  const target = document.getElementById('page-top');
+  if (!target) return;
+  event.preventDefault();
+  target.focus({preventScroll:true});
+  if (location.hash !== '#page-top') history.pushState(null,'','#page-top');
+  window.scrollTo({top:0,left:0,behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'instant' : 'smooth'});
 });
+// One native contents tree serves both the wide rail and narrow overlay.
+const contents = document.querySelector('.reader-controls > .contents-menu');
 const controls = document.querySelector('.reader-controls');
-if (controls) {
-  const setOffset = () => document.documentElement.style.setProperty('--reader-offset', `${controls.offsetHeight + 16}px`);
-  setOffset();
-  if (typeof ResizeObserver === 'function') new ResizeObserver(setOffset).observe(controls);
+const wideReader = window.matchMedia('(min-width:1101px)');
+const fitContentsPanel = () => {
+  if (!contents || wideReader.matches || !contents.open) return;
+  const rect = controls.getBoundingClientRect();
+  const below = window.innerHeight - rect.bottom - 12, above = rect.top - 12;
+  const upward = below < 180 && above > below;
+  contents.classList.toggle('opens-up', upward);
+  contents.style.setProperty('--contents-room', `${Math.max(80, upward ? above : below)}px`);
+};
+contents?.addEventListener('toggle',fitContentsPanel);
+window.addEventListener('resize',fitContentsPanel);
+window.addEventListener('scroll',fitContentsPanel,{passive:true});
+for (const summary of contents?.querySelectorAll('summary') || []) {
+  summary.addEventListener('pointerdown',()=>summary.setAttribute('data-pointer-focus',''));
+  summary.addEventListener('keydown',()=>summary.removeAttribute('data-pointer-focus'));
 }
+const setReaderOffset = () => {
+  if (controls) document.documentElement.style.setProperty('--reader-offset', wideReader.matches ? '24px' : `${controls.offsetHeight + 16}px`);
+};
+const syncContents = () => {
+  if (!contents) return;
+  const focused = document.activeElement;
+  contents.open = wideReader.matches;
+  if (!wideReader.matches && contents.contains(focused) && focused !== contents.querySelector('summary')) { contents.querySelector('summary').removeAttribute('data-pointer-focus'); contents.querySelector('summary').focus({preventScroll:true}); }
+  if (wideReader.matches && focused === contents.querySelector('summary')) contents.querySelector('[aria-current="page"]').focus({preventScroll:true});
+  setReaderOffset();
+};
+syncContents();
+wideReader.addEventListener('change',syncContents);
+contents?.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  if (!wideReader.matches && contents.open) {
+    event.preventDefault(); contents.open = false;
+    contents.querySelector('summary').removeAttribute('data-pointer-focus');
+    contents.querySelector('summary').focus({preventScroll:true});
+  } else if (wideReader.matches) {
+    const group = event.target.closest('.contents-group[open]');
+    if (group) { event.preventDefault(); group.open = false; group.querySelector('summary').removeAttribute('data-pointer-focus'); group.querySelector('summary').focus({preventScroll:true}); }
+  }
+});
+contents?.addEventListener('click', event => {
+  const link = event.target.closest('a');
+  if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (!wideReader.matches) contents.open = false;
+  if (link.pathname === location.pathname && link.hash) {
+    const target = document.getElementById(decodeFragment(link.hash));
+    if (target) {
+      if (!target.hasAttribute('tabindex')) target.tabIndex = -1;
+      event.preventDefault();
+      target.focus({preventScroll:true});
+      if (location.hash !== link.hash) location.hash = link.hash;
+      target.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'instant' : 'smooth'});
+    }
+  }
+});
+document.addEventListener('click', event => {
+  if (contents && !wideReader.matches && !contents.contains(event.target)) contents.open = false;
+});
+if (controls && typeof ResizeObserver === 'function') new ResizeObserver(setReaderOffset).observe(controls);
 for (const pre of document.querySelectorAll('.prose pre')) {
   const text = pre.textContent;
+  const block = document.createElement('div'); block.className = 'code-block';
+  const status = document.createElement('span'); status.className = 'copy-status';
+  status.setAttribute('role','status'); status.setAttribute('aria-atomic','true');
   const button = document.createElement('button');
-  button.type = 'button'; button.className = 'copy-button'; button.textContent = 'Copy code';
-  button.setAttribute('aria-label','Copy this code');
-  button.setAttribute('aria-live','polite');
+  button.type = 'button'; button.className = 'copy-button';
+  button.setAttribute('aria-label','Copy this code'); button.title = 'Copy code';
+  button.innerHTML = '<svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg><svg class="copy-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><svg class="copy-error" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 4h.01"/></svg><span class="copy-label">Copy</span>';
+  const label = button.querySelector('.copy-label');
+  function showCopyState(state) {
+    label.textContent = state === 'pending' ? 'Copying…' : state === 'success' ? 'Copied' : state === 'error' ? 'Retry' : 'Copy';
+    status.textContent = state === 'pending' ? 'Copying code' : state === 'success' ? 'Copied' : state === 'error' ? 'Could not copy' : '';
+    button.setAttribute('aria-label',state === 'error' ? 'Retry copying this code' : 'Copy this code');
+    button.title = state === 'error' ? 'Could not copy — try again' : 'Copy code';
+    if (state) { button.dataset.copyState = state; status.dataset.copyState = state; }
+    else { delete button.dataset.copyState; delete status.dataset.copyState; }
+  }
+  let resetCopy, copyAttempt = 0;
   button.addEventListener('click',async () => {
-    try { await navigator.clipboard.writeText(text); button.textContent = 'Copied'; }
-    catch { button.textContent = 'Could not copy'; }
-    setTimeout(() => { button.textContent = 'Copy code'; },2000);
+    const attempt = ++copyAttempt;
+    clearTimeout(resetCopy); showCopyState('pending');
+    try {
+      await navigator.clipboard.writeText(text);
+      if (attempt !== copyAttempt) return;
+      showCopyState('success');
+    } catch {
+      if (attempt !== copyAttempt) return;
+      showCopyState('error');
+    }
+    resetCopy = setTimeout(() => showCopyState(null),2000);
   });
-  pre.append(button);
+  pre.before(block); block.append(pre,status,button);
 }
 
 // The static text key remains complete without JavaScript. The optional modal
@@ -222,11 +287,12 @@ for (const figure of document.querySelectorAll('.schema-figure')) {
         canvas.scrollLeft = 0;
       });
       close.addEventListener('click', () => viewer.close());
-      viewer.addEventListener('close', () => trigger.focus({ preventScroll: true }));
+      viewer.addEventListener('close', () => { if (!document.querySelector('dialog[open]')) { trigger.removeAttribute('data-pointer-focus'); trigger.focus({ preventScroll: true }); } });
     }
     const canvas = viewer.querySelector('.figure-canvas');
     canvas.classList.remove('fit-width'); canvas.scrollLeft = 0;
     viewer.querySelector('button:not([data-figure-close])').textContent = 'Fit to width';
+    freezePageScroll();
     viewer.showModal();
   });
 }
