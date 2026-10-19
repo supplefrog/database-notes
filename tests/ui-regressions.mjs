@@ -261,6 +261,37 @@ export async function runUiRegressions({page,setViewport,pressKey,caseIds,slowRe
     const forward=await until(()=>page.evaluate(()=>({url:location.href,y:scrollY})),m=>m.url===before.url&&m.y>=0&&m.y<=2,'Forward did not return to the chapter at its last position');
     return {before,activations,back,forward};
   });
+  await test('current-section-follows-links-scroll-and-resume-without-history',async()=>{
+    const observations=[];
+    for(const width of [390,768,1440]){
+      await setViewport({width,height:900});await go('index.html');
+      const home=await page.evaluate(()=>location.href);
+      await page.locator('.product-entries').getByRole('link',{name:'MySQL',exact:true}).press('Enter');await waitForPageEntry();await ready();
+      const links=await page.evaluate(()=>[...document.querySelectorAll('.chapter-sections a')].map(a=>({hash:a.hash,text:a.textContent})));
+      const before=await readHistory();
+      const read=()=>page.evaluate(()=>({url:location.href,y:scrollY,current:[...document.querySelectorAll('.chapter-sections a[aria-current="location"]')].map(a=>a.hash),pageCurrent:document.querySelectorAll('.contents-menu [aria-current="page"]').length,overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth}));
+      for(const target of [links[0],links.at(-1)]){
+        if(width<1101){await page.locator('.contents-menu>summary').press('Enter');await ready();}
+        await page.locator('.chapter-sections a[href="'+target.hash+'"]').press('Enter');await ready();
+        await until(read,m=>m.current.length===1&&m.current[0]===target.hash,'clicked section not current after scrolling');
+      }
+      const selected=await read();require(selected.pageCurrent===1&&!selected.overflow,'section indication disturbed chapter/layout');
+      require((await readHistory()).historyLength===before.historyLength,'section clicks added a Back stop');
+      await page.goBack();await waitForPageEntry();await ready();require(await page.evaluate(()=>location.href)===home,'Back stopped inside a chapter');
+      await until(()=>page.locator('[data-resume]').getAttribute('href'),href=>href.endsWith(links.at(-1).hash),'Back changed the saved section');
+      await page.locator('[data-resume]').press('Enter');await waitForPageEntry();await ready();
+      await until(read,m=>m.current[0]===links.at(-1).hash,'Resume did not mark its section');
+      const scrollURL=(await read()).url;
+      await pressKey('Control+Home');await ready();
+      const scrolled=await until(read,m=>m.y<=2&&m.current.length===1&&m.current[0]===links[0].hash,'manual scroll left a stale section indication');
+      require(scrolled.url===scrollURL,'ordinary scroll changed the shareable URL');
+      await until(readReadingLocation,value=>value?.chapter==='mysql-overview'&&value.heading===links[0].hash.slice(1),'Resume did not track ordinary reading');
+      await page.goBack();await waitForPageEntry();await ready();require(await page.evaluate(()=>location.href)===home,'ordinary scroll added a Back stop');
+      const resumed=await until(()=>page.locator('[data-resume]').getAttribute('href'),href=>href.endsWith(links[0].hash),'Home retained the old clicked section after manual reading');
+      observations.push({width,before,selected,scrolled,resumed});
+    }
+    return observations;
+  });
   await test('same-document-navigation-does-not-add-history-stops',async()=>{
     const observations=[];
     for(const width of [390,1440]){
@@ -369,6 +400,35 @@ export async function runUiRegressions({page,setViewport,pressKey,caseIds,slowRe
     await page.locator('.subject-path-options').getByRole('link',{name:'PostgreSQL',exact:true}).press('Enter');await waitForPageEntry();await ready();
     require(await page.evaluate(()=>document.body.dataset.chapter)==='postgresql-foundations','header database choice did not reach content');
     return {before,opened,escaped,pointer,historyBefore,historyAfter};
+  });
+  await test('database-chooser-exit-removes-keyboard-options-immediately',async()=>{
+    const observations=[];
+    for(const width of [390,1440]){
+      await setViewport({width,height:900});await go('chapters/os-processes.html');
+      const summary=page.locator('.subject-path-menu>summary');
+      const read=()=>page.evaluate(()=>{
+        const menu=document.querySelector('.subject-path-menu'),options=menu.querySelector('.subject-path-options'),focus=document.activeElement,style=getComputedStyle(menu,'::details-content');
+        return {open:menu.open,inert:options.inert,optionFocused:options.contains(focus),searchFocused:focus.matches('[data-search-open]'),focusTag:focus.tagName,focusText:focus.textContent,opacity:parseFloat(style.opacity),painted:style.contentVisibility==='visible'&&parseFloat(style.opacity)>0,reduced:matchMedia('(prefers-reduced-motion:reduce)').matches,supported:CSS.supports('selector(::details-content)')};
+      });
+      const closeThenTab=async()=>{
+        await summary.press('Escape');await summary.press('Tab');
+        const immediate=await read();
+        require(!immediate.open&&immediate.inert&&!immediate.optionFocused&&immediate.searchFocused,'closed/exiting options entered Tab order');
+        require(immediate.reduced||!immediate.supported||immediate.painted,'exit window missed: transient keyboard coverage remains incomplete');
+        const settled=await until(read,m=>!m.open&&(m.reduced||!m.supported||!m.painted),'disclosure exit did not settle');
+        require(settled.searchFocused&&!settled.optionFocused&&settled.focusTag!=='BODY','exit discarded the next logical focus');
+        return {immediate,settled};
+      };
+      await summary.press('Enter');await until(read,m=>m.open&&!m.inert&&m.opacity>=.99,'chooser did not become usable');
+      const fromSummary=await closeThenTab();
+      await summary.press('Enter');await until(read,m=>m.open&&!m.inert&&m.opacity>=.99,'reopened chooser stayed inert');
+      await summary.press('Tab');
+      require(await page.evaluate(()=>document.activeElement===document.querySelector('.subject-path-options a')),'open options left the normal keyboard sequence');
+      // Escape bubbles from the actual focused option, then Tab must leave the menu.
+      await page.locator('.subject-path-options a').first().press('Escape');await summary.press('Tab');
+      const fromOption=await read();require(!fromOption.open&&fromOption.inert&&fromOption.searchFocused&&!fromOption.optionFocused,'option-origin Escape leaked focus into exit content');
+      observations.push({width,fromSummary,fromOption});
+    }return observations;
   });
   await test('task-comparison-preserves-product-route',async()=>{
     await setViewport({width:390,height:844});await go('chapters/mysql-installation.html');

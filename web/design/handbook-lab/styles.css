@@ -223,3 +223,7 @@ a,button,summary{transition:color 140ms ease-out,background-color 140ms ease-out
 .subject-path-menu>summary{white-space:nowrap}
 .breadcrumbs .breadcrumb-subject{color:var(--soft)}
 @media(forced-colors:none){.subject-path-menu>summary[data-pointer-focus]:focus-visible{outline:none}}
+
+/* Current reading position: retain the chapter and mark its active section. */
+.reader-controls .chapter-sections a[aria-current="location"]{color:var(--red);background:var(--panel);font-weight:600;box-shadow:inset 2px 0 var(--red)}
+@media(forced-colors:active){.reader-controls .chapter-sections a[aria-current="location"]{outline:1px solid CanvasText;outline-offset:-1px}}

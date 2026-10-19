@@ -131,13 +131,17 @@ const registryReady = loadRegistry().then(registry => {
   readingRegistry = registry;
   refreshResume();
   if (!registry || !chapter || !Object.hasOwn(registry,chapter)) return;
-  recordReadingLocation = () => {
-    const heading = decodeFragment(location.hash);
+  let lastSaved;
+  recordReadingLocation = headingId => {
+    const heading = typeof headingId === 'string' ? headingId : decodeFragment(location.hash);
     const value = { chapter };
     if (heading && registry[chapter].includes(heading)) value.heading = heading;
-    try { localStorage.setItem(key,JSON.stringify(value)); } catch { /* Reading never depends on storage. */ }
+    const serialized = JSON.stringify(value);
+    if (serialized === lastSaved) return;
+    try { localStorage.setItem(key,serialized); lastSaved = serialized; } catch { /* Reading never depends on storage. */ }
   };
   recordReadingLocation();
+  scheduleCurrentSection();
   window.addEventListener('hashchange',recordReadingLocation);
 });
 // A restored Home or another tab's reading change must not retain an old route.
@@ -181,19 +185,32 @@ if (pageTopAction) {
   });
 }
 // The database chooser opens routes directly; its disclosure is not history.
+function closeSubjectPathMenu(menu) {
+  const summary = menu.querySelector('summary'), options = menu.querySelector('.subject-path-options');
+  if (options.contains(document.activeElement)) {
+    summary.removeAttribute('data-pointer-focus');
+    summary.focus({preventScroll:true});
+  }
+  options.inert = true;
+  menu.open = false;
+}
 for (const menu of document.querySelectorAll('.subject-path-menu')) {
-  const summary = menu.querySelector('summary');
+  const summary = menu.querySelector('summary'), options = menu.querySelector('.subject-path-options');
+  // Exit paint may remain, but its links must leave keyboard/AT interaction now.
+  const syncInteraction = () => { options.inert = !menu.open; };
+  syncInteraction();
+  new MutationObserver(syncInteraction).observe(menu,{attributes:true,attributeFilter:['open']});
   summary.addEventListener('pointerdown', () => summary.setAttribute('data-pointer-focus',''));
   menu.addEventListener('keydown', event => {
     if (event.key === 'Escape' && menu.open) {
-      event.preventDefault(); menu.open = false;
-      summary.removeAttribute('data-pointer-focus'); summary.focus();
+      event.preventDefault(); closeSubjectPathMenu(menu);
+      summary.removeAttribute('data-pointer-focus'); summary.focus({preventScroll:true});
     }
   });
 }
 document.addEventListener('click', event => {
   for (const menu of document.querySelectorAll('.subject-path-menu[open]')) {
-    if (!menu.contains(event.target)) menu.open = false;
+    if (!menu.contains(event.target)) closeSubjectPathMenu(menu);
   }
 });
 // One native contents tree serves both the wide rail and narrow overlay.
@@ -248,6 +265,35 @@ document.addEventListener('click', event => {
   if (contents && !wideReader.matches && !contents.contains(event.target)) contents.open = false;
 });
 if (controls && typeof ResizeObserver === 'function') new ResizeObserver(setReaderOffset).observe(controls);
+// The section being read is local reading state, independent of URL/history.
+// Follow ordinary scrolling as well as links; never scroll or move focus here.
+const sectionEntries = [...document.querySelectorAll('.chapter-sections a')].map(link => ({link,target:document.getElementById(decodeFragment(link.hash))})).filter(entry => entry.target);
+let sectionFrame = 0;
+function scheduleCurrentSection() {
+  if (!sectionEntries.length || sectionFrame) return;
+  sectionFrame = requestAnimationFrame(() => {
+    sectionFrame = 0;
+    const offset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--reader-offset')) || 24;
+    const readingLine = Math.min(innerHeight / 3, offset + 32);
+    let current = sectionEntries[0];
+    for (const entry of sectionEntries) {
+      if (entry.target.getBoundingClientRect().top > readingLine) break;
+      current = entry;
+    }
+    if (scrollY > 0 && scrollY + document.documentElement.clientHeight >= document.documentElement.scrollHeight - 2) current = sectionEntries.at(-1);
+    for (const entry of sectionEntries) {
+      if (entry === current) entry.link.setAttribute('aria-current','location');
+      else entry.link.removeAttribute('aria-current');
+    }
+    recordReadingLocation(current.target.id);
+  });
+}
+window.addEventListener('scroll',scheduleCurrentSection,{passive:true});
+window.addEventListener('resize',scheduleCurrentSection);
+window.addEventListener('pageshow',scheduleCurrentSection);
+window.addEventListener('load',scheduleCurrentSection);
+document.fonts?.ready.then(scheduleCurrentSection);
+scheduleCurrentSection();
 for (const pre of document.querySelectorAll('.prose pre')) {
   const text = pre.textContent;
   const block = document.createElement('div'); block.className = 'code-block';

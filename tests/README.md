@@ -5,14 +5,15 @@ and DOM measurements through an injected adapter. It does not read saved QA
 observations. Run it for changes that can affect the UI; documentation-only
 changes do not need the full browser pass. Static build/link checks are separate.
 
-The current candidate has 22 executable groups: 78 representative layout states,
+The current candidate has 24 executable groups: 78 representative layout states,
 20 Contents hierarchy/panel states, search completion/Escape/focus, stable modal
 controls and background locking, Contents from the bottom and chapter selection,
 task/product routing, continuation, history-neutral Back to top with real browser
 Back/Forward, redundant entry-arrow omission, readable/repeatable Copy feedback,
 stationary Copy placement while wide code scrolls, eight Home-to-reader entry states,
-related-task product/subject switches, a history-neutral database chooser, and a
-shortcut opening search during smooth travel. Separate rendered motion probes
+related-task product/subject switches, a history-neutral database chooser, immediate
+keyboard exclusion of its exiting options, current-section tracking with scroll and
+Resume, and a shortcut opening search during smooth travel. Separate rendered motion probes
 exercise actual entry/exit, reversal, reduced motion and controlled error recovery;
 these are not performance certification or a substitute for the executable suite.
 
@@ -135,3 +136,5 @@ These incidents are failures to enforce the existing contribution and complete-n
 **Observe transient feedback and the internal control, not only its final box.** The old Copy test verified Copied/Retry and a fixed outer size but missed immediate Copying flashes and icon/text movement. `copy-active-feedback-does-not-flash-or-shift` observes mutations and rendered frames during actual repeated writes and reset. Fast writes must not flash progress; perceptible waits and failure/retry feedback remain valid. The shared I25 animation contract already required intermediate observation; this was an enforcement gap, not permission to add a duplicate rule.
 
 **Resume must use current validated reading state at activation.** An initial link default is not a saved location. `resume-reading-keeps-database-and-section-in-both-layouts` uses a real database chapter/section, observes its saved state, then clicks Home's Resume before an intentionally delayed registry reply. It also checks restored Home at phone/wide widths. Direct incoming fragments, blocked/invalid storage and a clearly labeled starting fallback remain valid. This fixture specifically distinguishes the early-click repair from a settled-page test that passed the old implementation.
+
+**Current section means the section being read.** The chapter-only mark did not identify a reader's position, and Resume only followed clicked fragments. `current-section-follows-links-scroll-and-resume-without-history` exercises section choices, actual Back to Home, Resume and real keyboard scrolling at phone/intermediate/wide widths. Exactly one section uses `aria-current="location"` alongside the chapter's `aria-current="page"`; its visible treatment includes weight and a marker. Ordinary scrolling updates validated local reading state without changing the URL or adding history. Existing direct fragments, citations, focus, meaningful page navigation and fast/slow Copy feedback remain required neighbors. Do not accept a clicked hash as evidence of the currently visible section.

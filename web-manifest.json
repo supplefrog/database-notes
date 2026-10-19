@@ -1,11 +1,11 @@
 {
-  "design/handbook-lab/app.js": "ce0f252d77f1e68d25a0005924f31f62ec4207b60d1a47f31c7b19400946b7cd",
+  "design/handbook-lab/app.js": "42ac0c547976cc7d7fc4cd60657144d62048a3a2430f559909142eccd5748e28",
   "design/handbook-lab/databases.html": "d502cc3f916f650cdc34f24423d96d0e53d0fd5c1e75d0c1c156bf4b0c5699e8",
   "design/handbook-lab/index.html": "24f7ad80b5417f59b8483a111f4c982f04ca9a547e1a531b48ad140b41fb01a5",
   "design/handbook-lab/operating-systems.html": "82b081f0851029b55199032892bfe9129d1c0779b0af34a44ccdc385d35acaa6",
   "design/handbook-lab/registry.json": "4db800aa69a65f65ea7f5a4a21a1ebcfaafd489eae7e727c1895e700f4d940a9",
   "design/handbook-lab/search-index.json": "e7036f0f9e54c78ef026fd418db2f50a48c7dd776606cecf60541383372cf779",
-  "design/handbook-lab/styles.css": "5b464c92ffd5e8bd1e254d1ddc6ae6278024b2672edc7a5e3ce699b6f14793fe",
+  "design/handbook-lab/styles.css": "ba1ae220c76ae2ca8a2b7e2e8078e5082cb86738e820dbd95639a44ad4d13990",
   "design/handbook-lab/teaching-figures.css": "a977a08b06c6eceeba40ed1ccbd0ddd609e3755f038dd40fbf5a88171cb0b60c",
   "design/handbook-lab/assets/open-loop.webp": "e0d9ada654991a73cf5a174dc9f17c5d9773ac4a3aa71b62c148df56a4c0f2ab",
   "design/handbook-lab/assets/shared-machine.webp": "f299e8df47d0a133d75ce2196f28f78adb628e8839e6aefbdbe103d580d8780d",
