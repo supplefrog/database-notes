@@ -1,0 +1,198 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Objects, sessions and table management — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-objects"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/store.html">Store data and handle change</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Store data and handle change</p><h1>Objects, sessions and table management</h1></header>
+<div class="reader-controls"><a href="../tasks/store.html">← Store data and handle change</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a aria-current="page" href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-0577">Database objects</a><a class="level-2" href="#mysql-objects--section-1">Sessions and server status</a><a class="level-3" href="#mysql-objects--section-2">Cancel a query or disconnect a session</a><a class="level-3" href="#mysql-b-0755">Table Management</a><a class="level-3" href="#mysql-b-0777">Tablespace growth</a><a class="level-3" href="#mysql-objects--section-3">Auto-increment and temporary tables</a><a class="level-3" href="#mysql-objects--section-4">General tablespaces</a><a class="level-3" href="#mysql-objects--section-5">Generate bounded dummy data</a><a class="level-2" href="#mysql-objects--section-6">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-storage-transactions.html">Storage, transactions and tablespaces</a><p class="product-label">MongoDB</p><a href="mongodb-storage.html">WiredTiger, transactions and consistency</a><a href="mongodb-modeling.html">Document modeling and BSON types</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-objects; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-objects--cite-1-1" class="citation-ref" href="#mysql-objects--source-1" aria-label="Source 1">[1]</a><a id="mysql-objects--cite-72-1" class="citation-ref" href="#mysql-objects--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-objects--administration" class="source-anchor"></span>
+<span id="mysql-objects--manage-database-objects" class="source-anchor"></span>
+<span id="mysql-objects--server-status-and-process-management" class="source-anchor"></span>
+<span id="mysql-objects--kill-process" class="source-anchor"></span>
+<span id="mysql-b-0550" class="source-anchor"></span>
+<span id="mysql-b-0552" class="source-anchor"></span>
+<span id="mysql-b-0553" class="source-anchor"></span>
+<span id="mysql-b-0561" class="source-anchor"></span>
+<span id="mysql-b-0562" class="source-anchor"></span>
+<span id="mysql-b-0563" class="source-anchor"></span>
+<span id="mysql-b-0567" class="source-anchor"></span>
+<span id="mysql-b-0569" class="source-anchor"></span>
+<span id="mysql-b-0572" class="source-anchor"></span>
+<span id="mysql-b-0574" class="source-anchor"></span>
+<span id="mysql-b-0576" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0577">Database objects</h2>
+<p>Use a database name you are authorized to inspect. Definition visibility depends on privileges; <code>SHOW</code> output can expose definer accounts and routine source.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Objects, sessions and table management: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Object</th>
+<th>List objects</th>
+<th>Show definition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Procedure</td>
+<td><code>SHOW PROCEDURE STATUS WHERE Db='app';</code></td>
+<td><code>SHOW CREATE PROCEDURE app.procedure_name\G</code></td>
+</tr>
+<tr>
+<td>Function</td>
+<td><code>SHOW FUNCTION STATUS WHERE Db='app';</code></td>
+<td><code>SHOW CREATE FUNCTION app.function_name\G</code></td>
+</tr>
+<tr>
+<td>View</td>
+<td><code>SHOW FULL TABLES IN app WHERE Table_type='VIEW';</code></td>
+<td><code>SHOW CREATE VIEW app.view_name\G</code></td>
+</tr>
+<tr>
+<td>Trigger</td>
+<td><code>SHOW TRIGGERS FROM app;</code></td>
+<td><code>SHOW CREATE TRIGGER app.trigger_name\G</code>; Information Schema exposes <code>ACTION_STATEMENT</code> too.</td>
+</tr>
+<tr>
+<td>Event</td>
+<td><code>SHOW EVENTS FROM app;</code></td>
+<td><code>SHOW CREATE EVENT app.event_name\G</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Names ending <code>_name</code> above are identifiers to substitute, not objects this chapter creates.</p>
+
+<h2 id="mysql-objects--section-1">Sessions and server status</h2>
+<p>In the interactive <code>mysql</code> client, <code>status</code> or <code>\s</code> reports connection details and selected server status such as uptime, threads, open tables, slow queries and average query rate. It is a <strong>client command</strong>, not SQL usable through every connector. <code>mysqladmin --user=operator --password status</code> provides related server counters; <code>processlist --sleep=2</code> polls sessions rather than status counters.</p>
+<pre tabindex="0" role="region" aria-label="Objects, sessions and table management: code 1, horizontally scrollable"><code class="language-sql">SHOW FULL PROCESSLIST;
+SELECT * FROM sys.processlist;
+</code></pre>
+<p>These show connection IDs, account/host/database, command, elapsed state time and current state/query. Visibility into other users’ sessions requires additional privilege. The <code>INFORMATION_SCHEMA.PROCESSLIST</code> implementation is deprecated in 8.4; prefer the Performance Schema-based interfaces.</p>
+
+<h3 id="mysql-objects--section-2">Cancel a query or disconnect a session</h3>
+<p><code>KILL QUERY connection_id</code> cancels a statement; <code>KILL CONNECTION connection_id</code> terminates the connection. <code>connection_id</code> is a MySQL connection/thread identifier, <strong>not an OS PID</strong>. Confirm the current owner/query before acting because IDs can be reused. Cancellation can trigger expensive rollback; do not repeatedly kill a recovering operation. Account privileges govern which sessions you may kill.</p>
+<p><a id="mysql-objects--cite-23-1" class="citation-ref" href="#mysql-objects--source-23" aria-label="Source 23">[23]</a><a id="mysql-objects--cite-24-1" class="citation-ref" href="#mysql-objects--source-24" aria-label="Source 24">[24]</a><a id="mysql-objects--cite-35-1" class="citation-ref" href="#mysql-objects--source-35" aria-label="Source 35">[35]</a><a id="mysql-objects--cite-36-1" class="citation-ref" href="#mysql-objects--source-36" aria-label="Source 36">[36]</a><a id="mysql-objects--cite-42-1" class="citation-ref" href="#mysql-objects--source-42" aria-label="Source 42">[42]</a><a id="mysql-objects--cite-89-1" class="citation-ref" href="#mysql-objects--source-89" aria-label="Source 89">[89]</a><a id="mysql-objects--cite-136-1" class="citation-ref" href="#mysql-objects--source-136" aria-label="Source 136">[136]</a></p>
+<p><span id="mysql-objects--table-management" class="source-anchor"></span>
+</p>
+<h3 id="mysql-b-0755">Table Management</h3>
+<p><span id="mysql-objects--change-tablespace-sizes" class="source-anchor"></span>
+<span id="mysql-objects--change-auto-increment-value" class="source-anchor"></span>
+<span id="mysql-objects--create-temporary-table" class="source-anchor"></span>
+<span id="mysql-objects--create-general-tablespace-and-add-tables" class="source-anchor"></span>
+<span id="mysql-b-0757" class="source-anchor"></span>
+<span id="mysql-b-0758" class="source-anchor"></span>
+<span id="mysql-b-0764" class="source-anchor"></span>
+<span id="mysql-b-0765" class="source-anchor"></span>
+<span id="mysql-b-0769" class="source-anchor"></span>
+<span id="mysql-b-0770" class="source-anchor"></span>
+<span id="mysql-b-0776" class="source-anchor"></span>
+</p>
+<h3 id="mysql-b-0777">Tablespace growth</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Objects, sessions and table management: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Source setting/operation</th>
+<th>Correct 8.4 interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>innodb_data_file_path=ibdata1:10M:autoextend:max:512M</code></td>
+<td>Startup system-tablespace layout example, not a live resize or shrink command. Do not apply a different initial size over an existing file. A small maximum can stop writes. Plan initialization/growth against actual files and backup/restore requirements.</td>
+</tr>
+<tr>
+<td><code>innodb_autoextend_increment=64</code></td>
+<td>Growth increment in MiB for the auto-extending system tablespace; not a universal size for every <code>.ibd</code>.</td>
+</tr>
+<tr>
+<td><code>CREATE TABLESPACE ... INITIAL_SIZE=100M</code></td>
+<td><code>INITIAL_SIZE</code> belongs to NDB syntax, not an InnoDB initial-allocation option. For InnoDB general tablespaces, <code>AUTOEXTEND_SIZE</code> controls extension increments (multiple of 4 MiB), not an arbitrary initial file size.</td>
+</tr>
+</tbody>
+</table></div>
+
+<h3 id="mysql-objects--section-3">Auto-increment and temporary tables</h3>
+<p><code>ALTER TABLE table_name AUTO_INCREMENT=value</code> is a schematic DDL operation: choose a permitted value above existing generated values. It does not renumber old rows or safely recycle identifiers. Concurrent inserts and engine rules affect the next value.</p>
+<p>The examples in this section are independent of the later data generator. First select a deliberately created empty scratch schema with <code>USE your_scratch_schema;</code> (replace that identifier); <code>app</code> elsewhere means an existing application schema, not this fixture. A complete temporary-table example:</p>
+<pre tabindex="0" role="region" aria-label="Objects, sessions and table management: code 2, horizontally scrollable"><code class="language-sql">CREATE TEMPORARY TABLE customers (
+  customer_id BIGINT PRIMARY KEY,
+  name VARCHAR(100) NOT NULL
+) ENGINE=InnoDB;
+</code></pre>
+<p>The table is session-local and disappears when that session ends. A same-named permanent table can be hidden in that session; explicitly identify scratch objects and do not assume temporary-table DDL follows ordinary rollback semantics.</p>
+
+<h3 id="mysql-objects--section-4">General tablespaces</h3>
+<p>The following creates new objects and requires a scratch schema, suitable privileges, an unused datafile name and disk space:</p>
+<pre tabindex="0" role="region" aria-label="Objects, sessions and table management: code 3, horizontally scrollable"><code class="language-sql">CREATE TABLESPACE ts ADD DATAFILE 'ts.ibd' ENGINE=InnoDB;
+CREATE TABLE t1 (
+  id INT PRIMARY KEY,
+  name VARCHAR(50)
+) TABLESPACE ts ENGINE=InnoDB;
+</code></pre>
+<p>A relative datafile location is resolved under the applicable datadir rules. Do not copy/move the file manually while the server owns it. Dropping a table does not return a general tablespace’s allocated file size to the OS.</p>
+<p><a id="mysql-objects--cite-21-1" class="citation-ref" href="#mysql-objects--source-21" aria-label="Source 21">[21]</a><a id="mysql-objects--cite-25-1" class="citation-ref" href="#mysql-objects--source-25" aria-label="Source 25">[25]</a><a id="mysql-objects--cite-26-1" class="citation-ref" href="#mysql-objects--source-26" aria-label="Source 26">[26]</a><a id="mysql-objects--cite-129-1" class="citation-ref" href="#mysql-objects--source-129" aria-label="Source 129">[129]</a></p>
+<p><span id="mysql-objects--change-storage-engine" class="source-anchor"></span>
+</p>
+<h4 id="mysql-b-0789">Change storage engine</h4>
+<p><span id="mysql-objects--create-stored-procedure-to-generate-dummy-data" class="source-anchor"></span>
+<span id="mysql-b-0791" class="source-anchor"></span>
+<span id="mysql-b-0793" class="source-anchor"></span>
+<span id="mysql-b-0795" class="source-anchor"></span>
+<span id="mysql-b-0797" class="source-anchor"></span>
+Back up and rehearse before conversion. <code>ALTER TABLE table_name ENGINE=InnoDB;</code> can rebuild the table, change locking/storage behavior and consume substantial extra space. Check unsupported engine-specific features and dependent code; verify row counts, constraints and application behavior before accepting the conversion. Reverting the engine is not a substitute for a tested backup.</p>
+
+<h3 id="mysql-objects--section-5">Generate bounded dummy data</h3>
+<p>The original procedure created successively numbered tables and generated one million SHA-256 values through a recursive CTE. Keep this as a <strong>load-generation task</strong>, not a production tuning command. A million-row run needs a deliberate resource budget; start with at most 1,000 rows in a disposable schema, never a shared schema named <code>test</code> whose ownership is unknown.</p>
+<p>The procedure below preserves dynamic table creation, numeric suffix discovery, prepared statements, recursive CTE generation and hash values, but takes a bounded row count. It must run in the interactive <code>mysql</code> client (<code>DELIMITER</code> is not server SQL). The following CREATE DATABASE must succeed for a new <code>scratch_mysql</code> schema (stop if it already exists); do not reuse another exercise’s schema. Use that new empty schema and use a single session; concurrent calls can choose the same table number. The procedure deliberately leaves its created table for inspection. DDL is not rolled back if later insertion fails.</p>
+<pre tabindex="0" role="region" aria-label="Objects, sessions and table management: code 4, horizontally scrollable"><code class="language-sql">CREATE DATABASE scratch_mysql;
+DELIMITER $$
+CREATE PROCEDURE scratch_mysql.create_dummy_data(IN row_limit INT)
+BEGIN
+  DECLARE n INT;
+  IF row_limit IS NULL OR row_limit &lt; 1 OR row_limit &gt; 1000 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='row_limit must be 1..1000';
+  END IF;
+  IF @@session.cte_max_recursion_depth &lt; row_limit THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='session recursion limit is too small';
+  END IF;
+  SELECT COALESCE(MAX(CAST(SUBSTRING(table_name,2) AS UNSIGNED)),0)+1 INTO n
+    FROM information_schema.tables
+    WHERE table_schema='scratch_mysql' AND table_name REGEXP '^t[0-9]+$';
+  SET @dummy_table=CONCAT('scratch_mysql.t',n);
+  SET @dummy_sql=CONCAT('CREATE TABLE ',@dummy_table,
+    ' (id INT AUTO_INCREMENT PRIMARY KEY, hash CHAR(64)) ENGINE=InnoDB');
+  PREPARE dummy_stmt FROM @dummy_sql;
+  EXECUTE dummy_stmt;
+  DEALLOCATE PREPARE dummy_stmt;
+  SET @dummy_sql=CONCAT('INSERT INTO ',@dummy_table,' (hash) ',
+    'WITH RECURSIVE cte(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM cte WHERE n&lt;',
+    row_limit,') SELECT SHA2(n,256) FROM cte');
+  PREPARE dummy_stmt FROM @dummy_sql;
+  EXECUTE dummy_stmt;
+  DEALLOCATE PREPARE dummy_stmt;
+END$$
+DELIMITER ;
+CALL scratch_mysql.create_dummy_data(100);
+</code></pre>
+<p>Inspect the created table’s count and hashes and the actual resource use; no expected output is fabricated here. For a larger load, deliberately revise/test a generator in a disposable instance, choose batches or an appropriate nonrecursive data-generation method, and budget redo/binlog/disk/replication load. Do not just set <code>cte_max_recursion_depth=1000000</code> in an unrelated session. Remove only the confirmed disposable objects when finished.</p>
+<p><a id="mysql-objects--cite-26-2" class="citation-ref" href="#mysql-objects--source-26" aria-label="Source 26">[26]</a><a id="mysql-objects--cite-27-1" class="citation-ref" href="#mysql-objects--source-27" aria-label="Source 27">[27]</a></p>
+
+<h2 id="mysql-objects--section-6">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-objects--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-objects--source-21">[21] <a href="https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html">https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 7.1.8 Server System Variables
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-21-1" aria-label="Return to citation 21, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-objects--source-23">[23] <a href="https://dev.mysql.com/doc/refman/8.4/en/show.html">https://dev.mysql.com/doc/refman/8.4/en/show.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.7.7 SHOW Statements
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-23-1" aria-label="Return to citation 23, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-objects--source-24">[24] <a href="https://dev.mysql.com/doc/refman/8.4/en/kill.html">https://dev.mysql.com/doc/refman/8.4/en/kill.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.7.8.4 KILL Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-24-1" aria-label="Return to citation 24, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-objects--source-25">[25] <a href="https://dev.mysql.com/doc/refman/8.4/en/create-tablespace.html">https://dev.mysql.com/doc/refman/8.4/en/create-tablespace.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.1.21 CREATE TABLESPACE Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-25-1" aria-label="Return to citation 25, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-objects--source-26">[26] <a href="https://dev.mysql.com/doc/refman/8.4/en/create-table.html">https://dev.mysql.com/doc/refman/8.4/en/create-table.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.1.20 CREATE TABLE Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-26-1" aria-label="Return to citation 26, occurrence 1">↩1</a><a class="citation-return" href="#mysql-objects--cite-26-2" aria-label="Return to citation 26, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-objects--source-27">[27] <a href="https://dev.mysql.com/doc/refman/8.4/en/with.html">https://dev.mysql.com/doc/refman/8.4/en/with.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.2.20 WITH (Common Table Expressions)
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-27-1" aria-label="Return to citation 27, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-objects--source-35">[35] <a href="https://dev.mysql.com/doc/refman/8.4/en/sys-schema.html">https://dev.mysql.com/doc/refman/8.4/en/sys-schema.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 30 MySQL sys Schema
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-35-1" aria-label="Return to citation 35, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-objects--source-36">[36] <a href="https://dev.mysql.com/doc/refman/8.4/en/information-schema.html">https://dev.mysql.com/doc/refman/8.4/en/information-schema.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 28 INFORMATION_SCHEMA Tables
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-36-1" aria-label="Return to citation 36, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-objects--source-42">[42] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-commands.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-commands.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.5.1.2 mysql Client Commands
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-42-1" aria-label="Return to citation 42, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-objects--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-objects--source-89">[89] <a href="https://dev.mysql.com/doc/refman/8.4/en/show-processlist.html">https://dev.mysql.com/doc/refman/8.4/en/show-processlist.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.7.7.31 SHOW PROCESSLIST Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-89-1" aria-label="Return to citation 89, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-objects--source-129">[129] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-parameters.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-parameters.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.14 InnoDB Startup Options and System Variables
+<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-129-1" aria-label="Return to citation 129, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-objects--source-136">[136] <a href="https://dev.mysql.com/doc/refman/8.4/en/sys-processlist.html">https://dev.mysql.com/doc/refman/8.4/en/sys-processlist.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 30.4.3.22 The processlist and x$processlist Views<span class="citation-returns"><a class="citation-return" href="#mysql-objects--cite-136-1" aria-label="Return to citation 136, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-innodb.html"><span>Previous · MySQL</span><strong>Storage engines, transactions and InnoDB</strong></a></div><div><a rel="next" href="mysql-installation.html"><span>Next · MySQL</span><strong>Installing MySQL on Linux</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/store.html">Explore Store data and handle change ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a aria-current="page" href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></div><div><span>MongoDB</span><a href="mongodb-storage.html">WiredTiger, transactions and consistency</a><a href="mongodb-modeling.html">Document modeling and BSON types</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

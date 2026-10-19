@@ -1,0 +1,256 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Audit, statistics and performance — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="postgresql-audit-performance"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/observe.html">See what the server is doing</a></nav>
+<header class="reader-head"><p class="reader-context">PostgreSQL <span aria-hidden="true">/</span> See what the server is doing</p><h1>Audit, statistics and performance</h1></header>
+<div class="reader-controls"><a href="../tasks/observe.html">← See what the server is doing</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="PostgreSQL chapters"><ol class="chapter-list"><li><a  href="../chapters/postgresql-foundations.html">PostgreSQL foundations and tools</a></li><li><a  href="../chapters/postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></li><li><a  href="../chapters/postgresql-install-instances.html">Installation, services and instances</a></li><li><a  href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a  href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li><li><a  href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a aria-current="page" href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li><li><a  href="../chapters/postgresql-backup-recovery.html">Backup and point-in-time recovery</a></li><li><a  href="../chapters/postgresql-replication-ha.html">Replication and high availability</a></li><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a  href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a  href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#logging">Choose observability, not unlimited logging</a><a class="level-3" href="#audit">Add audit only for a defined requirement</a><a class="level-2" href="#statistics">Rank query shapes and refresh statistics</a><a class="level-2" href="#plans">Compare a plan before and after one index</a><a class="level-2" href="#waits">Identify blockers and resource pressure</a><a class="level-3" href="#resources">Budget memory and connections together</a><a class="level-2" href="#postgresql-audit-performance--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-audit.html">Auditing activity</a><a href="mysql-performance.html">Execution plans, indexes and diagnostics</a><p class="product-label">MongoDB</p><a href="mongodb-performance.html">Auditing and performance</a></nav></details></div>
+<article class="prose">
+<h2 id="logging">Choose observability, not unlimited logging</h2>
+<p>Server logs diagnose errors and slow statements; cumulative statistics summarize activity; a statement-audit extension records selected classes of action. None alone is an immutable record of every business event. Decide which actor, operation and retention evidence you need before enabling high-volume logging.<a id="postgresql-audit-performance--cite-24-1" class="citation-ref" href="#postgresql-audit-performance--source-24" aria-label="Source 24">[24]</a><a id="postgresql-audit-performance--cite-25-1" class="citation-ref" href="#postgresql-audit-performance--source-25" aria-label="Source 25">[25]</a><a id="postgresql-audit-performance--cite-61-1" class="citation-ref" href="#postgresql-audit-performance--source-61" aria-label="Source 61">[61]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Audit, statistics and performance: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Mechanism</th>
+<th>Good for</th>
+<th>Does not prove</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Error/slow statement log</td>
+<td>Failed connections, errors, slow SQL, lock waits</td>
+<td>Every successful row change or tamper-resistant audit.</td>
+</tr>
+<tr>
+<td><code>pg_stat_*</code> views</td>
+<td>Rates, waits, maintenance and replication status</td>
+<td>Permanent event history; counters reset and queries may be hidden.</td>
+</tr>
+<tr>
+<td><code>pg_stat_statements</code></td>
+<td>Aggregate cost/calls of normalized query shapes</td>
+<td>Every execution with every parameter.</td>
+</tr>
+<tr>
+<td>pgAudit (separate extension)</td>
+<td>Detailed session/object audit using PostgreSQL logs</td>
+<td>Independent custody, regulatory compliance or protection from host superusers.</td>
+</tr>
+<tr>
+<td>Application audit events</td>
+<td>Business actor/reason/correlation</td>
+<td>Server-wide changes made outside the application.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Example server configuration for a measured starting point. Merge with existing values; do not replace an established logging destination blindly.<a id="postgresql-audit-performance--cite-24-2" class="citation-ref" href="#postgresql-audit-performance--source-24" aria-label="Source 24">[24]</a></p>
+<pre tabindex="0" role="region" aria-label="Audit, statistics and performance: code 1, horizontally scrollable"><code class="language-ini">logging_collector = on
+log_destination = 'jsonlog'
+log_directory = 'log'
+log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
+log_rotation_age = '1d'
+log_rotation_size = '100MB'
+log_min_duration_statement = '500ms'
+log_lock_waits = on
+log_statement = 'none'
+</code></pre>
+<p>Use the instance’s <code>PGDATA/log</code> created by PGDG setup (0700, owned by <code>postgres</code>), and <code>restorecon -Rv</code> after restoring/copying it.<a id="postgresql-audit-performance--cite-100-1" class="citation-ref" href="#postgresql-audit-performance--source-100" aria-label="Source 100">[100]</a><a id="postgresql-audit-performance--cite-102-1" class="citation-ref" href="#postgresql-audit-performance--source-102" aria-label="Source 102">[102]</a> For an external log path, use a persistent <code>postgresql_log_t</code> mapping and inspect actual policy/AVCs as in <a href="postgresql-install-instances.html#relocation">relocation</a>. Restrict access before restarting for <code>logging_collector</code>; most subsequent log policy changes are reloadable. Check <code>pg_settings.context</code>, then <code>SELECT pg_current_logfile();</code> and produce a known benign event in a fresh test session. Inspect both server log and remote collector receipt. Rotation creates new files; it is <strong>not retention deletion</strong>. Enforce bounded retention/off-host delivery outside the database.<a id="postgresql-audit-performance--cite-24-3" class="citation-ref" href="#postgresql-audit-performance--source-24" aria-label="Source 24">[24]</a></p>
+<p>Statement text, errors and parameters can leak secrets even when password-setting commands are treated specially. Avoid blanket <code>log_statement = 'all'</code>; document who can read logs and exclude secret values from application SQL. Watch disk space, ingestion lag and logging overhead after changing policy. Roll back to recorded settings and reload/restart as required if throughput or disk headroom becomes unsafe.</p>
+
+<h3 id="audit">Add audit only for a defined requirement</h3>
+<p>PGDG provides pgAudit as <code>pgaudit_18</code>; the inspected RPM is <code>18.0-1PGDG.rhel9</code>. Review its dependency resolution against this RHEL minor; a filename suffix alone is not dependency validation. Use <code>sudo dnf install pgaudit_18</code>, verify <code>rpm -q pgaudit_18</code> and <code>rpm -ql pgaudit_18</code>, and keep signature checking enabled.<a id="postgresql-audit-performance--cite-106-1" class="citation-ref" href="#postgresql-audit-performance--source-106" aria-label="Source 106">[106]</a> pgAudit is open source, separate from core, with major-specific builds; use the <strong>18.x</strong> extension line for PostgreSQL 18, not an arbitrary build from another major. Install its trusted package/binary on every host that may become primary. Check the installed extension version rather than assuming it ships with the server.<a id="postgresql-audit-performance--cite-61-2" class="citation-ref" href="#postgresql-audit-performance--source-61" aria-label="Source 61">[61]</a></p>
+<ol>
+<li>Preserve the existing <code>shared_preload_libraries</code> list and append <code>pgaudit</code>. Restart in a maintenance window; a missing library can prevent startup, so keep the prior config available.</li>
+<li>As administrator, <code>CREATE EXTENSION pgaudit;</code> in each database needing its DDL event-trigger support <strong>before</strong> setting <code>pgaudit.log</code>.</li>
+<li>For a narrow initial policy, set <code>pgaudit.log = 'ddl,role'</code> in the server configuration and reload. Include <code>read</code>/<code>write</code> only if required and volume-tested; object auditing can restrict relation coverage but must be maintained when new objects are added.</li>
+<li>Execute a harmless, approved fixture DDL change, then verify the exact event in server and external logs. Test denied actions and role changes against the requirement too.</li>
+<li>Record overhead, rotation/retention, collector outage behavior and who can alter policy. To remove the extension, first unset <code>pgaudit.log</code>; removing preload needs a restart.<a id="postgresql-audit-performance--cite-61-3" class="citation-ref" href="#postgresql-audit-performance--source-61" aria-label="Source 61">[61]</a></li>
+</ol>
+<p>Do not copy the example policy into a compliance claim: it deliberately omits ordinary reads/writes, and server administrators can change both extension policy and local files.</p>
+
+<h2 id="statistics">Rank query shapes and refresh statistics</h2>
+<p>Install the approved <code>postgresql18-contrib</code> RPM on each relevant host before preloading <code>pg_stat_statements</code>; confirm <code>/usr/pgsql-18/lib/pg_stat_statements.so</code> and its control files with <code>rpm -ql postgresql18-contrib</code>. The inspected contrib RPM also supplies <code>amcheck</code>, <code>pgcrypto</code> and <code>basic_archive</code>; availability of files is separate from extension SQL installation.<a id="postgresql-audit-performance--cite-101-1" class="citation-ref" href="#postgresql-audit-performance--source-101" aria-label="Source 101">[101]</a></p>
+<p><code>pg_stat_statements</code> needs its major-18 module files, preloading and query-ID computation. Merge <code>pg_stat_statements</code> into <code>shared_preload_libraries</code>, retain other entries, keep <code>compute_query_id = auto</code> (or <code>on</code>), restart, then create its SQL extension in <code>adminlab</code>.<a id="postgresql-audit-performance--cite-26-1" class="citation-ref" href="#postgresql-audit-performance--source-26" aria-label="Source 26">[26]</a></p>
+<pre tabindex="0" role="region" aria-label="Audit, statistics and performance: code 2, horizontally scrollable"><code class="language-sql">CREATE EXTENSION pg_stat_statements;
+SELECT queryid, calls, total_exec_time, mean_exec_time, rows,
+       shared_blks_hit, shared_blks_read, temp_blks_written,
+       left(query, 180) AS query
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC LIMIT 10;
+</code></pre>
+<p>Use an authorized monitoring role; other users’ text/query IDs require superuser or <code>pg_read_all_stats</code>. Record the stats reset time and sample interval. A high mean time with one call is different from cheap SQL executed millions of times. Do not reset shared counters merely to make a chart look clean.<a id="postgresql-audit-performance--cite-26-2" class="citation-ref" href="#postgresql-audit-performance--source-26" aria-label="Source 26">[26]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Audit, statistics and performance: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>View</th>
+<th>Read it for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pg_stat_database</code></td>
+<td>Transactions, temp bytes, deadlocks, cache/block activity by database.</td>
+</tr>
+<tr>
+<td><code>pg_stat_user_tables</code>, <code>pg_stat_user_indexes</code></td>
+<td>Scans, writes, live/dead estimates, maintenance and index use.</td>
+</tr>
+<tr>
+<td><code>pg_stat_activity</code>, <code>pg_locks</code></td>
+<td>Active/idle sessions, transaction age, waits and lock identity.</td>
+</tr>
+<tr>
+<td><code>pg_stat_io</code></td>
+<td>I/O by backend/object/context; distinguish reads, writes and eviction pressure.</td>
+</tr>
+<tr>
+<td><code>pg_stat_wal</code>, <code>pg_stat_checkpointer</code></td>
+<td>WAL generation and checkpoint behavior.</td>
+</tr>
+<tr>
+<td><code>pg_stat_progress_*</code></td>
+<td>Progress of supported vacuum/index/backup operations.<a id="postgresql-audit-performance--cite-89-1" class="citation-ref" href="#postgresql-audit-performance--source-89" aria-label="Source 89">[89]</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>These are observation surfaces, not exact bloat gauges or end-to-end application timings.<a id="postgresql-audit-performance--cite-25-2" class="citation-ref" href="#postgresql-audit-performance--source-25" aria-label="Source 25">[25]</a> After large imports, run <code>ANALYZE</code> and review estimates; for skewed columns consider a measured higher statistics target, then restore the previous target if extra planning/collection cost is not justified. See <a href="postgresql-vacuum.html#autovacuum">vacuum and analyze</a>.</p>
+
+<h2 id="plans">Compare a plan before and after one index</h2>
+<p>Use the exact <a href="postgresql-administration.html#objects">2,000-row fixture</a> in <code>adminlab</code>, with no concurrent benchmark workload. The table owner can create/drop the test index. <code>EXPLAIN</code> plans the query; <strong><code>EXPLAIN ANALYZE</code> executes it</strong>, including writes, triggers and function side effects. A transaction rollback cannot undo external effects or sequence allocation, so do not profile unknown DML this way.<a id="postgresql-audit-performance--cite-27-1" class="citation-ref" href="#postgresql-audit-performance--source-27" aria-label="Source 27">[27]</a></p>
+<pre tabindex="0" role="region" aria-label="Audit, statistics and performance: code 3, horizontally scrollable"><code class="language-sql">ANALYZE notes.orders;
+EXPLAIN (COSTS, VERBOSE)
+SELECT order_id, amount FROM notes.orders
+WHERE customer_id = 42 AND status = 'new';
+
+EXPLAIN (ANALYZE, BUFFERS, TIMING OFF)
+SELECT order_id, amount FROM notes.orders
+WHERE customer_id = 42 AND status = 'new';
+
+CREATE INDEX orders_customer_status_idx
+ON notes.orders (customer_id, status) INCLUDE (amount, order_id);
+ANALYZE notes.orders;
+
+EXPLAIN (ANALYZE, BUFFERS, TIMING OFF)
+SELECT order_id, amount FROM notes.orders
+WHERE customer_id = 42 AND status = 'new';
+</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Audit, statistics and performance: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Plan item/option</th>
+<th>Interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cost=start..total</code></td>
+<td>Planner cost units, <strong>not milliseconds</strong>.</td>
+</tr>
+<tr>
+<td>Estimated <code>rows</code> versus actual rows</td>
+<td>Large mismatch suggests distribution/statistics/correlation issues.</td>
+</tr>
+<tr>
+<td>Actual <code>rows</code> and <code>loops</code></td>
+<td>Repeated nodes report per-loop values; interpret work across loops.</td>
+</tr>
+<tr>
+<td><code>BUFFERS</code></td>
+<td>Shared hits/reads and temp activity; a shared hit is not an application-cache hit.</td>
+</tr>
+<tr>
+<td><code>TIMING OFF</code></td>
+<td>Reduces per-node clock overhead while still executing/counting.</td>
+</tr>
+<tr>
+<td>Rows removed by filter</td>
+<td>Work done for rows not returned; consider predicate/index fit.</td>
+</tr>
+<tr>
+<td>Heap fetches in index-only scan</td>
+<td>Visibility checks may still visit heap pages; vacuum state matters.</td>
+</tr>
+</tbody>
+</table></div>
+<p>On this small table a sequential scan may remain cheaper; that is not a failed index. Compare result equality, estimates, logical reads and repeated timings under a declared cache/load condition. No elapsed times or chosen plan are promised here. Keep the index only if it benefits the real read workload enough to pay for write/WAL/storage cost; otherwise <code>DROP INDEX notes.orders_customer_status_idx;</code> removes this exact fixture index.<a id="postgresql-audit-performance--cite-27-2" class="citation-ref" href="#postgresql-audit-performance--source-27" aria-label="Source 27">[27]</a><a id="postgresql-audit-performance--cite-28-1" class="citation-ref" href="#postgresql-audit-performance--source-28" aria-label="Source 28">[28]</a></p>
+<p>For a live table, normal index creation blocks writes. <code>CREATE INDEX CONCURRENTLY</code> reduces that blocking but performs extra work, waits for old transactions, cannot run inside a transaction block and may leave an <strong>invalid</strong> index after failure. Check <code>pg_index.indisvalid</code>, resolve the cause and follow documented drop/rebuild handling. A failed concurrent unique index can still affect writes; do not assume “invalid” means harmless.<a id="postgresql-audit-performance--cite-28-2" class="citation-ref" href="#postgresql-audit-performance--source-28" aria-label="Source 28">[28]</a></p>
+<p>Do not force global planner switches as a permanent fix for one query. Compare alternatives in a bounded session, restore the setting and correct statistics/query/index design. Join semantics and datasets are in the <a href="postgresql-joins.html">existing joins lesson</a>.</p>
+
+<h2 id="waits">Identify blockers and resource pressure</h2>
+<pre tabindex="0" role="region" aria-label="Audit, statistics and performance: code 4, horizontally scrollable"><code class="language-sql">SELECT pid, usename, application_name, state, wait_event_type, wait_event,
+       clock_timestamp() - xact_start AS transaction_age,
+       pg_blocking_pids(pid) AS blockers, left(query, 120) AS query
+FROM pg_stat_activity
+WHERE datname = 'adminlab' AND pid &lt;&gt; pg_backend_pid()
+ORDER BY xact_start NULLS LAST;
+
+SELECT l.pid, l.locktype, l.mode, l.granted,
+       l.relation::regclass AS relation
+FROM pg_locks AS l
+WHERE NOT l.granted ORDER BY l.pid;
+</code></pre>
+<p>A wait event is not necessarily a lock: it may be I/O, client consumption, WAL flush or synchronous replication. Follow blocker PIDs to the oldest transaction, check application ownership, then ask it to finish. Use <a href="postgresql-administration.html#sessions">cancel versus terminate</a> only after identifying the exact target. Killing the visible victim leaves the root blocker intact.<a id="postgresql-audit-performance--cite-9-1" class="citation-ref" href="#postgresql-audit-performance--source-9" aria-label="Source 9">[9]</a><a id="postgresql-audit-performance--cite-23-1" class="citation-ref" href="#postgresql-audit-performance--source-23" aria-label="Source 23">[23]</a><a id="postgresql-audit-performance--cite-25-3" class="citation-ref" href="#postgresql-audit-performance--source-25" aria-label="Source 25">[25]</a></p>
+
+<h3 id="resources">Budget memory and connections together</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Audit, statistics and performance: table 4, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Lever</th>
+<th>Why it matters</th>
+<th>Safer first move</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>work_mem</code></td>
+<td>Per sort/hash operation, multiplied by plan nodes/sessions/workers; hashes also use <code>hash_mem_multiplier</code></td>
+<td>Set locally for a measured query, not one enormous global allocation.</td>
+</tr>
+<tr>
+<td><code>shared_buffers</code></td>
+<td>Shared cache competing with OS and private memory</td>
+<td>Change only with a host budget and restart window.</td>
+</tr>
+<tr>
+<td><code>maintenance_work_mem</code> / autovacuum memory</td>
+<td>Maintenance and worker concurrency</td>
+<td>Sum concurrent operations before increasing.</td>
+</tr>
+<tr>
+<td>Connection pool / <code>max_connections</code></td>
+<td>Backend memory, contention, reserved admin access</td>
+<td>Remove idle transactions and cap pools before raising server capacity.</td>
+</tr>
+<tr>
+<td>Temp-file activity</td>
+<td>Sort/hash spill or large intermediate results</td>
+<td>Check query shape and selective indexes before adding RAM.</td>
+</tr>
+<tr>
+<td>Checkpoints/WAL/archive</td>
+<td>Bursty I/O or retained WAL</td>
+<td>Correlate with disk latency, slots and archiver health.</td>
+</tr>
+</tbody>
+</table></div>
+<p>PostgreSQL memory is not a single buffer-pool cap.<a id="postgresql-audit-performance--cite-63-1" class="citation-ref" href="#postgresql-audit-performance--source-63" aria-label="Source 63">[63]</a> Compare database views with host CPU, filesystem bytes/inodes, storage latency and memory/swap, taking matched time samples. A high buffer hit ratio can coexist with slow locking, CPU-heavy queries or WAL waits. Change one hypothesis at a time; record old values, workload, interval and result, then revert changes that do not improve the chosen objective.</p>
+
+<h2 id="postgresql-audit-performance--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="postgresql-audit-performance--source-9">[9] <a href="https://www.postgresql.org/docs/18/explicit-locking.html">PostgreSQL: Documentation: 18: 13.3.&nbsp;Explicit Locking</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-9-1" aria-label="Return to citation 9, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-23">[23] <a href="https://www.postgresql.org/docs/18/functions-admin.html">PostgreSQL: Documentation: 18: 9.28.&nbsp;System Administration Functions</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-23-1" aria-label="Return to citation 23, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-24">[24] <a href="https://www.postgresql.org/docs/18/runtime-config-logging.html">PostgreSQL: Documentation: 18: 19.8.&nbsp;Error Reporting and Logging</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-24-1" aria-label="Return to citation 24, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-audit-performance--cite-24-2" aria-label="Return to citation 24, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-audit-performance--cite-24-3" aria-label="Return to citation 24, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-25">[25] <a href="https://www.postgresql.org/docs/18/monitoring-stats.html">PostgreSQL: Documentation: 18: 27.2.&nbsp;The Cumulative Statistics System</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-25-1" aria-label="Return to citation 25, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-audit-performance--cite-25-2" aria-label="Return to citation 25, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-audit-performance--cite-25-3" aria-label="Return to citation 25, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-26">[26] <a href="https://www.postgresql.org/docs/18/pgstatstatements.html">PostgreSQL: Documentation: 18: F.32.&nbsp;pg_stat_statements — track statistics of SQL planning and execution</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-26-1" aria-label="Return to citation 26, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-audit-performance--cite-26-2" aria-label="Return to citation 26, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-27">[27] <a href="https://www.postgresql.org/docs/18/using-explain.html">PostgreSQL: Documentation: 18: 14.1.&nbsp;Using EXPLAIN</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-27-1" aria-label="Return to citation 27, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-audit-performance--cite-27-2" aria-label="Return to citation 27, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-28">[28] <a href="https://www.postgresql.org/docs/18/sql-createindex.html">PostgreSQL: Documentation: 18: CREATE INDEX</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-28-1" aria-label="Return to citation 28, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-audit-performance--cite-28-2" aria-label="Return to citation 28, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-61">[61] <a href="https://raw.githubusercontent.com/pgaudit/pgaudit/REL_18_STABLE/README.md">pgaudit</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-61-1" aria-label="Return to citation 61, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-audit-performance--cite-61-2" aria-label="Return to citation 61, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-audit-performance--cite-61-3" aria-label="Return to citation 61, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-63">[63] <a href="https://www.postgresql.org/docs/18/runtime-config-resource.html">PostgreSQL: Documentation: 18: 19.4.&nbsp;Resource Consumption</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-63-1" aria-label="Return to citation 63, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-89">[89] <a href="https://www.postgresql.org/docs/18/progress-reporting.html">PostgreSQL: Documentation: 18: 27.4.&nbsp;Progress Reporting</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-89-1" aria-label="Return to citation 89, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-100">[100] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-server-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18-server 18.6-1PGDG.rhel9.7</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-101">[101] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-contrib-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18-contrib 18.6-1PGDG.rhel9.7</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-101-1" aria-label="Return to citation 101, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-102">[102] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux">Chapter&nbsp;5.&nbsp;Troubleshooting problems related to SELinux | Using SELinux | Red Hat Enterprise Linux | 9 | Red Hat Documentation</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-102-1" aria-label="Return to citation 102, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-audit-performance--source-106">[106] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/pgaudit_18-18.0-1PGDG.rhel9.x86_64.rpm">PGDG RPM pgaudit_18 18.0-1PGDG.rhel9</a><span class="citation-returns"><a class="citation-return" href="#postgresql-audit-performance--cite-106-1" aria-label="Return to citation 106, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="postgresql-vacuum.html"><span>Previous · PostgreSQL</span><strong>Vacuum, freezing and bloat</strong></a></div><div><a rel="next" href="postgresql-backup-recovery.html"><span>Next · PostgreSQL</span><strong>Backup and point-in-time recovery</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/observe.html">Explore See what the server is doing ↗</a><div class="current-group"><h2>In PostgreSQL</h2><ol class="chapter-list"><li><a  href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a aria-current="page" href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-audit.html">Auditing activity</a><a href="mysql-performance.html">Execution plans, indexes and diagnostics</a></div><div><span>MongoDB</span><a href="mongodb-performance.html">Auditing and performance</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

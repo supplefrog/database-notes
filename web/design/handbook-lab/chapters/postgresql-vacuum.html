@@ -1,0 +1,166 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Vacuum, freezing and bloat — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="postgresql-vacuum"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/observe.html">See what the server is doing</a></nav>
+<header class="reader-head"><p class="reader-context">PostgreSQL <span aria-hidden="true">/</span> See what the server is doing</p><h1>Vacuum, freezing and bloat</h1></header>
+<div class="reader-controls"><a href="../tasks/observe.html">← See what the server is doing</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="PostgreSQL chapters"><ol class="chapter-list"><li><a  href="../chapters/postgresql-foundations.html">PostgreSQL foundations and tools</a></li><li><a  href="../chapters/postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></li><li><a  href="../chapters/postgresql-install-instances.html">Installation, services and instances</a></li><li><a  href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a  href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li><li><a aria-current="page" href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a  href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li><li><a  href="../chapters/postgresql-backup-recovery.html">Backup and point-in-time recovery</a></li><li><a  href="../chapters/postgresql-replication-ha.html">Replication and high availability</a></li><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a  href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a  href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#lifecycle">Maintain the MVCC lifecycle</a><a class="level-2" href="#inspect">Find the bottleneck before tuning</a><a class="level-2" href="#autovacuum">Tune the table, then measure again</a><a class="level-2" href="#freezing">Prevent transaction-ID exhaustion</a><a class="level-2" href="#bloat">Distinguish bloat from necessary space</a><a class="level-2" href="#postgresql-vacuum--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-audit.html">Auditing activity</a><a href="mysql-performance.html">Execution plans, indexes and diagnostics</a><p class="product-label">MongoDB</p><a href="mongodb-performance.html">Auditing and performance</a></nav></details></div>
+<article class="prose">
+<h2 id="lifecycle">Maintain the MVCC lifecycle</h2>
+<p>An update normally leaves an old row version behind. A delete marks a version dead; it does not immediately make its space reclaimable. Vacuum removes versions no snapshot can still need, updates free-space/visibility information and freezes old transaction identities. Analyze samples values for the planner. These are different jobs even when <code>VACUUM (ANALYZE)</code> requests both.<a id="postgresql-vacuum--cite-10-1" class="citation-ref" href="#postgresql-vacuum--source-10" aria-label="Source 10">[10]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Vacuum, freezing and bloat: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Changes</th>
+<th>Concurrency / disk behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VACUUM notes.orders</code></td>
+<td>Reclaims dead-version space for reuse, maintains visibility and freezing</td>
+<td>Normal reads/writes continue, but I/O and lock conflicts still matter; usually does not shrink the file.</td>
+</tr>
+<tr>
+<td><code>ANALYZE notes.orders</code></td>
+<td>Updates estimated row counts/value distribution</td>
+<td>Run after bulk load or major distribution changes; not a dead-row cleanup.</td>
+</tr>
+<tr>
+<td><code>VACUUM (ANALYZE, VERBOSE) notes.orders</code></td>
+<td>Both tasks, with diagnostic messages</td>
+<td>Run outside a transaction block.</td>
+</tr>
+<tr>
+<td><code>VACUUM (FREEZE) notes.orders</code></td>
+<td>Aggressively freezes eligible tuples</td>
+<td>Extra work, not a reason to disable automatic freezing.</td>
+</tr>
+<tr>
+<td><code>VACUUM (FULL, ANALYZE) notes.orders</code></td>
+<td>Rewrites a compact copy, returns space to OS</td>
+<td><code>ACCESS EXCLUSIVE</code> lock and extra disk space; planned outage, not routine maintenance.</td>
+</tr>
+<tr>
+<td>Autovacuum</td>
+<td>Schedules ordinary vacuum/analyze by thresholds and age</td>
+<td>Does not perform <code>VACUUM FULL</code>; keep enabled.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The command must be issued by an authorized owner/maintenance role; database ownership does not grant unrestricted maintenance of shared catalogs. PostgreSQL 18 offers <code>MAINTAIN</code> privileges and the predefined <code>pg_maintain</code> role, which is much broader than one-table access.<a id="postgresql-vacuum--cite-19-1" class="citation-ref" href="#postgresql-vacuum--source-19" aria-label="Source 19">[19]</a><a id="postgresql-vacuum--cite-56-1" class="citation-ref" href="#postgresql-vacuum--source-56" aria-label="Source 56">[56]</a><a id="postgresql-vacuum--cite-57-1" class="citation-ref" href="#postgresql-vacuum--source-57" aria-label="Source 57">[57]</a></p>
+
+<h2 id="inspect">Find the bottleneck before tuning</h2>
+<p>Start read-only in the affected database. Statistics are estimates, and counters can reset; compare samples taken over a known interval. Slot transaction horizons and maintenance progress answer different questions from dead-tuple estimates.<a id="postgresql-vacuum--cite-25-1" class="citation-ref" href="#postgresql-vacuum--source-25" aria-label="Source 25">[25]</a><a id="postgresql-vacuum--cite-89-1" class="citation-ref" href="#postgresql-vacuum--source-89" aria-label="Source 89">[89]</a><a id="postgresql-vacuum--cite-90-1" class="citation-ref" href="#postgresql-vacuum--source-90" aria-label="Source 90">[90]</a></p>
+<pre tabindex="0" role="region" aria-label="Vacuum, freezing and bloat: code 1, horizontally scrollable"><code class="language-sql">SELECT relid::regclass AS relation, n_live_tup, n_dead_tup,
+       n_mod_since_analyze, last_autovacuum, last_autoanalyze,
+       vacuum_count, autovacuum_count
+FROM pg_stat_user_tables
+ORDER BY n_dead_tup DESC;
+
+SELECT pid, usename, state, xact_start, backend_xmin,
+       age(backend_xmin) AS xmin_age, wait_event_type, wait_event
+FROM pg_stat_activity
+WHERE xact_start IS NOT NULL
+ORDER BY xact_start;
+
+SELECT slot_name, slot_type, active, xmin, catalog_xmin,
+       age(xmin) AS xmin_age, age(catalog_xmin) AS catalog_age
+FROM pg_replication_slots;
+SELECT gid, prepared, owner, database FROM pg_prepared_xacts;
+SELECT pid, relid::regclass, phase FROM pg_stat_progress_vacuum;
+</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Vacuum, freezing and bloat: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Observation</th>
+<th>Likely next investigation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dead tuples grow despite frequent vacuum</td>
+<td>Old snapshots, abandoned transactions, prepared transactions, slot <code>xmin</code> retention.</td>
+</tr>
+<tr>
+<td>Vacuum rarely starts</td>
+<td>Per-table thresholds, worker capacity, disabled settings, repeated cancellation.</td>
+</tr>
+<tr>
+<td>Vacuum active but little progress</td>
+<td>Lock wait, storage throughput, cost throttling, large indexes or retained tuples.</td>
+</tr>
+<tr>
+<td>Plans stale after bulk load</td>
+<td>Analyze separately; waiting for a vacuum threshold is unnecessary.</td>
+</tr>
+<tr>
+<td>Disk did not shrink after vacuum</td>
+<td>Reusable space inside the relation is expected, not failed cleanup.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Resolve long transactions with their application owner. A prepared transaction may represent an external coordinator’s decision; do not guess <code>COMMIT PREPARED</code> versus <code>ROLLBACK PREPARED</code>. A stale slot may be retaining required data for a real subscriber. Dropping it can force a rebuild. Do not terminate sessions or drop slots purely because an age column is large.<a id="postgresql-vacuum--cite-10-2" class="citation-ref" href="#postgresql-vacuum--source-10" aria-label="Source 10">[10]</a></p>
+
+<h2 id="autovacuum">Tune the table, then measure again</h2>
+<p>Thresholds combine a fixed component and a table-size component; large tables may need smaller scale factors to avoid a huge maintenance backlog. PostgreSQL 18 also has insert-triggered vacuum and a maximum vacuum threshold, so the old “updates plus deletes only” rule is incomplete. Inspect current settings instead of assuming every installation uses defaults.<a id="postgresql-vacuum--cite-10-3" class="citation-ref" href="#postgresql-vacuum--source-10" aria-label="Source 10">[10]</a></p>
+<pre tabindex="0" role="region" aria-label="Vacuum, freezing and bloat: code 2, horizontally scrollable"><code class="language-sql">SELECT name, setting, unit, context
+FROM pg_settings
+WHERE name LIKE 'autovacuum%' ORDER BY name;
+SELECT relname, reloptions FROM pg_class
+WHERE oid = 'notes.orders'::regclass;
+</code></pre>
+<p>Example for a measured, high-churn table—not universal tuning values:</p>
+<pre tabindex="0" role="region" aria-label="Vacuum, freezing and bloat: code 3, horizontally scrollable"><code class="language-sql">ALTER TABLE notes.orders SET (
+  autovacuum_vacuum_scale_factor = 0.02,
+  autovacuum_vacuum_threshold = 1000,
+  autovacuum_analyze_scale_factor = 0.01,
+  autovacuum_analyze_threshold = 500
+);
+</code></pre>
+<p>Record the old <code>reloptions</code>, sample dead tuples and vacuum duration, then compare the next workload cycle. More aggressive scheduling can increase I/O contention. Worker count, maintenance memory and cost delay must fit the host across all databases, not just this table. Table storage-parameter changes need no server restart. Undo this example by restoring the recorded values, or remove these overrides to inherit cluster defaults:</p>
+<pre tabindex="0" role="region" aria-label="Vacuum, freezing and bloat: code 4, horizontally scrollable"><code class="language-sql">ALTER TABLE notes.orders RESET (
+  autovacuum_vacuum_scale_factor, autovacuum_vacuum_threshold,
+  autovacuum_analyze_scale_factor, autovacuum_analyze_threshold
+);
+</code></pre>
+<p>Autovacuum does not analyze partitioned parent tables automatically in the same way as ordinary leaf tables; explicitly analyze the parent after changes that affect its combined distribution. It also cannot work on a session’s temporary tables. PostgreSQL 18’s manual <code>VACUUM</code>/<code>ANALYZE</code> traversal of inheritance children changed; use <code>ONLY</code> when the intended target is strictly the named parent.<a id="postgresql-vacuum--cite-4-1" class="citation-ref" href="#postgresql-vacuum--source-4" aria-label="Source 4">[4]</a><a id="postgresql-vacuum--cite-10-4" class="citation-ref" href="#postgresql-vacuum--source-10" aria-label="Source 10">[10]</a></p>
+
+<h2 id="freezing">Prevent transaction-ID exhaustion</h2>
+<p>Transaction IDs have a finite wraparound space. Freezing makes sufficiently old tuple versions safe regardless of later counter wraparound. Insert-only and nearly static tables still need it. The protective autovacuum activity for wraparound is not ordinary optional housekeeping; disabling normal autovacuum does not remove that requirement.<a id="postgresql-vacuum--cite-10-5" class="citation-ref" href="#postgresql-vacuum--source-10" aria-label="Source 10">[10]</a></p>
+<pre tabindex="0" role="region" aria-label="Vacuum, freezing and bloat: code 5, horizontally scrollable"><code class="language-sql">SELECT datname, age(datfrozenxid) AS xid_age,
+       mxid_age(datminmxid) AS multixact_age
+FROM pg_database ORDER BY age(datfrozenxid) DESC;
+
+SELECT oid::regclass AS relation, age(relfrozenxid) AS xid_age,
+       mxid_age(relminmxid) AS multixact_age
+FROM pg_class
+WHERE relkind IN ('r','m') ORDER BY age(relfrozenxid) DESC LIMIT 20;
+</code></pre>
+<p>Alert well before configured freeze ages, using rate of age growth and measured maintenance duration to budget time. Include MultiXact age, not only XID age. When warnings occur: locate the oldest relations in <strong>each database</strong>, remove blocking old snapshots by an agreed application action, ensure disk/I/O capacity, and run ordinary targeted <code>VACUUM</code> as an authorized maintainer. Verify ages fall. Repeatedly cancelling an anti-wraparound worker or increasing limits only postpones the hazard. If the server reaches refusal thresholds, follow the official emergency procedure with a DBA rather than applying <code>pg_resetwal</code> as a fix.<a id="postgresql-vacuum--cite-10-6" class="citation-ref" href="#postgresql-vacuum--source-10" aria-label="Source 10">[10]</a></p>
+
+<h2 id="bloat">Distinguish bloat from necessary space</h2>
+<p>Bloat is allocated space that is persistently excessive for the live workload; free space for the next update cycle is often useful. <code>n_dead_tup</code> and file size alone do not measure exact reclaimable bytes. Investigate row growth, TOAST, indexes, long snapshots and maintenance history first.<a id="postgresql-vacuum--cite-10-7" class="citation-ref" href="#postgresql-vacuum--source-10" aria-label="Source 10">[10]</a></p>
+<ol>
+<li>Capture relation/index sizes and workload rates. Remove the retention cause before a rewrite.</li>
+<li>Run ordinary vacuum/analyze and observe reuse over a representative cycle.</li>
+<li>If the OS must recover space, estimate free disk for the rewritten relation/indexes, WAL/archive growth and replicas; book a maintenance window for <code>VACUUM FULL</code>.</li>
+<li>For an isolated bloated index, evaluate <code>REINDEX INDEX CONCURRENTLY</code> rather than rewriting the table. Concurrent rebuilds still consume space, can wait on transactions and have restrictions; read the target command reference before applying it.<a id="postgresql-vacuum--cite-68-1" class="citation-ref" href="#postgresql-vacuum--source-68" aria-label="Source 68">[68]</a></li>
+<li>Compare size, query plans, constraints and replication/archive health afterward. A rewrite is not transactionally “undone” after completion; restore or rebuild from a known-good source if validation fails.</li>
+</ol>
+<p>Do not schedule <code>VACUUM FULL</code> nightly or disable autovacuum to reduce visible activity. That trades manageable background work for locks and future outages. Continue with <a href="postgresql-audit-performance.html#plans">measured plans and indexes</a>.</p>
+
+<h2 id="postgresql-vacuum--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="postgresql-vacuum--source-4">[4] <a href="https://www.postgresql.org/docs/18/release-18.html">PostgreSQL: Documentation: 18: E.6.&nbsp;Release 18</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-vacuum--cite-4-1" aria-label="Return to citation 4, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-vacuum--source-10">[10] <a href="https://www.postgresql.org/docs/18/routine-vacuuming.html">PostgreSQL: Documentation: 18: 24.1.&nbsp;Routine Vacuuming</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-vacuum--cite-10-1" aria-label="Return to citation 10, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-vacuum--cite-10-2" aria-label="Return to citation 10, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-vacuum--cite-10-3" aria-label="Return to citation 10, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-vacuum--cite-10-4" aria-label="Return to citation 10, occurrence 4">↩4</a><a class="citation-return" href="#postgresql-vacuum--cite-10-5" aria-label="Return to citation 10, occurrence 5">↩5</a><a class="citation-return" href="#postgresql-vacuum--cite-10-6" aria-label="Return to citation 10, occurrence 6">↩6</a><a class="citation-return" href="#postgresql-vacuum--cite-10-7" aria-label="Return to citation 10, occurrence 7">↩7</a></span></div><div class="source-entry" id="postgresql-vacuum--source-19">[19] <a href="https://www.postgresql.org/docs/18/sql-grant.html">PostgreSQL: Documentation: 18: GRANT</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-vacuum--cite-19-1" aria-label="Return to citation 19, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-vacuum--source-25">[25] <a href="https://www.postgresql.org/docs/18/monitoring-stats.html">PostgreSQL: Documentation: 18: 27.2.&nbsp;The Cumulative Statistics System</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-vacuum--cite-25-1" aria-label="Return to citation 25, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-vacuum--source-56">[56] <a href="https://www.postgresql.org/docs/18/sql-analyze.html">PostgreSQL: Documentation: 18: ANALYZE</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-vacuum--cite-56-1" aria-label="Return to citation 56, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-vacuum--source-57">[57] <a href="https://www.postgresql.org/docs/18/sql-vacuum.html">PostgreSQL: Documentation: 18: VACUUM</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-vacuum--cite-57-1" aria-label="Return to citation 57, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-vacuum--source-68">[68] <a href="https://www.postgresql.org/docs/18/sql-reindex.html">PostgreSQL: Documentation: 18: REINDEX</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-vacuum--cite-68-1" aria-label="Return to citation 68, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-vacuum--source-89">[89] <a href="https://www.postgresql.org/docs/18/progress-reporting.html">PostgreSQL: Documentation: 18: 27.4.&nbsp;Progress Reporting</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-vacuum--cite-89-1" aria-label="Return to citation 89, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-vacuum--source-90">[90] <a href="https://www.postgresql.org/docs/18/view-pg-replication-slots.html">PostgreSQL: Documentation: 18: 53.20.&nbsp;pg_replication_slots</a><span class="citation-returns"><a class="citation-return" href="#postgresql-vacuum--cite-90-1" aria-label="Return to citation 90, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="postgresql-joins.html"><span>Previous · PostgreSQL</span><strong>Joins: keep the rows you mean</strong></a></div><div><a rel="next" href="postgresql-audit-performance.html"><span>Next · PostgreSQL</span><strong>Audit, statistics and performance</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/observe.html">Explore See what the server is doing ↗</a><div class="current-group"><h2>In PostgreSQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a  href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-audit.html">Auditing activity</a><a href="mysql-performance.html">Execution plans, indexes and diagnostics</a></div><div><span>MongoDB</span><a href="mongodb-performance.html">Auditing and performance</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

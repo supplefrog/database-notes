@@ -1,0 +1,256 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Storage engines, transactions and InnoDB — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-innodb"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/store.html">Store data and handle change</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Store data and handle change</p><h1>Storage engines, transactions and InnoDB</h1></header>
+<div class="reader-controls"><a href="../tasks/store.html">← Store data and handle change</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a aria-current="page" href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-0250">Storage Engines</a><a class="level-3" href="#mysql-b-0273">InnoDB</a><a class="level-2" href="#mysql-innodb--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-storage-transactions.html">Storage, transactions and tablespaces</a><p class="product-label">MongoDB</p><a href="mongodb-storage.html">WiredTiger, transactions and consistency</a><a href="mongodb-modeling.html">Document modeling and BSON types</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-innodb; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-innodb--cite-1-1" class="citation-ref" href="#mysql-innodb--source-1" aria-label="Source 1">[1]</a><a id="mysql-innodb--cite-72-1" class="citation-ref" href="#mysql-innodb--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-innodb--storage-engines" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0250">Storage Engines</h2>
+<p><span id="mysql-b-0252" class="source-anchor"></span>
+<span id="mysql-b-0255" class="source-anchor"></span>
+<span id="mysql-b-0259" class="source-anchor"></span>
+<span id="mysql-b-0262" class="source-anchor"></span>
+<span id="mysql-b-0266" class="source-anchor"></span>
+<span id="mysql-b-0269" class="source-anchor"></span></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Storage engines, transactions and InnoDB: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Engine</th>
+<th>Use and limits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NDB / NDBCLUSTER</td>
+<td>Distributed, highly available storage engine in the separate MySQL NDB Cluster product; not InnoDB Group Replication.</td>
+</tr>
+<tr>
+<td>MEMORY</td>
+<td>RAM-resident table data; definitions persist but rows do not survive a server restart. Not all optimizer temporary tables use this engine.</td>
+</tr>
+<tr>
+<td>CSV</td>
+<td>Stores table rows in CSV files; no indexes, with CSV-specific constraints. Useful for bounded interchange, not a transactional replacement.</td>
+</tr>
+<tr>
+<td>BLACKHOLE</td>
+<td>Discards written data; specialized replication/logging experiments need binlog-format analysis.</td>
+</tr>
+<tr>
+<td>ARCHIVE</td>
+<td>Compressed archival storage with restricted operations/index support; not a backup format.</td>
+</tr>
+<tr>
+<td>MyISAM</td>
+<td>Nontransactional engine with table-level locking. Some workloads may favor it; “smaller and faster” is not a general rule. Prefer InnoDB when transactions, foreign keys and crash recovery are required.</td>
+</tr>
+</tbody>
+</table></div>
+<p><a id="mysql-innodb--cite-16-1" class="citation-ref" href="#mysql-innodb--source-16" aria-label="Source 16">[16]</a></p>
+<p><span id="mysql-innodb--innodb" class="source-anchor"></span>
+</p>
+<h3 id="mysql-b-0273">InnoDB</h3>
+<p><span id="mysql-b-0275" class="source-anchor"></span>
+<span id="mysql-b-0282" class="source-anchor"></span></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Storage engines, transactions and InnoDB: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>ACID property</th>
+<th>InnoDB</th>
+<th>MyISAM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Atomicity</td>
+<td>Transaction rollback uses undo; application must handle statement errors, deadlocks and rollback scope. DDL commonly causes implicit commits.</td>
+<td>No transactional rollback.</td>
+</tr>
+<tr>
+<td>Consistency</td>
+<td>Enforces supported constraints including foreign keys; application/business invariants remain the application’s responsibility.</td>
+<td>Supports some constraints such as unique indexes, but not InnoDB-style foreign keys.</td>
+</tr>
+<tr>
+<td>Isolation</td>
+<td>MVCC plus record/gap locks and selectable isolation levels.</td>
+<td>Table-level locking coordinates statements but does not provide multi-statement transactional isolation.</td>
+</tr>
+<tr>
+<td>Durability</td>
+<td>Redo, recovery, doublewrite and correctly configured flushing/storage. Not independent of settings or hardware.</td>
+<td>No transactional crash recovery; table repair is not committed-transaction recovery.</td>
+</tr>
+</tbody>
+</table></div>
+<p>InnoDB is the default engine in 8.4 (historically the default since 5.5). <a href="https://dev.mysql.com/doc/refman/8.4/en/images/innodb-architecture-8-0.png">Official architecture diagram</a> is linked rather than republished.</p>
+<p><a id="mysql-innodb--cite-11-1" class="citation-ref" href="#mysql-innodb--source-11" aria-label="Source 11">[11]</a><a id="mysql-innodb--cite-13-1" class="citation-ref" href="#mysql-innodb--source-13" aria-label="Source 13">[13]</a><a id="mysql-innodb--cite-14-1" class="citation-ref" href="#mysql-innodb--source-14" aria-label="Source 14">[14]</a><a id="mysql-innodb--cite-16-2" class="citation-ref" href="#mysql-innodb--source-16" aria-label="Source 16">[16]</a></p>
+<p><span id="mysql-innodb--in-memory-data" class="source-anchor"></span>
+</p>
+<h4 id="mysql-b-0284">In-Memory Data</h4>
+<p><span id="mysql-b-0285" class="source-anchor"></span>
+<span id="mysql-b-0287" class="source-anchor"></span>
+The buffer pool, log buffer and internal structures use RAM; some cached structures have durable on-disk backing.</p><figure class="teaching-figure" id="tf-mysql-innodb" data-after-heading="mysql-b-0284" aria-labelledby="tf-mysql-innodb-title" aria-describedby="tf-mysql-innodb-caption"><div class="tf-heading"><span class="tf-label">MySQL 8.4 · memory / persistence</span><strong id="tf-mysql-innodb-title">Pages and logs do different jobs</strong></div><div class="tf-tracks"><div class="tf-track"><p class="tf-lane-title">Redo records</p><div class="tf-cell"><strong>Log buffer · RAM</strong><span>Records changes; it is not a list of dirty pages.</span></div><div class="tf-transfer"><span aria-hidden="true">→</span> write / flush</div><div class="tf-cell"><strong>Redo log · storage</strong><span>Supports crash recovery. Write-ahead logging makes the required redo durable before the corresponding data-page write.</span></div></div><div class="tf-track"><p class="tf-lane-title">Data &amp; index pages</p><div class="tf-cell"><strong>Buffer pool · RAM</strong><span>Holds clean and dirty pages. Reads can fetch pages into the pool; updates dirty cached pages.</span></div><div class="tf-transfer"><span aria-hidden="true">→</span> page flushing</div><div class="tf-cell"><strong>Doublewrite → tablespaces</strong><span>With normal doublewrite protection, page images go through doublewrite files before their final locations. This protects against torn page writes.</span></div></div></div><div class="tf-columns tf-support"><p><strong>Undo has another role.</strong> Undo records support rollback and older visible versions for consistent reads. Persistent undo tablespaces are separate from redo; long snapshots can delay purge.</p><p><strong>The binary log is separate.</strong> It belongs to the MySQL server, not the InnoDB buffer pool. It supports replication and point-in-time recovery; redo is not a substitute.</p></div><p class="tf-note"><strong>This is not a commit timeline.</strong> Commit durability and page flushing are different events; committing does not require every changed page to be written to its final location. Redo/binlog flush settings and storage that must honor flush requests matter. Group commit and background work are not shown.</p><p class="tf-detail">The existing LRU drawing below explains the old/new page policy. Flushing is not eviction. Optional change buffering and the adaptive hash index are omitted here; both are disabled by default in 8.4.</p><figcaption id="tf-mysql-innodb-caption">Teaching simplification: two persistence paths and their purposes, not an exact engine schematic or a promise of fixed I/O ordering across all transactions. This is InnoDB, not a shared PostgreSQL/MongoDB storage model.<p class="tf-sources"><strong>Read the sources</strong> <a href="#mysql-innodb--source-7" id="tf-mysql-innodb-ref-1" class="figure-source-ref">Buffer pool [7]</a> · <a href="#mysql-innodb--source-10" id="tf-mysql-innodb-ref-2" class="figure-source-ref">Redo [10]</a> · <a href="#mysql-innodb--source-11" id="tf-mysql-innodb-ref-3" class="figure-source-ref">Doublewrite [11]</a> · <a href="#mysql-innodb--source-13" id="tf-mysql-innodb-ref-4" class="figure-source-ref">Versions and undo [13]</a> · <a href="#mysql-innodb--source-131" id="tf-mysql-innodb-ref-5" class="figure-source-ref">Undo tablespaces [131]</a> · <a href="#mysql-innodb--source-21" id="tf-mysql-innodb-ref-6" class="figure-source-ref">Durability settings [21]</a> · <a href="#mysql-innodb--source-90" id="tf-mysql-innodb-ref-7" class="figure-source-ref">8.4 defaults [90]</a></p><p class="tf-external">External reference, not republished: <a href="https://dev.mysql.com/doc/refman/8.4/en/images/innodb-architecture-8-0.png">Official InnoDB architecture image</a></p></figcaption></figure>
+<p><strong>Buffer pool</strong></p>
+<ul>
+<li>Caches clean and dirty table/index pages. Default configuration starts small (128 MiB); size to the measured working set and total memory budget, including connections, other engines and the OS. “80% of RAM” is not universal, especially on shared or container-limited hosts.</li>
+<li>The LRU diagram below shows the usual old/new midpoint policy. The old portion defaults to 3/8; flushing dirty pages and evicting pages are different operations.</li>
+</ul>
+<p><a id="mysql-innodb--cite-7-1" class="citation-ref" href="#mysql-innodb--source-7" aria-label="Source 7">[7]</a><a id="mysql-innodb--cite-21-1" class="citation-ref" href="#mysql-innodb--source-21" aria-label="Source 21">[21]</a><a id="mysql-innodb--cite-129-1" class="citation-ref" href="#mysql-innodb--source-129" aria-label="Source 129">[129]</a></p>
+<p><span id="mysql-b-0290" class="source-anchor"></span></p>
+<pre tabindex="0" role="region" aria-label="Storage engines, transactions and InnoDB: code 1, horizontally scrollable"><code class="language-text">+-----------------------------+
+|      InnoDB LRU List        |
++-----------------------------+
+|                             |
+|   Young (New) Sublist (5/8) |
+|   +---------------------+   |
+|   | Head                |&lt;--+-- Most recently accessed page
+|   | Most accessed pages |   |
+|   | ...                 |   |
+|   | Tail                |   |
+|   +---------------------+   |
+|                             |
+|   Old Sublist (3/8)         |
+|   +---------------------+   |
+|   | Head                |&lt;--+-- Newly loaded page
+|   | Less accessed pages |   |
+|   | ...                 |   |
+|   | Tail                |&lt;--+-- Candidate for eviction; dirty pages must be flushed safely
+|   +---------------------+   |
++-----------------------------+
+</code></pre>
+<p><a id="mysql-innodb--cite-7-2" class="citation-ref" href="#mysql-innodb--source-7" aria-label="Source 7">[7]</a></p>
+<p><span id="mysql-b-0312" class="source-anchor"></span>
+<span id="mysql-b-0316" class="source-anchor"></span>
+<span id="mysql-b-0322" class="source-anchor"></span>
+<strong>Change buffer</strong></p>
+<ul>
+<li>Buffers eligible changes to secondary-index pages absent from the buffer pool, then merges them when needed or in the background. It has in-memory and persistent parts.</li>
+<li>In 8.4 <code>innodb_change_buffering=none</code> by default. When enabled, <code>innodb_change_buffer_max_size</code> defaults to 25% of the pool, with maximum 50%; this is a limit, not a permanent reservation.</li>
+</ul>
+<p><strong>Adaptive hash index</strong></p>
+<ul>
+<li>Built by InnoDB from hot B-tree search patterns when enabled. It points to buffered index pages and can speed suitable lookups, but can also add contention.</li>
+<li>Disabled by default in 8.4. Benchmark before enabling; it is not a user-created secondary index or optimizer hint.</li>
+</ul>
+<p><strong>Log buffer</strong></p>
+<ul>
+<li>Holds redo records describing changes, not a catalog of dirty pages. Writes/flushes are affected by commits, capacity and periodic flushing.</li>
+<li><code>innodb_flush_log_at_trx_commit=1</code> and <code>sync_binlog=1</code> are the usual strongest server settings for durable InnoDB/binlog commits; storage must honor flushes.</li>
+</ul>
+<p><a id="mysql-innodb--cite-8-1" class="citation-ref" href="#mysql-innodb--source-8" aria-label="Source 8">[8]</a><a id="mysql-innodb--cite-9-1" class="citation-ref" href="#mysql-innodb--source-9" aria-label="Source 9">[9]</a><a id="mysql-innodb--cite-10-1" class="citation-ref" href="#mysql-innodb--source-10" aria-label="Source 10">[10]</a><a id="mysql-innodb--cite-21-2" class="citation-ref" href="#mysql-innodb--source-21" aria-label="Source 21">[21]</a><a id="mysql-innodb--cite-129-2" class="citation-ref" href="#mysql-innodb--source-129" aria-label="Source 129">[129]</a><a id="mysql-innodb--cite-90-1" class="citation-ref" href="#mysql-innodb--source-90" aria-label="Source 90">[90]</a></p>
+<p><span id="mysql-innodb--on-disk-data" class="source-anchor"></span>
+</p>
+<h4 id="mysql-b-0327">On-Disk Data</h4>
+<p><span id="mysql-b-0328" class="source-anchor"></span>
+<strong>Redo Logs</strong></p>
+<ul>
+<li>
+<p>Write-ahead logging</p>
+<ul>
+<li>Persistent log of changes, before applied to on-disk pages</li>
+</ul>
+</li>
+<li>
+<p>Changes can be reapplied to data pages if system crashes before/during writing</p>
+</li>
+<li>
+<p>Durability depends on redo/binlog flush settings and storage guarantees; committed data can be lost with relaxed settings or faulty storage.</p>
+</li>
+</ul>
+<p><a id="mysql-innodb--cite-10-2" class="citation-ref" href="#mysql-innodb--source-10" aria-label="Source 10">[10]</a><a id="mysql-innodb--cite-21-3" class="citation-ref" href="#mysql-innodb--source-21" aria-label="Source 21">[21]</a></p>
+<ul>
+<li>Temporary redo logs (#ib_redoXXX_tmp) - internal, pre-created spare files to handle log resizing and rotation</li>
+</ul>
+<p><span id="mysql-b-0335" class="source-anchor"></span>
+<strong>Tablespaces</strong></p>
+<p><span id="mysql-b-0337" class="source-anchor"></span>
+<span id="mysql-b-0352" class="source-anchor"></span>
+<span id="mysql-b-0358" class="source-anchor"></span>
+<span id="mysql-b-0363" class="source-anchor"></span></p>
+<ul>
+<li><strong>System tablespace (<code>ibdata1</code>):</strong> stores the change buffer and may hold table/index data when not using file-per-table or general tablespaces. The 8.4 dictionary lives in <code>mysql.ibd</code>; default undo and doublewrite storage are separate. Old diagrams putting all of them in <code>ibdata1</code> describe historical layouts.</li>
+<li><strong>General tablespace (<code>.ibd</code>):</strong> shared InnoDB container for multiple tables. Moving/dropping tables does not automatically shrink the file.</li>
+<li><strong>File-per-table (<code>.ibd</code>):</strong> one table’s data/index storage (or separate files for partitions). Availability of transportable tablespaces depends on table features and import restrictions.</li>
+<li><strong>Session temporary tablespaces (<code>#innodb_temp/*.ibt</code>):</strong> a pool starts with ten files. A session can receive two: one for user temporary tables and one for internal on-disk temporary tables. They are truncated/reused on release. Inspect <code>INNODB_SESSION_TEMP_TABLESPACES</code>; not all internal temp work reaches disk.</li>
+<li><strong>Global temporary tablespace (<code>ibtmp1</code>):</strong> remains supported in 8.4, not deprecated simply because session files exist. Stores rollback segments for user-created temporary tables. Default is auto-extending, initially slightly over 12 MiB. <code>innodb_temp_data_file_path</code>, for example <code>ibtmp1:12M:autoextend:max:1G</code>, bounds growth but can cause statements to fail at the limit. It is recreated on restart. Never delete it while the server is running; a normal controlled restart reclaims it without a manual deletion recipe.</li>
+<li><strong>Undo tablespaces:</strong> hold undo records for transaction rollback and consistent reads. They are not a network-delivery rollback mechanism. Long-running snapshots can delay purge and grow undo storage.</li>
+<li><strong>Doublewrite files:</strong> protect against torn page writes; normally separate <code>.dblwr</code> files in 8.4, not the old fixed system-tablespace location.</li>
+</ul>
+<p><a id="mysql-innodb--cite-11-2" class="citation-ref" href="#mysql-innodb--source-11" aria-label="Source 11">[11]</a><a id="mysql-innodb--cite-12-1" class="citation-ref" href="#mysql-innodb--source-12" aria-label="Source 12">[12]</a><a id="mysql-innodb--cite-13-2" class="citation-ref" href="#mysql-innodb--source-13" aria-label="Source 13">[13]</a><a id="mysql-innodb--cite-25-1" class="citation-ref" href="#mysql-innodb--source-25" aria-label="Source 25">[25]</a><a id="mysql-innodb--cite-130-1" class="citation-ref" href="#mysql-innodb--source-130" aria-label="Source 130">[130]</a><a id="mysql-innodb--cite-131-1" class="citation-ref" href="#mysql-innodb--source-131" aria-label="Source 131">[131]</a><a id="mysql-innodb--cite-146-1" class="citation-ref" href="#mysql-innodb--source-146" aria-label="Source 146">[146]</a></p>
+<p><span id="mysql-innodb--glossary" class="source-anchor"></span>
+</p>
+<h4 id="mysql-b-0368">Glossary</h4>
+<p><span id="mysql-b-0370" class="source-anchor"></span>
+InnoDB data changes run in transactions. With the usual <code>autocommit=1</code>, each statement forms its own transaction unless an explicit transaction is active. Use <code>START TRANSACTION</code> for a deliberate multi-statement unit; many DDL statements implicitly commit.</p>
+<p><a id="mysql-innodb--cite-140-1" class="citation-ref" href="#mysql-innodb--source-140" aria-label="Source 140">[140]</a></p>
+<p><span id="mysql-b-0372" class="source-anchor"></span>
+<span id="mysql-b-0374" class="source-anchor"></span>
+<span id="mysql-b-0387" class="source-anchor"></span>
+The default isolation level is <strong>REPEATABLE READ</strong>. A normal consistent read establishes a read view at the first consistent read in a transaction (or use <code>WITH CONSISTENT SNAPSHOT</code> where applicable). Later consistent reads reuse it. READ COMMITTED takes a fresh snapshot for each consistent read.</p>
+<ul>
+<li>The read view tracks transaction visibility boundaries and active transaction IDs. Later transactions do not become visible merely because they commit.</li>
+<li>A row’s transaction ID and undo chain allow reconstruction of an older visible version; a transaction sees its own changes.</li>
+<li>Locking reads (<code>FOR UPDATE</code> / <code>FOR SHARE</code>) and DML do not simply reuse the nonlocking snapshot. Their locks and record-selection behavior depend on statement and isolation level. Mixing locking and consistent reads can expose different states.</li>
+<li>Undo supports both rollback and MVCC; purge removes versions no active read view needs.</li>
+</ul>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Storage engines, transactions and InnoDB: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Page</td>
+<td>Basic InnoDB storage/buffer unit, 16 KiB by default; configurable at instance initialization. Not the smallest OS write or individual SQL change.</td>
+</tr>
+<tr>
+<td>Clustered key</td>
+<td>Explicit primary key; otherwise the first suitable UNIQUE NOT NULL index; otherwise an internal generated row ID.</td>
+</tr>
+<tr>
+<td>Clustered index</td>
+<td>One per InnoDB table; leaf records contain the row data ordered by clustered key.</td>
+</tr>
+<tr>
+<td>Secondary key</td>
+<td>Indexed columns used for alternate access paths, including columns that may overlap the primary key. Example: searching <code>WHERE name='A'</code>.</td>
+</tr>
+<tr>
+<td>Secondary index</td>
+<td>Leaf records contain secondary-key columns plus the clustered key to locate the row. A covering query can avoid the extra clustered lookup. Additional indexes cost storage and write work.</td>
+</tr>
+</tbody>
+</table></div>
+<p><a id="mysql-innodb--cite-13-3" class="citation-ref" href="#mysql-innodb--source-13" aria-label="Source 13">[13]</a><a id="mysql-innodb--cite-14-2" class="citation-ref" href="#mysql-innodb--source-14" aria-label="Source 14">[14]</a><a id="mysql-innodb--cite-15-1" class="citation-ref" href="#mysql-innodb--source-15" aria-label="Source 15">[15]</a></p>
+
+<h2 id="mysql-innodb--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-innodb--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-innodb--source-7">[7] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-buffer-pool.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-buffer-pool.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.5.1 Buffer Pool
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-7-1" aria-label="Return to citation 7, occurrence 1">↩1</a><a class="citation-return" href="#mysql-innodb--cite-7-2" aria-label="Return to citation 7, occurrence 2">↩2</a><a class="citation-return" href="#tf-mysql-innodb-ref-1" aria-label="Return to figure: Pages and logs do different jobs">↩ Figure</a></span></div><div class="source-entry" id="mysql-innodb--source-8">[8] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-change-buffer.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-change-buffer.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.5.2 Change Buffer
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-8-1" aria-label="Return to citation 8, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-innodb--source-9">[9] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-adaptive-hash.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-adaptive-hash.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.5.3 Adaptive Hash Index
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-9-1" aria-label="Return to citation 9, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-innodb--source-10">[10] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-redo-log.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-redo-log.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.6.5 Redo Log
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-10-1" aria-label="Return to citation 10, occurrence 1">↩1</a><a class="citation-return" href="#mysql-innodb--cite-10-2" aria-label="Return to citation 10, occurrence 2">↩2</a><a class="citation-return" href="#tf-mysql-innodb-ref-2" aria-label="Return to figure: Pages and logs do different jobs">↩ Figure</a></span></div><div class="source-entry" id="mysql-innodb--source-11">[11] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-doublewrite-buffer.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-doublewrite-buffer.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.6.4 Doublewrite Buffer
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-11-1" aria-label="Return to citation 11, occurrence 1">↩1</a><a class="citation-return" href="#mysql-innodb--cite-11-2" aria-label="Return to citation 11, occurrence 2">↩2</a><a class="citation-return" href="#tf-mysql-innodb-ref-3" aria-label="Return to figure: Pages and logs do different jobs">↩ Figure</a></span></div><div class="source-entry" id="mysql-innodb--source-12">[12] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-temporary-tablespace.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-temporary-tablespace.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.6.3.5 Temporary Tablespaces
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-12-1" aria-label="Return to citation 12, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-innodb--source-13">[13] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-multi-versioning.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-multi-versioning.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.3 InnoDB Multi-Versioning
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-13-1" aria-label="Return to citation 13, occurrence 1">↩1</a><a class="citation-return" href="#mysql-innodb--cite-13-2" aria-label="Return to citation 13, occurrence 2">↩2</a><a class="citation-return" href="#mysql-innodb--cite-13-3" aria-label="Return to citation 13, occurrence 3">↩3</a><a class="citation-return" href="#tf-mysql-innodb-ref-4" aria-label="Return to figure: Pages and logs do different jobs">↩ Figure</a></span></div><div class="source-entry" id="mysql-innodb--source-14">[14] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-transaction-isolation-levels.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-transaction-isolation-levels.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.7.2.1 Transaction Isolation Levels
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-14-1" aria-label="Return to citation 14, occurrence 1">↩1</a><a class="citation-return" href="#mysql-innodb--cite-14-2" aria-label="Return to citation 14, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-innodb--source-15">[15] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-index-types.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-index-types.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.6.2.1 Clustered and Secondary Indexes
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-15-1" aria-label="Return to citation 15, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-innodb--source-16">[16] <a href="https://dev.mysql.com/doc/refman/8.4/en/storage-engines.html">https://dev.mysql.com/doc/refman/8.4/en/storage-engines.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 18 Alternative Storage Engines
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-16-1" aria-label="Return to citation 16, occurrence 1">↩1</a><a class="citation-return" href="#mysql-innodb--cite-16-2" aria-label="Return to citation 16, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-innodb--source-21">[21] <a href="https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html">https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 7.1.8 Server System Variables
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-21-1" aria-label="Return to citation 21, occurrence 1">↩1</a><a class="citation-return" href="#mysql-innodb--cite-21-2" aria-label="Return to citation 21, occurrence 2">↩2</a><a class="citation-return" href="#mysql-innodb--cite-21-3" aria-label="Return to citation 21, occurrence 3">↩3</a><a class="citation-return" href="#tf-mysql-innodb-ref-6" aria-label="Return to figure: Pages and logs do different jobs">↩ Figure</a></span></div><div class="source-entry" id="mysql-innodb--source-25">[25] <a href="https://dev.mysql.com/doc/refman/8.4/en/create-tablespace.html">https://dev.mysql.com/doc/refman/8.4/en/create-tablespace.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.1.21 CREATE TABLESPACE Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-25-1" aria-label="Return to citation 25, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-innodb--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-innodb--source-90">[90] <a href="https://dev.mysql.com/doc/refman/8.4/en/upgrading-from-previous-series.html">https://dev.mysql.com/doc/refman/8.4/en/upgrading-from-previous-series.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 3.5 Changes in MySQL 8.4
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-90-1" aria-label="Return to citation 90, occurrence 1">↩</a><a class="citation-return" href="#tf-mysql-innodb-ref-7" aria-label="Return to figure: Pages and logs do different jobs">↩ Figure</a></span></div><div class="source-entry" id="mysql-innodb--source-129">[129] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-parameters.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-parameters.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.14 InnoDB Startup Options and System Variables
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-129-1" aria-label="Return to citation 129, occurrence 1">↩1</a><a class="citation-return" href="#mysql-innodb--cite-129-2" aria-label="Return to citation 129, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-innodb--source-130">[130] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-system-tablespace.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-system-tablespace.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.6.3.1 The System Tablespace
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-130-1" aria-label="Return to citation 130, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-innodb--source-131">[131] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-undo-tablespaces.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-undo-tablespaces.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.6.3.4 Undo Tablespaces
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-131-1" aria-label="Return to citation 131, occurrence 1">↩</a><a class="citation-return" href="#tf-mysql-innodb-ref-5" aria-label="Return to figure: Pages and logs do different jobs">↩ Figure</a></span></div><div class="source-entry" id="mysql-innodb--source-140">[140] <a href="https://dev.mysql.com/doc/refman/8.4/en/commit.html">https://dev.mysql.com/doc/refman/8.4/en/commit.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.3.1 START TRANSACTION, COMMIT, and ROLLBACK Statements
+<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-140-1" aria-label="Return to citation 140, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-innodb--source-146">[146] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-file-per-table-tablespaces.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-file-per-table-tablespaces.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.6.3.2 File-Per-Table Tablespaces<span class="citation-returns"><a class="citation-return" href="#mysql-innodb--cite-146-1" aria-label="Return to citation 146, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-layout.html"><span>Previous · MySQL</span><strong>Executables, schemas and server files</strong></a></div><div><a rel="next" href="mysql-objects.html"><span>Next · MySQL</span><strong>Objects, sessions and table management</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/store.html">Explore Store data and handle change ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></div><div><span>MongoDB</span><a href="mongodb-storage.html">WiredTiger, transactions and consistency</a><a href="mongodb-modeling.html">Document modeling and BSON types</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

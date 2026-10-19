@@ -1,0 +1,291 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Sharding and resharding — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mongodb-sharding"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/replicate.html">Keep more than one copy</a></nav>
+<header class="reader-head"><p class="reader-context">MongoDB <span aria-hidden="true">/</span> Keep more than one copy</p><h1>Sharding and resharding</h1></header>
+<div class="reader-controls"><a href="../tasks/replicate.html">← Keep more than one copy</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MongoDB chapters"><ol class="chapter-list"><li><a  href="../chapters/mongodb-architecture.html">Architecture, editions and tools</a></li><li><a  href="../chapters/mongodb-storage.html">WiredTiger, transactions and consistency</a></li><li><a  href="../chapters/mongodb-modeling.html">Document modeling and BSON types</a></li><li><a  href="../chapters/mongodb-installation.html">Installation and first start</a></li><li><a  href="../chapters/mongodb-instances.html">Troubleshooting and isolated instances</a></li><li><a  href="../chapters/mongodb-administration.html">Objects, users and administration</a></li><li><a  href="../chapters/mongodb-performance.html">Auditing and performance</a></li><li><a  href="../chapters/mongodb-backup.html">Backup and recovery</a></li><li><a  href="../chapters/mongodb-replication.html">Replica sets and high availability</a></li><li><a aria-current="page" href="../chapters/mongodb-sharding.html">Sharding and resharding</a></li><li><a  href="../chapters/mongodb-security.html">Hardening, TLS and key rotation</a></li><li><a  href="../chapters/mongodb-upgrades.html">Upgrades and feature compatibility</a></li><li><a  href="../chapters/mongodb-migration.html">Relational-to-document migration</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#topology">A sharded cluster contains replica sets</a><a class="level-2" href="#shard-key">Choose a key from access patterns</a><a class="level-2" href="#deploy">Assemble a secured lab topology</a><a class="level-2" href="#routing">Shard and inspect the collection</a><a class="level-2" href="#balancer">Balance, zones and maintenance</a><a class="level-2" href="#reshard">Reshard without pretending it is free</a><a class="level-2" href="#mongodb-sharding--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-replication.html">Source-replica replication and recovery</a><a href="mysql-group-replication.html">Group replication and failover</a><p class="product-label">PostgreSQL</p><a href="postgresql-replication-ha.html">Replication and high availability</a></nav></details></div>
+<article class="prose">
+<h2 id="topology">A sharded cluster contains replica sets</h2>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 1, horizontally scrollable"><code class="language-text">application -&gt; mongos router A / router B
+                 | reads config metadata from cfgRS
+                 +-&gt; shard01 replica set (primary + secondaries)
+                 +-&gt; shard02 replica set (primary + secondaries)
+config servers: cfgRS, three members, cluster metadata
+</code></pre>
+<p>A shard owns ranges of collection data. Each shard’s replica set provides redundancy for those ranges. Config servers hold placement/cluster metadata; routers cache that metadata and target requests. Lose a shard’s availability and requests needing its data fail even if other shards are healthy. Lose config-server majority and metadata operations/balancing become unavailable; do not treat router cache as a replacement backup.<a id="mongodb-sharding--cite-34-1" class="citation-ref" href="#mongodb-sharding--source-34" aria-label="Source 34">[34]</a><a id="mongodb-sharding--cite-73-1" class="citation-ref" href="#mongodb-sharding--source-73" aria-label="Source 73">[73]</a></p>
+<p>Applications connect to <strong>mongos</strong>, not directly to shards. Shard-local maintenance access is exceptional, separately authorized, and especially constrained in 8.0. Do not grant <code>directShardOperations</code> to application users or write around the router because a command is rejected.<a id="mongodb-sharding--cite-25-1" class="citation-ref" href="#mongodb-sharding--source-25" aria-label="Source 25">[25]</a><a id="mongodb-sharding--cite-34-2" class="citation-ref" href="#mongodb-sharding--source-34" aria-label="Source 34">[34]</a></p>
+
+<h2 id="shard-key">Choose a key from access patterns</h2>
+<p>For <code>shop.orders</code>, primary accesses are tenant + order ID and tenant + recent date. The worked starting key is <code>{tenantId: 1, _id: 1}</code>. Tenant alone has poor cardinality if there are few tenants, and one very large tenant can become a hotspot. The second field permits subdivisions within a tenant, but sequential IDs can still concentrate new inserts. The fixture is too small to demonstrate real distribution.<a id="mongodb-sharding--cite-32-1" class="citation-ref" href="#mongodb-sharding--source-32" aria-label="Source 32">[32]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Sharding and resharding: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Candidate</th>
+<th>Advantage</th>
+<th>Cost / reject when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{tenantId: 1}</code></td>
+<td>Tenant routing and zone affinity</td>
+<td>Few/hot tenants; identical-key range cannot split usefully</td>
+</tr>
+<tr>
+<td><code>{placedAt: 1}</code></td>
+<td>Time-range locality</td>
+<td>Monotonically increasing ingest concentrates writes</td>
+</tr>
+<tr>
+<td><code>{_id: "hashed"}</code></td>
+<td>Distributes many distinct IDs</td>
+<td>Tenant queries may scatter; hashing does not cure a single repeated hot value</td>
+</tr>
+<tr>
+<td><code>{tenantId: 1, _id: 1}</code></td>
+<td>Tenant prefix and precise order routing</td>
+<td>Within-tenant monotonic insert pressure; date scans need their own index</td>
+</tr>
+<tr>
+<td><code>{tenantId: 1, customerId: 1, _id: 1}</code></td>
+<td>Customer-specific routing/locality</td>
+<td>Tenant-only reads still span its ranges; changed write predicates required</td>
+</tr>
+</tbody>
+</table></div>
+<p>Evaluate cardinality, value frequency, monotonicity, query targeting, write distribution, document growth and zone/residency rules. Use representative production-shaped data and sampled access patterns, not only the three-document exercise. An index can speed work <strong>inside</strong> a shard without improving router targeting.<a id="mongodb-sharding--cite-20-1" class="citation-ref" href="#mongodb-sharding--source-20" aria-label="Source 20">[20]</a><a id="mongodb-sharding--cite-32-2" class="citation-ref" href="#mongodb-sharding--source-32" aria-label="Source 32">[32]</a></p>
+<p>The shard key is not automatically a uniqueness constraint. Unique indexes on sharded collections must satisfy shard-key restrictions; <code>_id</code> may not enforce global uniqueness when it is not the shard key. Generate globally unique business/order IDs and include tenant context in application requests. Do not create an incompatible unique index and discover the conflict only during sharding.<a id="mongodb-sharding--cite-36-1" class="citation-ref" href="#mongodb-sharding--source-36" aria-label="Source 36">[36]</a><a id="mongodb-sharding--cite-39-1" class="citation-ref" href="#mongodb-sharding--source-39" aria-label="Source 39">[39]</a></p>
+
+<h2 id="deploy">Assemble a secured lab topology</h2>
+<p>Use new isolated hosts and the pinned 8.0.29 packages. This procedure uses keyfile membership + TLS for a controlled self-managed lab; MongoDB’s production sharded-deployment guidance recommends x.509 security. Review <a href="mongodb-security.html#internal-auth">internal-authentication requirements</a> before promoting the lab to production.<a id="mongodb-sharding--cite-13-1" class="citation-ref" href="#mongodb-sharding--source-13" aria-label="Source 13">[13]</a><a id="mongodb-sharding--cite-34-3" class="citation-ref" href="#mongodb-sharding--source-34" aria-label="Source 34">[34]</a><a id="mongodb-sharding--cite-58-1" class="citation-ref" href="#mongodb-sharding--source-58" aria-label="Source 58">[58]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Sharding and resharding: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Set/process</th>
+<th>Hosts</th>
+<th>Explicit port</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cfgRS</code></td>
+<td><code>cfg1</code>, <code>cfg2</code>, <code>cfg3</code>.example.net</td>
+<td>27019</td>
+<td><code>configsvr</code></td>
+</tr>
+<tr>
+<td><code>shard01</code></td>
+<td><code>s1a</code>, <code>s1b</code>, <code>s1c</code>.example.net</td>
+<td>27018</td>
+<td><code>shardsvr</code></td>
+</tr>
+<tr>
+<td><code>shard02</code></td>
+<td><code>s2a</code>, <code>s2b</code>, <code>s2c</code>.example.net</td>
+<td>27018</td>
+<td><code>shardsvr</code></td>
+</tr>
+<tr>
+<td>Router</td>
+<td><code>router1.example.net</code></td>
+<td>27017</td>
+<td><code>mongos</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Names are examples, not resolvable infrastructure supplied by these notes. On distinct hosts each <code>mongod</code> may use the package <code>/var/lib/mongo</code> and log path; on shared lab hosts every instance needs a different path/service/socket/port and the <a href="mongodb-instances.html#selinux-custom">custom SELinux integration</a>. Never reuse the standalone restore instance’s 27018 on the same host.<a id="mongodb-sharding--cite-6-1" class="citation-ref" href="#mongodb-sharding--source-6" aria-label="Source 6">[6]</a><a id="mongodb-sharding--cite-34-4" class="citation-ref" href="#mongodb-sharding--source-34" aria-label="Source 34">[34]</a></p>
+<ol>
+<li>Provision enforcing RHEL 9 hosts, the <a href="mongodb-installation.html#selinux">mongod policy</a>, the <a href="mongodb-security.html#firewall">private firewalld matrix</a>, DNS, private reachability, clock synchronization, a CA bundle, unique node certificates with proper SAN/usage, and one shared cluster keyfile across <strong>all</strong> config/shard/router members. Protect files as in <a href="mongodb-replication.html#setup">replica setup</a>.</li>
+<li>On each config server use the replica-set TLS/security/data/log config, but set these role fields and its own private <code>bindIp</code>:</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 2, horizontally scrollable"><code class="language-yaml">replication:
+  replSetName: cfgRS
+sharding:
+  clusterRole: configsvr
+net:
+  port: 27019
+  bindIp: 127.0.0.1,cfg1.example.net
+  tls:
+    mode: requireTLS
+    certificateKeyFile: /etc/mongodb/tls/server.pem
+    CAFile: /etc/mongodb/tls/ca.pem
+    allowConnectionsWithoutCertificates: true
+security:
+  keyFile: /etc/mongodb/cluster.key
+  authorization: enabled
+</code></pre>
+<ol start="3">
+<li>Verify <code>mongod_port_t</code> includes 27019 (do not re-add an existing port), label/secret access and then start the config-server <code>mongod</code> services. On one local TLS shell using localhost exception, initiate once:</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 3, horizontally scrollable"><code class="language-javascript">rs.initiate({_id: "cfgRS", configsvr: true, members: [
+  {_id: 0, host: "cfg1.example.net:27019"},
+  {_id: 1, host: "cfg2.example.net:27019"},
+  {_id: 2, host: "cfg3.example.net:27019"}
+]});
+</code></pre>
+<ol start="4">
+<li>For each shard, use the same secure base, with <code>sharding.clusterRole: shardsvr</code>, port 27018 and <code>replication.replSetName: shard01</code> or <code>shard02</code>. Verify <code>mongod_port_t</code> includes 27018 and all required scoped connections; start the package <code>mongod</code> service on each dedicated host, then initiate each set <strong>once</strong> with its corresponding three hostnames. For shard01:[13]<a id="mongodb-sharding--cite-34-5" class="citation-ref" href="#mongodb-sharding--source-34" aria-label="Source 34">[34]</a></li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 4, horizontally scrollable"><code class="language-javascript">rs.initiate({_id: "shard01", members: [
+  {_id: 0, host: "s1a.example.net:27018"},
+  {_id: 1, host: "s1b.example.net:27018"},
+  {_id: 2, host: "s1c.example.net:27018"}
+]});
+</code></pre>
+<p>Repeat with <code>_id: "shard02"</code> and <code>s2a/s2b/s2c</code>. Wait for PRIMARY/SECONDARY health. On each shard primary, create a <strong>shard-local</strong> user administrator via localhost exception, then a narrowly controlled maintenance identity. This closes the individual shard’s bootstrap exception. It does not create application users for the cluster.<a id="mongodb-sharding--cite-7-1" class="citation-ref" href="#mongodb-sharding--source-7" aria-label="Source 7">[7]</a><a id="mongodb-sharding--cite-18-1" class="citation-ref" href="#mongodb-sharding--source-18" aria-label="Source 18">[18]</a></p>
+<ol start="5">
+<li>On a <strong>dedicated new RHEL 9 router host</strong>, configure the same signed vendor repository, but install <code>mongodb-org-mongos-8.0.29-1.el9.x86_64</code> and the separately pinned shell. The mongos RPM supplies the router executable/manpage, <strong>not</strong> a service account, configuration or <code>mongos.service</code>. Do not install/start an unused mongod just to obtain a user.<a id="mongodb-sharding--cite-100-1" class="citation-ref" href="#mongodb-sharding--source-100" aria-label="Source 100">[100]</a><a id="mongodb-sharding--cite-106-1" class="citation-ref" href="#mongodb-sharding--source-106" aria-label="Source 106">[106]</a></li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 5, horizontally scrollable"><code class="language-bash">sudo dnf install mongodb-org-mongos-8.0.29-1.el9.x86_64 mongodb-mongosh-2.10.0-1.el8.x86_64
+rpm -q mongodb-org-mongos mongodb-mongosh
+sudo dnf versionlock add mongodb-org-mongos mongodb-mongosh
+# Inspect existing identities first; the next two commands are for a NEW host.
+getent passwd mongod
+getent group mongod
+sudo groupadd --system mongod
+sudo useradd --system --gid mongod --no-create-home --home-dir /var/lib/mongo \
+  --shell /sbin/nologin mongod
+sudo install -d -o mongod -g mongod -m 750 /var/log/mongodb
+</code></pre>
+<p>If the identity already exists, verify its purpose/UID/group and reuse only when appropriate; do not run the creation commands or change an unrelated account. Install that router’s own TLS PEM/CA and the shared <code>cluster.key</code> with the <a href="mongodb-security.html#tls">documented ownership/modes</a>. <code>/etc/mongos.conf</code> is root:mongod 0640 and has no <code>storage.dbPath</code>:[6]<a id="mongodb-sharding--cite-34-6" class="citation-ref" href="#mongodb-sharding--source-34" aria-label="Source 34">[34]</a></p>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 6, horizontally scrollable"><code class="language-yaml">systemLog:
+  destination: file
+  path: /var/log/mongodb/mongos.log
+  logAppend: true
+net:
+  port: 27017
+  bindIp: 127.0.0.1,router1.example.net
+  tls:
+    mode: requireTLS
+    certificateKeyFile: /etc/mongodb/tls/server.pem
+    CAFile: /etc/mongodb/tls/ca.pem
+    allowConnectionsWithoutCertificates: true
+security:
+  keyFile: /etc/mongodb/cluster.key
+sharding:
+  configDB: cfgRS/cfg1.example.net:27019,cfg2.example.net:27019,cfg3.example.net:27019
+</code></pre>
+<p>Create a root-owned <code>/etc/systemd/system/mongos.service</code> (0644) with foreground supervision; no <code>--fork</code> or PID file. This is a <strong>site-owned unit</strong>, not a vendor-supplied mongos service:[100]<a id="mongodb-sharding--cite-101-1" class="citation-ref" href="#mongodb-sharding--source-101" aria-label="Source 101">[101]</a></p>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 7, horizontally scrollable"><code class="language-ini">[Unit]
+Description=MongoDB sharded cluster router
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mongod
+Group=mongod
+Environment="GLIBC_TUNABLES=glibc.pthread.rseq=0"
+ExecStart=/usr/bin/mongos --config /etc/mongos.conf
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=64000
+LimitNPROC=64000
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitCPU=infinity
+LimitAS=infinity
+TasksMax=infinity
+TimeoutStopSec=infinity
+
+[Install]
+WantedBy=multi-user.target
+</code></pre>
+<p><strong>Mandatory router confinement gate:</strong> MongoDB’s supplied SELinux policy explicitly excludes mongos. Do not relabel <code>/usr/bin/mongos</code> as <code>mongod_exec_t</code> and call it vendor support, nor accept an <code>unconfined_service_t</code> process as production confinement. Before starting, obtain a site-reviewed mongos policy for this exact RHEL build covering executable/domain transition, unit/config/TLS/key reads, log/socket writes, DNS and required outbound/inbound cluster ports. Install the approved policy and its persistent contexts under the platform security process, then verify them with <code>matchpathcon</code>, process context and AVC inspection. No universal policy blob is supplied here: its required access and support ownership depend on the deployment. Without that prerequisite, the router deployment is <strong>blocked</strong>, not an enforcing-ready production recipe.<a id="mongodb-sharding--cite-103-1" class="citation-ref" href="#mongodb-sharding--source-103" aria-label="Source 103">[103]</a><a id="mongodb-sharding--cite-104-1" class="citation-ref" href="#mongodb-sharding--source-104" aria-label="Source 104">[104]</a><a id="mongodb-sharding--cite-110-1" class="citation-ref" href="#mongodb-sharding--source-110" aria-label="Source 110">[110]</a></p>
+<p>After that gate and the <a href="mongodb-security.html#firewall">scoped firewall matrix</a> are accepted:</p>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 8, horizontally scrollable"><code class="language-bash">sudo chown root:mongod /etc/mongos.conf
+sudo chmod 640 /etc/mongos.conf
+sudo restorecon -v /usr/bin/mongos /etc/mongos.conf /etc/systemd/system/mongos.service
+sudo restorecon -Rv /etc/mongodb /var/log/mongodb
+sudo systemd-analyze verify /etc/systemd/system/mongos.service
+sudo systemctl daemon-reload
+sudo systemctl start mongos
+sudo systemctl status mongos --no-pager
+sudo journalctl -u mongos -n 100 --no-pager
+sudo ps -eZ | grep mongos
+sudo ausearch -m AVC,USER_AVC -ts recent
+</code></pre>
+<p>Match the running domain to the <strong>approved router policy</strong>, verify logs/TLS/new internal connections and then enable boot start after full cluster acceptance. Keep shutdown supervised; an infinite stop timeout avoids an automatic timed SIGKILL but requires an operator escalation plan for a hung process. <code>mongos</code> membership authentication is enabled by <code>keyFile</code>; do not paste mongod-only options indiscriminately.<a id="mongodb-sharding--cite-6-2" class="citation-ref" href="#mongodb-sharding--source-6" aria-label="Source 6">[6]</a></p>
+<ol start="6">
+<li>Start the router, connect locally over TLS, and use the cluster localhost exception to create <code>useradmin</code> on <code>admin</code>. Authenticate it, create <code>operator</code> with cluster administration and <code>shop</code> roles. This is the cluster user catalog maintained through <code>mongos</code>; do not first create a conflicting cluster user directly on config servers.<a id="mongodb-sharding--cite-7-2" class="citation-ref" href="#mongodb-sharding--source-7" aria-label="Source 7">[7]</a><a id="mongodb-sharding--cite-18-2" class="citation-ref" href="#mongodb-sharding--source-18" aria-label="Source 18">[18]</a></li>
+<li>As authenticated cluster administrator through the router, add the shard replica sets and inspect topology:[34]</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 9, horizontally scrollable"><code class="language-javascript">sh.addShard("shard01/s1a.example.net:27018,s1b.example.net:27018,s1c.example.net:27018");
+sh.addShard("shard02/s2a.example.net:27018,s2b.example.net:27018,s2c.example.net:27018");
+sh.status();
+db.adminCommand({listShards: 1});
+</code></pre>
+<p>All intended members must be healthy and internally authenticated before admitting clients. If adding a shard fails, inspect set identity, DNS, TLS, keyfile agreement and duplicate databases. Never bypass authentication or hand-edit config metadata to force registration.</p>
+
+<h2 id="routing">Shard and inspect the collection</h2>
+<p>Load the <a href="mongodb-administration.html#fixture">fixture</a> <strong>through mongos</strong> in the isolated cluster, not directly into a shard. Use the administrator’s cluster-management privileges and approved index/DDL window:[32]<a id="mongodb-sharding--cite-34-7" class="citation-ref" href="#mongodb-sharding--source-34" aria-label="Source 34">[34]</a></p>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 10, horizontally scrollable"><code class="language-javascript">const shop = db.getSiblingDB("shop");
+shop.orders.createIndex({tenantId: 1, _id: 1}, {name: "tenant_order_shard"});
+sh.shardCollection("shop.orders", {tenantId: 1, _id: 1});
+sh.status();
+shop.orders.explain("queryPlanner").find({tenantId: "t1", _id: "o1001"});
+shop.orders.explain("queryPlanner").find({status: "paid"});
+</code></pre>
+<p>The full-key lookup should be targetable; a status-only query lacks the shard key and may scatter to shards. Inspect the actual router explain output rather than assuming a particular shard count in a tiny dataset. Keep <code>tenant_recent</code> for tenant/date reads: the shard-key index does not replace that sorting access path.<a id="mongodb-sharding--cite-20-2" class="citation-ref" href="#mongodb-sharding--source-20" aria-label="Source 20">[20]</a><a id="mongodb-sharding--cite-24-1" class="citation-ref" href="#mongodb-sharding--source-24" aria-label="Source 24">[24]</a><a id="mongodb-sharding--cite-32-3" class="citation-ref" href="#mongodb-sharding--source-32" aria-label="Source 32">[32]</a></p>
+<p>Chunks/ranges describe keyspace ownership, not fixed-size files. Balancing migrates ranges between shards; config metadata records ownership. A migration may create temporary copies/orphan cleanup work, which is why direct shard counts can mislead and backups must coordinate across the topology.<a id="mongodb-sharding--cite-26-1" class="citation-ref" href="#mongodb-sharding--source-26" aria-label="Source 26">[26]</a><a id="mongodb-sharding--cite-38-1" class="citation-ref" href="#mongodb-sharding--source-38" aria-label="Source 38">[38]</a></p>
+
+<h2 id="balancer">Balance, zones and maintenance</h2>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 11, horizontally scrollable"><code class="language-javascript">sh.getBalancerState();
+sh.isBalancerRunning();
+sh.status();
+</code></pre>
+<p>The enabled setting and a currently active balancing round are different observations. Balancer decisions depend on data distribution/thresholds; adding a shard does not guarantee immediate even document counts. Repeated shard-key values can create unsplittable hot ranges. Investigate data/key design, shard disk, replication lag, migration errors and zone restrictions before manually moving ranges.<a id="mongodb-sharding--cite-32-4" class="citation-ref" href="#mongodb-sharding--source-32" aria-label="Source 32">[32]</a><a id="mongodb-sharding--cite-38-2" class="citation-ref" href="#mongodb-sharding--source-38" aria-label="Source 38">[38]</a></p>
+<p>Zones constrain key ranges to selected shards for placement/residency or hardware classes. They do not replace authorization or automatically ensure every copy/backup meets a residency policy. Design zone ranges and matching shard tags together; a missing eligible shard can stop useful balancing.<a id="mongodb-sharding--cite-38-3" class="citation-ref" href="#mongodb-sharding--source-38" aria-label="Source 38">[38]</a></p>
+<p>For backup/upgrade windows, record prior state, stop the balancer, wait for active migrations to finish, perform the coordinated work, then restore prior state and validate. Link the <strong>same topology inventory</strong> to <a href="mongodb-backup.html#sharded-backup">sharded backup</a> and <a href="mongodb-upgrades.html#sharded-order">upgrade ordering</a>; a per-shard “done” is not cluster completion.<a id="mongodb-sharding--cite-25-2" class="citation-ref" href="#mongodb-sharding--source-25" aria-label="Source 25">[25]</a><a id="mongodb-sharding--cite-26-2" class="citation-ref" href="#mongodb-sharding--source-26" aria-label="Source 26">[26]</a></p>
+
+<h2 id="reshard">Reshard without pretending it is free</h2>
+<p>8.0 Community supports resharding. The example changes the key to <code>{tenantId: 1, customerId: 1, _id: 1}</code> only after a measured customer-locality benefit. It is not a fix required by this fixture. Read the 8.0 procedure in full: one collection at a time, majority journaling enabled, no incompatible unique indexes/index builds, sufficient recipient space and CPU/I/O/oplog headroom. The guide’s storage estimate per recipient is <code>2 × (collection storage + index storage) / shard count</code>; skew and growth require additional margin.<a id="mongodb-sharding--cite-39-2" class="citation-ref" href="#mongodb-sharding--source-39" aria-label="Source 39">[39]</a><a id="mongodb-sharding--cite-64-1" class="citation-ref" href="#mongodb-sharding--source-64" aria-label="Source 64">[64]</a></p>
+<ol>
+<li>Rehearse on a representative restored cluster; take a coordinated backup and agree latency/write-block budget. Update application query/identity assumptions for the new key.</li>
+<li>Save balancer state and stop it. Avoid concurrent DDL/topology changes.</li>
+<li>Through <code>mongos</code>, run as a role authorized for resharding:</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 12, horizontally scrollable"><code class="language-javascript">db.adminCommand({
+  reshardCollection: "shop.orders",
+  key: {tenantId: 1, customerId: 1, _id: 1}
+});
+</code></pre>
+<ol start="4">
+<li>Monitor from another connection with <code>$currentOp</code> on <code>admin</code>, filtering resharding descriptions, and watch per-member disk, lag and errors. The command builds required indexes during its index phase; it is write-intensive and has a write-blocking commit phase. A disconnected client is not proof of cancellation.<a id="mongodb-sharding--cite-39-3" class="citation-ref" href="#mongodb-sharding--source-39" aria-label="Source 39">[39]</a></li>
+<li>Before commit, an approved abort can use the command below. Once commit is reached, abort may be rejected; rollback then is another reviewed reshard/migration or restore, not toggling a setting.<a id="mongodb-sharding--cite-63-1" class="citation-ref" href="#mongodb-sharding--source-63" aria-label="Source 63">[63]</a></li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Sharding and resharding: code 13, horizontally scrollable"><code class="language-javascript">db.adminCommand({abortReshardCollection: "shop.orders"});
+</code></pre>
+<ol start="6">
+<li>After success, verify key/placement, counts and business totals, uniqueness assumptions and routing of actual queries/writes; restore the prior balancer state. Keep old-key query clients from becoming an unexpected scatter workload. In 8.0 the same-key <code>forceRedistribution</code> option also exists, but it is still a resharding operation with these resource/operational costs, not ordinary balancing.<a id="mongodb-sharding--cite-39-4" class="citation-ref" href="#mongodb-sharding--source-39" aria-label="Source 39">[39]</a><a id="mongodb-sharding--cite-64-2" class="citation-ref" href="#mongodb-sharding--source-64" aria-label="Source 64">[64]</a></li>
+</ol>
+
+<h2 id="mongodb-sharding--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mongodb-sharding--source-6">[6] <a href="https://www.mongodb.com/docs/v8.0/reference/configuration-options">https://www.mongodb.com/docs/v8.0/reference/configuration-options</a> — Self-Managed Configuration File Options - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-6-1" aria-label="Return to citation 6, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-sharding--cite-6-2" aria-label="Return to citation 6, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-sharding--source-7">[7] <a href="https://www.mongodb.com/docs/v8.0/core/localhost-exception">https://www.mongodb.com/docs/v8.0/core/localhost-exception</a> — Localhost Exception in Self-Managed Deployments - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-7-1" aria-label="Return to citation 7, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-sharding--cite-7-2" aria-label="Return to citation 7, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-sharding--source-13">[13] <a href="https://www.mongodb.com/docs/v8.0/tutorial/deploy-replica-set-with-keyfile-access-control">https://www.mongodb.com/docs/v8.0/tutorial/deploy-replica-set-with-keyfile-access-control</a> — Deploy Self-Managed Replica Set With Keyfile Authentication - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-13-1" aria-label="Return to citation 13, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-sharding--source-18">[18] <a href="https://www.mongodb.com/docs/v8.0/tutorial/manage-users-and-roles">https://www.mongodb.com/docs/v8.0/tutorial/manage-users-and-roles</a> — Manage Users and Roles on Self-Managed Deployments - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-18-1" aria-label="Return to citation 18, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-sharding--cite-18-2" aria-label="Return to citation 18, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-sharding--source-20">[20] <a href="https://www.mongodb.com/docs/v8.0/core/indexes/index-types/index-compound">https://www.mongodb.com/docs/v8.0/core/indexes/index-types/index-compound</a> — Compound Indexes - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-20-1" aria-label="Return to citation 20, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-sharding--cite-20-2" aria-label="Return to citation 20, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-sharding--source-24">[24] <a href="https://www.mongodb.com/docs/v8.0/reference/explain-results">https://www.mongodb.com/docs/v8.0/reference/explain-results</a> — Explain Results - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-24-1" aria-label="Return to citation 24, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-sharding--source-25">[25] <a href="https://www.mongodb.com/docs/v8.0/release-notes/8.0-upgrade-sharded-cluster">https://www.mongodb.com/docs/v8.0/release-notes/8.0-upgrade-sharded-cluster</a> — Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-25-1" aria-label="Return to citation 25, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-sharding--cite-25-2" aria-label="Return to citation 25, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-sharding--source-26">[26] <a href="https://www.mongodb.com/docs/v8.0/tutorial/backup-sharded-cluster-with-filesystem-snapshots">https://www.mongodb.com/docs/v8.0/tutorial/backup-sharded-cluster-with-filesystem-snapshots</a> — Back Up a Sharded Cluster with File System Snapshots - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-26-1" aria-label="Return to citation 26, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-sharding--cite-26-2" aria-label="Return to citation 26, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-sharding--source-32">[32] <a href="https://www.mongodb.com/docs/v8.0/core/sharding-choose-a-shard-key">https://www.mongodb.com/docs/v8.0/core/sharding-choose-a-shard-key</a> — Choose a Shard Key - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-32-1" aria-label="Return to citation 32, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-sharding--cite-32-2" aria-label="Return to citation 32, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-sharding--cite-32-3" aria-label="Return to citation 32, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-sharding--cite-32-4" aria-label="Return to citation 32, occurrence 4">↩4</a></span></div><div class="source-entry" id="mongodb-sharding--source-34">[34] <a href="https://www.mongodb.com/docs/v8.0/tutorial/deploy-shard-cluster">https://www.mongodb.com/docs/v8.0/tutorial/deploy-shard-cluster</a> — Deploy a Self-Managed Sharded Cluster - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-34-1" aria-label="Return to citation 34, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-sharding--cite-34-2" aria-label="Return to citation 34, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-sharding--cite-34-3" aria-label="Return to citation 34, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-sharding--cite-34-4" aria-label="Return to citation 34, occurrence 4">↩4</a><a class="citation-return" href="#mongodb-sharding--cite-34-5" aria-label="Return to citation 34, occurrence 5">↩5</a><a class="citation-return" href="#mongodb-sharding--cite-34-6" aria-label="Return to citation 34, occurrence 6">↩6</a><a class="citation-return" href="#mongodb-sharding--cite-34-7" aria-label="Return to citation 34, occurrence 7">↩7</a></span></div><div class="source-entry" id="mongodb-sharding--source-36">[36] <a href="https://www.mongodb.com/docs/v8.0/reference/limits">https://www.mongodb.com/docs/v8.0/reference/limits</a> — MongoDB Limits and Thresholds - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-36-1" aria-label="Return to citation 36, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-sharding--source-38">[38] <a href="https://www.mongodb.com/docs/v8.0/core/sharding-balancer-administration">https://www.mongodb.com/docs/v8.0/core/sharding-balancer-administration</a> — Sharded Cluster Balancer - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-38-1" aria-label="Return to citation 38, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-sharding--cite-38-2" aria-label="Return to citation 38, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-sharding--cite-38-3" aria-label="Return to citation 38, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-sharding--source-39">[39] <a href="https://www.mongodb.com/docs/v8.0/core/sharding-reshard-a-collection">https://www.mongodb.com/docs/v8.0/core/sharding-reshard-a-collection</a> — Reshard a Collection - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-39-1" aria-label="Return to citation 39, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-sharding--cite-39-2" aria-label="Return to citation 39, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-sharding--cite-39-3" aria-label="Return to citation 39, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-sharding--cite-39-4" aria-label="Return to citation 39, occurrence 4">↩4</a></span></div><div class="source-entry" id="mongodb-sharding--source-58">[58] <a href="https://www.mongodb.com/docs/v8.0/core/security-x.509">https://www.mongodb.com/docs/v8.0/core/security-x.509</a> — Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-58-1" aria-label="Return to citation 58, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-sharding--source-63">[63] <a href="https://www.mongodb.com/docs/v8.0/reference/command/abortReshardCollection">https://www.mongodb.com/docs/v8.0/reference/command/abortReshardCollection</a> — abortReshardCollection (database command) - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-63-1" aria-label="Return to citation 63, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-sharding--source-64">[64] <a href="https://www.mongodb.com/docs/v8.0/reference/command/reshardCollection">https://www.mongodb.com/docs/v8.0/reference/command/reshardCollection</a> — reshardCollection (database command) - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-64-1" aria-label="Return to citation 64, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-sharding--cite-64-2" aria-label="Return to citation 64, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-sharding--source-73">[73] <a href="https://www.mongodb.com/docs/v8.0/core/sharded-cluster-config-servers">https://www.mongodb.com/docs/v8.0/core/sharded-cluster-config-servers</a> — Config Servers - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-73-1" aria-label="Return to citation 73, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-sharding--source-100">[100] <a href="https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongodb-org.spec">https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongodb-org.spec</a> — MongoDB r8.0.29 RPM specification
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-sharding--source-101">[101] <a href="https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongod.service">https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongod.service</a> — MongoDB r8.0.29 RPM systemd unit
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-101-1" aria-label="Return to citation 101, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-sharding--source-103">[103] <a href="https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/README.md">https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/README.md</a> — Official MongoDB SELinux policy scope and assumptions
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-103-1" aria-label="Return to citation 103, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-sharding--source-104">[104] <a href="https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-red-hat.md">https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-red-hat.md</a> — MongoDB 8.0 RHEL install manual (mixed-platform passages flagged)
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-104-1" aria-label="Return to citation 104, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-sharding--source-106">[106] <a href="https://repo.mongodb.org/yum/redhat/9/mongodb-org/8.0/x86_64/repodata/primary.xml.gz">https://repo.mongodb.org/yum/redhat/9/mongodb-org/8.0/x86_64/repodata/primary.xml.gz</a> — RHEL 9 x86_64 MongoDB vendor RPM repository metadata
+<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-106-1" aria-label="Return to citation 106, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-sharding--source-110">[110] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux</a> — RHEL 9 SELinux diagnostics and persistent contexts<span class="citation-returns"><a class="citation-return" href="#mongodb-sharding--cite-110-1" aria-label="Return to citation 110, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mongodb-replication.html"><span>Previous · MongoDB</span><strong>Replica sets and high availability</strong></a></div><div><a rel="next" href="mongodb-security.html"><span>Next · MongoDB</span><strong>Hardening, TLS and key rotation</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/replicate.html">Explore Keep more than one copy ↗</a><div class="current-group"><h2>In MongoDB</h2><ol class="chapter-list"><li><a  href="../chapters/mongodb-replication.html">Replica sets and high availability</a></li><li><a aria-current="page" href="../chapters/mongodb-sharding.html">Sharding and resharding</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-replication.html">Source-replica replication and recovery</a><a href="mysql-group-replication.html">Group replication and failover</a></div><div><span>PostgreSQL</span><a href="postgresql-replication-ha.html">Replication and high availability</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

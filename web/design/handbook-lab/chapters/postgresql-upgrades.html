@@ -1,0 +1,172 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Minor and major upgrades — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="postgresql-upgrades"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/change.html">Protect it and change it safely</a></nav>
+<header class="reader-head"><p class="reader-context">PostgreSQL <span aria-hidden="true">/</span> Protect it and change it safely</p><h1>Minor and major upgrades</h1></header>
+<div class="reader-controls"><a href="../tasks/change.html">← Protect it and change it safely</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="PostgreSQL chapters"><ol class="chapter-list"><li><a  href="../chapters/postgresql-foundations.html">PostgreSQL foundations and tools</a></li><li><a  href="../chapters/postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></li><li><a  href="../chapters/postgresql-install-instances.html">Installation, services and instances</a></li><li><a  href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a  href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li><li><a  href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a  href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li><li><a  href="../chapters/postgresql-backup-recovery.html">Backup and point-in-time recovery</a></li><li><a  href="../chapters/postgresql-replication-ha.html">Replication and high availability</a></li><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a aria-current="page" href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a  href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#decision">Choose the upgrade mechanism</a><a class="level-2" href="#preflight">Inventory and rehearse before the window</a><a class="level-2" href="#minor">Apply a minor update</a><a class="level-2" href="#pg-upgrade">Run a copy-mode major upgrade</a><a class="level-2" href="#rollback">Keep rollback honest</a><a class="level-2" href="#postgresql-upgrades--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-hardening.html">TLS and encryption at rest</a><a href="mysql-upgrades.html">Upgrades and rollback planning</a><a href="mysql-migration.html">Migrating MySQL to Oracle</a><p class="product-label">MongoDB</p><a href="mongodb-security.html">Hardening, TLS and key rotation</a><a href="mongodb-upgrades.html">Upgrades and feature compatibility</a><a href="mongodb-migration.html">Relational-to-document migration</a></nav></details></div>
+<article class="prose">
+<h2 id="decision">Choose the upgrade mechanism</h2>
+<p>A minor update (18.x to a later 18.x) replaces binaries without a major-format conversion. A major update (for example <strong>17 to 18</strong>) requires <code>pg_upgrade</code>, logical dump/restore or a planned logical-replication migration. Never start an 18 binary on a 17 data directory. PostgreSQL does not require visiting every intervening major, but you must review their compatibility notes.<a id="postgresql-upgrades--cite-1-1" class="citation-ref" href="#postgresql-upgrades--source-1" aria-label="Source 1">[1]</a><a id="postgresql-upgrades--cite-37-1" class="citation-ref" href="#postgresql-upgrades--source-37" aria-label="Source 37">[37]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Minor and major upgrades: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Strength</th>
+<th>Main constraint</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Minor package update</td>
+<td>Short restart, unchanged major format</td>
+<td>Read that minor’s release notes for extra actions; binaries/extensions must remain compatible.</td>
+</tr>
+<tr>
+<td><code>pg_upgrade</code> default copy</td>
+<td>Fast catalog conversion without logical row reload</td>
+<td>Both major binaries, compatible physical settings/extensions and extra disk space.</td>
+</tr>
+<tr>
+<td><code>pg_upgrade --clone</code></td>
+<td>Copy-on-write speed with independent old cluster</td>
+<td>Supported OS/filesystem and same filesystem requirements; verify in rehearsal.</td>
+</tr>
+<tr>
+<td><code>pg_upgrade --link</code></td>
+<td>Less copying/storage</td>
+<td>After new cluster starts, shared files make old cluster unsafe to restart.</td>
+</tr>
+<tr>
+<td>Dump/restore</td>
+<td>Clean rebuild; portability and selected redesign</td>
+<td>Longer copy/index-build outage unless separately synchronized.</td>
+</tr>
+<tr>
+<td>Logical replication</td>
+<td>Can reduce final write outage</td>
+<td>DDL, sequences, large objects and cutover consistency need separate handling.</td>
+</tr>
+</tbody>
+</table></div>
+<p>PostgreSQL 18 also has swap/copy-file-range modes; this procedure deliberately uses <strong>default copy</strong>, not a space-saving mode with different rollback properties.<a id="postgresql-upgrades--cite-36-1" class="citation-ref" href="#postgresql-upgrades--source-36" aria-label="Source 36">[36]</a></p>
+
+<h2 id="preflight">Inventory and rehearse before the window</h2>
+<p>The bounded major procedure is <strong>PGDG PostgreSQL 17 to 18 on the same RHEL 9.7 x86_64 host</strong>, old unit <code>postgresql-17</code> with <code>/var/lib/pgsql/17/data</code>, new unit <code>postgresql-18-upgrade</code> with <code>/var/lib/pgsql/18/upgrade</code> on 5544. Both package families must resolve against this maintained OS minor, including OpenSSL and all extension dependencies. It is not an AppStream stream-switch recipe or an instruction to downgrade the existing 18 learning cluster.<a id="postgresql-upgrades--cite-94-1" class="citation-ref" href="#postgresql-upgrades--source-94" aria-label="Source 94">[94]</a><a id="postgresql-upgrades--cite-100-1" class="citation-ref" href="#postgresql-upgrades--source-100" aria-label="Source 100">[100]</a></p>
+<pre tabindex="0" role="region" aria-label="Minor and major upgrades: code 1, horizontally scrollable"><code class="language-sql">SELECT version();
+SHOW data_directory;
+SHOW data_checksums;
+SHOW server_encoding;
+SHOW lc_collate;
+SHOW lc_ctype;
+SELECT datname, datlocprovider, datcollate, datctype, datcollversion
+FROM pg_database ORDER BY datname;
+SELECT extname, extversion FROM pg_extension ORDER BY extname;
+SELECT spcname, pg_tablespace_location(oid) FROM pg_tablespace;
+SELECT * FROM pg_prepared_xacts;
+</code></pre>
+<p>Collect extension inventory <strong>from every database</strong>, native library paths, replication topology/slots, publications/subscriptions, external integrations and package versions. Check drivers, SCRAM/TLS support, reserved words, query behavior and extension vendor upgrade instructions. A compatible binary package is not proof its SQL extension version was upgraded.<a id="postgresql-upgrades--cite-36-2" class="citation-ref" href="#postgresql-upgrades--source-36" aria-label="Source 36">[36]</a><a id="postgresql-upgrades--cite-54-1" class="citation-ref" href="#postgresql-upgrades--source-54" aria-label="Source 54">[54]</a></p>
+<p>PostgreSQL 18 enables checksums by default; <code>pg_upgrade</code> requires matching old/new checksum settings. For a no-checksum source, initialize the target with <code>--no-data-checksums</code> or follow an independently reviewed offline checksum-enablement plan. Match locale/provider/encoding and other checked physical settings; do not “fix” a check failure by editing control files.<a id="postgresql-upgrades--cite-4-1" class="citation-ref" href="#postgresql-upgrades--source-4" aria-label="Source 4">[4]</a><a id="postgresql-upgrades--cite-11-1" class="citation-ref" href="#postgresql-upgrades--source-11" aria-label="Source 11">[11]</a></p>
+<p>Use a restored production copy for rehearsal. Measure the entire outage through extension updates, stats, reindex work and application validation. Freeze schema changes before the final run, take a verified recoverable backup and retain source binaries/configuration. Confirm capacity for both copied data and later WAL/index work. Default-copy rollback still cannot recover writes accepted only by the new server.<a id="postgresql-upgrades--cite-36-3" class="citation-ref" href="#postgresql-upgrades--source-36" aria-label="Source 36">[36]</a></p>
+
+<h2 id="minor">Apply a minor update</h2>
+<ol>
+<li>Read the exact old-to-new 18.x release notes, check repository candidates and extension package updates, verify backup/recovery access, then drain applications.</li>
+<li>Inventory every unit using <code>/usr/pgsql-18</code>; drain and stop affected clusters cleanly. Review <code>dnf --refresh list --showduplicates postgresql18 postgresql18-server postgresql18-contrib</code>, then use <code>sudo dnf upgrade postgresql18 postgresql18-server postgresql18-libs postgresql18-contrib</code> with approved matching extension updates. Preview/review the whole transaction; retain <code>gpgcheck=1</code>. The inspected server RPM calls <code>systemctl try-restart postgresql-18</code> on upgrade; a stopped service is not started by that action. Separately named local units are not updated/restarted for you. Compare copied units to the new vendor unit and inspect <code>.rpmnew</code> files.<a id="postgresql-upgrades--cite-99-1" class="citation-ref" href="#postgresql-upgrades--source-99" aria-label="Source 99">[99]</a><a id="postgresql-upgrades--cite-100-2" class="citation-ref" href="#postgresql-upgrades--source-100" aria-label="Source 100">[100]</a></li>
+<li>Start <code>postgresql-18.service</code> (and each affected named instance in order), verify SQL <code>SELECT version()</code> <strong>and</strong> tool versions, inspect logs, connect as the actual application role and run representative reads/writes.</li>
+<li>Follow any release-specific reindex/extension tasks. Observe replication/archive health and new backup completion before closing the change.<a id="postgresql-upgrades--cite-1-2" class="citation-ref" href="#postgresql-upgrades--source-1" aria-label="Source 1">[1]</a><a id="postgresql-upgrades--cite-100-3" class="citation-ref" href="#postgresql-upgrades--source-100" aria-label="Source 100">[100]</a></li>
+</ol>
+<p>If startup fails, preserve logs and diagnose config/library mismatches. Binary rollback is a release-specific decision, not a universal safety guarantee; keep a restore path for changes that cannot be reversed by reinstalling an older package.</p>
+
+<h2 id="pg-upgrade">Run a copy-mode major upgrade</h2>
+<p>The OS account running <code>pg_upgrade</code> must own both clusters and a writable work directory. Use the <strong>new</strong> major’s utility. No applications may connect during conversion. Ensure the fresh target’s HBA permits local peer connections for <code>postgres</code>; do not enable network trust to make the tool work.<a id="postgresql-upgrades--cite-36-4" class="citation-ref" href="#postgresql-upgrades--source-36" aria-label="Source 36">[36]</a></p>
+<ol>
+<li>Install approved <code>postgresql17</code>, <code>postgresql17-server</code> and corresponding old extensions if not already retained, plus target <code>postgresql18</code>, <code>postgresql18-server</code>, <code>postgresql18-contrib</code> and all matching target extension libraries. Do not replace the old major or install extension SQL manually into the empty target. Register <code>postgresql-18-upgrade.service</code> using <a href="postgresql-install-instances.html#multiple">multiple instances</a>, with <code>PGDATA=/var/lib/pgsql/18/upgrade</code> and mount ordering. Leave it disabled/stopped.</li>
+<li>Initialize that <strong>empty</strong> directory as <code>postgres</code> with <code>/usr/pgsql-18/bin/initdb -D /var/lib/pgsql/18/upgrade</code>, adding the <strong>source’s</strong> encoding/locale/provider/checksum choices and <code>--auth-local=peer --auth-host=scram-sha-256</code>; never use learning defaults blindly. Set target port 5544, <code>listen_addresses = ''</code>, socket <code>/run/postgresql</code>, and local peer HBA. Create/label its owned <code>log</code> directory. Inspect the port inventory; if TCP will later be enabled on 5544, allocate <code>postgresql_port_t</code> after checking conflicts. No broad firewall opening is needed for this local upgrade.<a id="postgresql-upgrades--cite-11-2" class="citation-ref" href="#postgresql-upgrades--source-11" aria-label="Source 11">[11]</a><a id="postgresql-upgrades--cite-102-1" class="citation-ref" href="#postgresql-upgrades--source-102" aria-label="Source 102">[102]</a></li>
+<li>Create <code>/var/lib/pgsql/upgrade-work</code> owned by <code>postgres</code>, mode 0700. Use direct <strong>new-major <code>pg_upgrade</code></strong> in default copy mode: the inspected PGDG setup wrapper’s <code>upgrade</code> action uses <code>--link</code> and its check action rewrites HBA/has destructive failure cleanup, so it is <strong>not</strong> a harmless substitute for this workflow.<a id="postgresql-upgrades--cite-100-4" class="citation-ref" href="#postgresql-upgrades--source-100" aria-label="Source 100">[100]</a> Both clusters must be cleanly stopped for the following rehearsal/final sequence. Prevent unattended package/service starts during conversion.</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Minor and major upgrades: code 2, horizontally scrollable"><code class="language-bash">sudo systemctl stop postgresql-17.service
+sudo systemctl stop postgresql-18-upgrade.service
+sudo restorecon -Rv /var/lib/pgsql/18/upgrade /var/lib/pgsql/upgrade-work
+sudo -u postgres -H bash
+cd /var/lib/pgsql/upgrade-work
+/usr/pgsql-18/bin/pg_upgrade \
+  --old-bindir=/usr/pgsql-17/bin \
+  --new-bindir=/usr/pgsql-18/bin \
+  --old-datadir=/var/lib/pgsql/17/data \
+  --new-datadir=/var/lib/pgsql/18/upgrade \
+  --old-port=5432 --new-port=5544 \
+  --socketdir=/var/lib/pgsql/upgrade-work --check
+</code></pre>
+<p>PGDG configs are inside these PGDATA paths, so no external <code>--old-options</code>/<code>--new-options</code> config-file override is needed. If discovery showed a nonstandard split layout, explicitly adapt and rehearse it. <code>pg_upgrade</code> starts temporary postmasters itself: do not also start their systemd units. Keep SELinux enforcing; diagnose path/domain/AVC failures instead of turning confinement off.<a id="postgresql-upgrades--cite-36-5" class="citation-ref" href="#postgresql-upgrades--source-36" aria-label="Source 36">[36]</a><a id="postgresql-upgrades--cite-100-5" class="citation-ref" href="#postgresql-upgrades--source-100" aria-label="Source 100">[100]</a><a id="postgresql-upgrades--cite-102-2" class="citation-ref" href="#postgresql-upgrades--source-102" aria-label="Source 102">[102]</a></p>
+<p><code>--check</code> reports incompatibilities, not successful application migration. Resolve every reported library/type/setting/prepared-transaction issue and rerun. Keep the generated logs. Before final execution, confirm backup and cutover authorization; run <strong>the same command without <code>--check</code></strong>, still from the owned work directory. Do not add <code>--link</code>, <code>--swap</code> or <code>--no-sync</code> to save time.<a id="postgresql-upgrades--cite-36-6" class="citation-ref" href="#postgresql-upgrades--source-36" aria-label="Source 36">[36]</a></p>
+<ol start="4">
+<li>Exit the OS <code>postgres</code> maintenance shell before host-administrator service commands. Follow <code>pg_upgrade</code>’s generated, version-specific completion instructions. Review and apply extension update SQL using the extension vendor’s supported path. Compare old/new configs; do not copy the old whole file over new defaults or unintentionally point target <code>data_directory</code> back at the source. After conversion, inspect/restore SELinux labels, verify target unit PGDATA and its private listener/log settings, then <code>sudo systemctl start postgresql-18-upgrade.service</code> on 5544 while applications remain drained. Test confined service startup and new-session authentication; do not use the temporary upgrade postmaster as production supervision.<a id="postgresql-upgrades--cite-100-6" class="citation-ref" href="#postgresql-upgrades--source-100" aria-label="Source 100">[100]</a><a id="postgresql-upgrades--cite-102-3" class="citation-ref" href="#postgresql-upgrades--source-102" aria-label="Source 102">[102]</a></li>
+<li>PostgreSQL 18 transfers <strong>most</strong>, not all, optimizer statistics. Run the instructed missing-statistics and cumulative-statistics refresh, with correct connection parameters, running these clients as OS <code>postgres</code> for local peer authentication:[36]</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Minor and major upgrades: code 3, horizontally scrollable"><code class="language-bash">/usr/pgsql-18/bin/vacuumdb -h /run/postgresql -p 5544 \
+  -U postgres --all --analyze-in-stages --missing-stats-only
+/usr/pgsql-18/bin/vacuumdb -h /run/postgresql -p 5544 \
+  -U postgres --all --analyze-only
+</code></pre>
+<ol start="6">
+<li>Validate <a href="postgresql-backup-recovery.html#validation">structure, counts, roles, plans and application behavior</a>, plus release-note-specific changes. PostgreSQL 18’s collation/text-search behavior changes can require rebuilding affected full-text/<code>pg_trgm</code> indexes. After an OS/ICU collation change, identify and rebuild affected objects <strong>before</strong> refreshing recorded collation versions; updating metadata alone does not rebuild index order.<a id="postgresql-upgrades--cite-4-2" class="citation-ref" href="#postgresql-upgrades--source-4" aria-label="Source 4">[4]</a><a id="postgresql-upgrades--cite-87-1" class="citation-ref" href="#postgresql-upgrades--source-87" aria-label="Source 87">[87]</a></li>
+<li>Rebuild/reconfigure standbys for the new major and validate archive namespaces/backup jobs. Do not let a 17 physical standby consume 18 WAL. Test logical subscriptions separately, including slot compatibility/failover settings. Route a controlled client cohort to 5544 or change the planned endpoint during a final stop/start; then monitor errors/latency and take a new base backup.<a id="postgresql-upgrades--cite-36-7" class="citation-ref" href="#postgresql-upgrades--source-36" aria-label="Source 36">[36]</a><a id="postgresql-upgrades--cite-38-1" class="citation-ref" href="#postgresql-upgrades--source-38" aria-label="Source 38">[38]</a></li>
+</ol>
+
+<h2 id="rollback">Keep rollback honest</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Minor and major upgrades: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Point</th>
+<th>Copy-mode rollback</th>
+<th>What must not happen</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Precheck failed</td>
+<td>Source remains the authority; restart it after inspection</td>
+<td>Do not promote/populate the target to bypass checks.</td>
+</tr>
+<tr>
+<td>Conversion failed before target use</td>
+<td>Preserve logs, confirm source unchanged, restart source</td>
+<td>Do not reuse half-upgraded target without cleanup/reinitialization plan.</td>
+</tr>
+<tr>
+<td>New target tested without accepted writes</td>
+<td>Stop target, restore routing/config to retained source</td>
+<td>Never run both writable behind the same endpoint.</td>
+</tr>
+<tr>
+<td>New target accepted writes</td>
+<td>Reconcile/export those writes or restore under an agreed loss decision</td>
+<td>Old source is now stale; starting it is not lossless rollback.</td>
+</tr>
+<tr>
+<td>Link/swap mode was used instead</td>
+<td>Follow that mode’s strict destructive boundary; restore backup when required</td>
+<td>Do not restart shared or moved source files after the unsafe boundary.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Keep old cluster data, packages, tablespaces and generated cleanup scripts through the agreed rollback period. Do not run <code>delete_old_cluster.sh</code> merely because the upgrade tool produced it. End the window only after new backups can be restored and the performance/application acceptance checks pass.<a id="postgresql-upgrades--cite-36-8" class="citation-ref" href="#postgresql-upgrades--source-36" aria-label="Source 36">[36]</a></p>
+<p>For dump/restore migration, use the <a href="postgresql-backup-recovery.html#logical">logical restore workflow</a> with target-major clients. For a low-outage table migration, use <a href="postgresql-replication-ha.html#logical">logical replication</a> and a separate sequence/DDL/cutover plan—not an assumed automatic upgrade of every database object.</p>
+
+<h2 id="postgresql-upgrades--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="postgresql-upgrades--source-1">[1] <a href="https://www.postgresql.org/support/versioning">PostgreSQL: Versioning Policy</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-upgrades--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-upgrades--cite-1-2" aria-label="Return to citation 1, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-upgrades--source-4">[4] <a href="https://www.postgresql.org/docs/18/release-18.html">PostgreSQL: Documentation: 18: E.6.&nbsp;Release 18</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-upgrades--cite-4-1" aria-label="Return to citation 4, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-upgrades--cite-4-2" aria-label="Return to citation 4, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-upgrades--source-11">[11] <a href="https://www.postgresql.org/docs/18/app-initdb.html">PostgreSQL: Documentation: 18: initdb</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-upgrades--cite-11-1" aria-label="Return to citation 11, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-upgrades--cite-11-2" aria-label="Return to citation 11, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-upgrades--source-36">[36] <a href="https://www.postgresql.org/docs/18/pgupgrade.html">PostgreSQL: Documentation: 18: pg_upgrade</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-upgrades--cite-36-1" aria-label="Return to citation 36, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-upgrades--cite-36-2" aria-label="Return to citation 36, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-upgrades--cite-36-3" aria-label="Return to citation 36, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-upgrades--cite-36-4" aria-label="Return to citation 36, occurrence 4">↩4</a><a class="citation-return" href="#postgresql-upgrades--cite-36-5" aria-label="Return to citation 36, occurrence 5">↩5</a><a class="citation-return" href="#postgresql-upgrades--cite-36-6" aria-label="Return to citation 36, occurrence 6">↩6</a><a class="citation-return" href="#postgresql-upgrades--cite-36-7" aria-label="Return to citation 36, occurrence 7">↩7</a><a class="citation-return" href="#postgresql-upgrades--cite-36-8" aria-label="Return to citation 36, occurrence 8">↩8</a></span></div><div class="source-entry" id="postgresql-upgrades--source-37">[37] <a href="https://www.postgresql.org/docs/18/upgrading.html">PostgreSQL: Documentation: 18: 18.6.&nbsp;Upgrading a PostgreSQL Cluster</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-upgrades--cite-37-1" aria-label="Return to citation 37, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-upgrades--source-38">[38] <a href="https://www.postgresql.org/docs/18/warm-standby.html">PostgreSQL: Documentation: 18: 26.2.&nbsp;Log-Shipping Standby Servers</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-upgrades--cite-38-1" aria-label="Return to citation 38, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-upgrades--source-54">[54] <a href="https://www.postgresql.org/docs/18/extend-extensions.html">PostgreSQL: Documentation: 18: 36.17.&nbsp;Packaging Related Objects into an Extension</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-upgrades--cite-54-1" aria-label="Return to citation 54, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-upgrades--source-87">[87] <a href="https://www.postgresql.org/docs/18/sql-altercollation.html">PostgreSQL: Documentation: 18: ALTER COLLATION</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-upgrades--cite-87-1" aria-label="Return to citation 87, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-upgrades--source-94">[94] <a href="https://yum.postgresql.org/news/postgresql-rpms-multiple-rhel-minor-versions">PostgreSQL RPM repository now supports multiple RHEL minor versions - PostgreSQL YUM Repository</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-upgrades--cite-94-1" aria-label="Return to citation 94, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-upgrades--source-99">[99] <a href="https://download.postgresql.org/pub/repos/yum/reporpms/EL-9.7-x86_64/pgdg-redhat-repo-42.0-66.rhel9.7PGDG.noarch.rpm">PGDG RPM pgdg-redhat-repo 42.0-66.rhel9.7PGDG</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-upgrades--cite-99-1" aria-label="Return to citation 99, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-upgrades--source-100">[100] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-server-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18-server 18.6-1PGDG.rhel9.7</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-upgrades--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-upgrades--cite-100-2" aria-label="Return to citation 100, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-upgrades--cite-100-3" aria-label="Return to citation 100, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-upgrades--cite-100-4" aria-label="Return to citation 100, occurrence 4">↩4</a><a class="citation-return" href="#postgresql-upgrades--cite-100-5" aria-label="Return to citation 100, occurrence 5">↩5</a><a class="citation-return" href="#postgresql-upgrades--cite-100-6" aria-label="Return to citation 100, occurrence 6">↩6</a></span></div><div class="source-entry" id="postgresql-upgrades--source-102">[102] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux">Chapter&nbsp;5.&nbsp;Troubleshooting problems related to SELinux | Using SELinux | Red Hat Enterprise Linux | 9 | Red Hat Documentation</a><span class="citation-returns"><a class="citation-return" href="#postgresql-upgrades--cite-102-1" aria-label="Return to citation 102, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-upgrades--cite-102-2" aria-label="Return to citation 102, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-upgrades--cite-102-3" aria-label="Return to citation 102, occurrence 3">↩3</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="postgresql-hardening.html"><span>Previous · PostgreSQL</span><strong>Authentication, TLS and hardening</strong></a></div><div><a rel="next" href="postgresql-migration.html"><span>Next · PostgreSQL</span><strong>Migrating to PostgreSQL</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/change.html">Explore Protect it and change it safely ↗</a><div class="current-group"><h2>In PostgreSQL</h2><ol class="chapter-list"><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a aria-current="page" href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a  href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-hardening.html">TLS and encryption at rest</a><a href="mysql-upgrades.html">Upgrades and rollback planning</a><a href="mysql-migration.html">Migrating MySQL to Oracle</a></div><div><span>MongoDB</span><a href="mongodb-security.html">Hardening, TLS and key rotation</a><a href="mongodb-upgrades.html">Upgrades and feature compatibility</a><a href="mongodb-migration.html">Relational-to-document migration</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

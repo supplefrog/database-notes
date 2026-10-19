@@ -1,0 +1,196 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Document modeling and BSON types — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mongodb-modeling"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/store.html">Store data and handle change</a></nav>
+<header class="reader-head"><p class="reader-context">MongoDB <span aria-hidden="true">/</span> Store data and handle change</p><h1>Document modeling and BSON types</h1></header>
+<div class="reader-controls"><a href="../tasks/store.html">← Store data and handle change</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MongoDB chapters"><ol class="chapter-list"><li><a  href="../chapters/mongodb-architecture.html">Architecture, editions and tools</a></li><li><a  href="../chapters/mongodb-storage.html">WiredTiger, transactions and consistency</a></li><li><a aria-current="page" href="../chapters/mongodb-modeling.html">Document modeling and BSON types</a></li><li><a  href="../chapters/mongodb-installation.html">Installation and first start</a></li><li><a  href="../chapters/mongodb-instances.html">Troubleshooting and isolated instances</a></li><li><a  href="../chapters/mongodb-administration.html">Objects, users and administration</a></li><li><a  href="../chapters/mongodb-performance.html">Auditing and performance</a></li><li><a  href="../chapters/mongodb-backup.html">Backup and recovery</a></li><li><a  href="../chapters/mongodb-replication.html">Replica sets and high availability</a></li><li><a  href="../chapters/mongodb-sharding.html">Sharding and resharding</a></li><li><a  href="../chapters/mongodb-security.html">Hardening, TLS and key rotation</a></li><li><a  href="../chapters/mongodb-upgrades.html">Upgrades and feature compatibility</a></li><li><a  href="../chapters/mongodb-migration.html">Relational-to-document migration</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#access-patterns">Start with the operation, not the table list</a><a class="level-2" href="#embedding">Embed a bounded aggregate; reference independent entities</a><a class="level-2" href="#types">Preserve BSON type meaning</a><a class="level-2" href="#validation">Validation and referential integrity</a><a class="level-2" href="#boundaries">Index and transaction boundaries</a><a class="level-2" href="#relational-example">Worked relational transformation</a><a class="level-2" href="#mongodb-modeling--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-innodb.html">Storage engines, transactions and InnoDB</a><a href="mysql-objects.html">Objects, sessions and table management</a><p class="product-label">PostgreSQL</p><a href="postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></nav></details></div>
+<article class="prose">
+<h2 id="access-patterns">Start with the operation, not the table list</h2>
+<p>The relational source has <code>customers</code>, <code>orders</code> and <code>order_lines</code>. A literal collection per table is possible, but it does not decide which data should be read/written atomically together. List request predicates, output fields, cardinality, update frequency, consistency requirements and growth before choosing the document boundary.<a id="mongodb-modeling--cite-35-1" class="citation-ref" href="#mongodb-modeling--source-35" aria-label="Source 35">[35]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Document modeling and BSON types: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Frequency / invariant</th>
+<th>Model consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Render one order</td>
+<td>Read its lines and historical prices together</td>
+<td>Embed bounded line items in the order</td>
+</tr>
+<tr>
+<td>List tenant’s recent orders</td>
+<td>Tenant equality, descending placement time</td>
+<td><code>{tenantId: 1, placedAt: -1}</code> index</td>
+</tr>
+<tr>
+<td>Update customer’s current contact details</td>
+<td>Many orders refer to one customer</td>
+<td>Reference a separate customer document</td>
+</tr>
+<tr>
+<td>Preserve shipping destination at purchase</td>
+<td>Historical value must not drift</td>
+<td>Embed address snapshot on order if needed</td>
+</tr>
+<tr>
+<td>Reserve stock and create order</td>
+<td>Both or neither when promised</td>
+<td>Conditional atomic update plus transaction if spanning documents</td>
+</tr>
+<tr>
+<td>Customer’s entire order history</td>
+<td>Potentially unbounded</td>
+<td>Query orders by customer; never append forever to customer document</td>
+</tr>
+</tbody>
+</table></div>
+<p>Keep the <a href="mongodb-administration.html#fixture">administration fixture</a> canonical: order IDs <code>o1001</code>–<code>o1003</code>, tenant <code>t1</code>/<code>t2</code>, customer reference, UTC date, Decimal128 total and a bounded <code>lines</code> array. Additional model examples build on it rather than inventing another database.<a id="mongodb-modeling--cite-35-2" class="citation-ref" href="#mongodb-modeling--source-35" aria-label="Source 35">[35]</a><a id="mongodb-modeling--cite-37-1" class="citation-ref" href="#mongodb-modeling--source-37" aria-label="Source 37">[37]</a></p>
+
+<h2 id="embedding">Embed a bounded aggregate; reference independent entities</h2>
+<pre tabindex="0" role="region" aria-label="Document modeling and BSON types: code 1, horizontally scrollable"><code class="language-javascript">// Read together and modified as one aggregate:
+{
+  _id: "o1001", tenantId: "t1", customerId: "c1",
+  placedAt: ISODate("2026-09-01T09:00:00Z"),
+  status: "new", total: Decimal128("5.00"),
+  lines: [{sku: "pencil", qty: Int32(2), unitPrice: Decimal128("2.50")}]
+}
+</code></pre>
+<p>The price is an order-time fact, not a pointer to today’s product price. Copying that value is intentional denormalization. Customer current email/name should usually remain on the customer. If historical customer/address facts are legally required, snapshot only the required fields and define retention/deletion obligations.<a id="mongodb-modeling--cite-35-3" class="citation-ref" href="#mongodb-modeling--source-35" aria-label="Source 35">[35]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Document modeling and BSON types: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Embed when</th>
+<th>Reference when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bounded one-to-few relationship</td>
+<td>Unbounded/high-cardinality relationship</td>
+</tr>
+<tr>
+<td>Same lifecycle and access pattern</td>
+<td>Independent updates/lifecycles</td>
+</tr>
+<tr>
+<td>Atomic update of the aggregate matters</td>
+<td>Large or shared entities would duplicate heavily</td>
+</tr>
+<tr>
+<td>Extra copied bytes are acceptable</td>
+<td>Growth approaches document limits or write contention</td>
+</tr>
+</tbody>
+</table></div>
+<p>Arrays must have a growth policy, not merely an initial small size. The fixture validator caps lines at 100 as an application rule. MongoDB’s BSON document limit is 16 MiB; GridFS is an alternative for large binary content, not a reason to put unlimited order history in one customer. Measure BSON size and tail growth, not only averages.<a id="mongodb-modeling--cite-36-1" class="citation-ref" href="#mongodb-modeling--source-36" aria-label="Source 36">[36]</a><a id="mongodb-modeling--cite-37-2" class="citation-ref" href="#mongodb-modeling--source-37" aria-label="Source 37">[37]</a></p>
+<pre tabindex="0" role="region" aria-label="Document modeling and BSON types: code 2, horizontally scrollable"><code class="language-javascript">const shop = db.getSiblingDB("shop");
+shop.orders.aggregate([
+  {$project: {_id: 1, bytes: {$bsonSize: "$$ROOT"}, lines: {$size: "$lines"}}},
+  {$sort: {bytes: -1}}, {$limit: 10}
+]).toArray();
+</code></pre>
+
+<h2 id="types">Preserve BSON type meaning</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Document modeling and BSON types: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Relational meaning</th>
+<th>BSON/model choice</th>
+<th>Trap</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Signed BIGINT identity</td>
+<td><code>Long("...")</code> or stable string</td>
+<td>JavaScript Number cannot exactly represent every 64-bit integer</td>
+</tr>
+<tr>
+<td>Money DECIMAL</td>
+<td><code>Decimal128("5.00")</code> with explicit currency policy</td>
+<td>Binary floating-point rounding or string sorting</td>
+</tr>
+<tr>
+<td>UTC instant</td>
+<td>BSON Date / <code>ISODate(...)</code></td>
+<td>Date has no stored timezone; source local timestamp needs a zone decision</td>
+</tr>
+<tr>
+<td>Date-only business value</td>
+<td>Validated ISO date string or explicitly modeled parts</td>
+<td>Midnight UTC silently changes local date semantics</td>
+</tr>
+<tr>
+<td>Nullable value</td>
+<td><code>null</code> when known-empty; missing when absent by design</td>
+<td><code>{field: null}</code> also matches missing; choose <code>$exists</code>/type checks deliberately</td>
+</tr>
+<tr>
+<td>SQL primary key</td>
+<td>Stable <code>_id</code> plus tenant/business identity policy</td>
+<td>Do not regenerate IDs on every import/retry</td>
+</tr>
+<tr>
+<td>ENUM/status</td>
+<td>String plus validator enum</td>
+<td>Flexible schema does not enforce the enum by itself</td>
+</tr>
+<tr>
+<td>Binary/UUID</td>
+<td>Agreed BSON binary subtype/UUID representation</td>
+<td>Legacy UUID representations differ across drivers</td>
+</tr>
+</tbody>
+</table></div>
+<p>The shell uses BSON constructors; plain JSON cannot express all these types. Use canonical Extended JSON or a driver-aware loader for interchange. <code>Decimal128</code>, <code>Long</code>, BSON Timestamp and BSON Date are different types; oplog timestamps are not ordinary user dates.<a id="mongodb-modeling--cite-74-1" class="citation-ref" href="#mongodb-modeling--source-74" aria-label="Source 74">[74]</a><a id="mongodb-modeling--cite-87-1" class="citation-ref" href="#mongodb-modeling--source-87" aria-label="Source 87">[87]</a></p>
+
+<h2 id="validation">Validation and referential integrity</h2>
+<p>Use the full <a href="mongodb-administration.html#fixture">orders validator</a> to check presence, types, enum and bounded arrays. <code>strict</code>/<code>error</code> rejects invalid writes; it does not retroactively scan/fix existing documents. Before tightening a validator, inspect old shapes, backfill deliberately, test all writers, then enforce. A rollback restores the old validator but does not restore already transformed data.<a id="mongodb-modeling--cite-37-3" class="citation-ref" href="#mongodb-modeling--source-37" aria-label="Source 37">[37]</a><a id="mongodb-modeling--cite-55-1" class="citation-ref" href="#mongodb-modeling--source-55" aria-label="Source 55">[55]</a></p>
+<p>MongoDB has no foreign key ensuring <code>customerId</code> exists or matches <code>tenantId</code>. Create/inspect customers in the disposable dataset:</p>
+<pre tabindex="0" role="region" aria-label="Document modeling and BSON types: code 3, horizontally scrollable"><code class="language-javascript">const shop = db.getSiblingDB("shop");
+shop.customers.insertMany([
+  {_id: "c1", tenantId: "t1", name: "Mira"},
+  {_id: "c2", tenantId: "t1", name: "Dev"},
+  {_id: "c3", tenantId: "t2", name: "Asha"}
+]);
+shop.orders.aggregate([
+  {$lookup: {
+    from: "customers", let: {cid: "$customerId", tenant: "$tenantId"},
+    pipeline: [{$match: {$expr: {$and: [
+      {$eq: ["$_id", "$$cid"]}, {$eq: ["$tenantId", "$$tenant"]}
+    ]}}}], as: "customer"
+  }},
+  {$match: {customer: {$size: 0}}},
+  {$project: {_id: 1, tenantId: 1, customerId: 1}}
+]).toArray();
+</code></pre>
+<p>No results is the expected invariant for this fixture, not measured output. Including the tenant prevents a same-ID/cross-tenant reference from appearing valid. Production referential rules require application/transaction policy plus periodic reconciliation; a nightly orphan report alone does not prevent invalid writes.<a id="mongodb-modeling--cite-35-4" class="citation-ref" href="#mongodb-modeling--source-35" aria-label="Source 35">[35]</a><a id="mongodb-modeling--cite-40-1" class="citation-ref" href="#mongodb-modeling--source-40" aria-label="Source 40">[40]</a></p>
+
+<h2 id="boundaries">Index and transaction boundaries</h2>
+<p>An embedded order update can be atomic without a multi-document transaction. A customer reference plus inventory reservation may require a transaction if the business promises an all-or-nothing change. Keep transactions short, pre-create collections/indexes, and make retries idempotent; see the <a href="mongodb-storage.html#transactions">stock/order transaction</a>.<a id="mongodb-modeling--cite-40-2" class="citation-ref" href="#mongodb-modeling--source-40" aria-label="Source 40">[40]</a></p>
+<p>Use indexes for actual predicates, not every optional field. Arrays produce multikey behavior and larger indexes; an index on <code>lines.sku</code> can help product-based searches but increases write cost. Tenant/date and tenant/customer/order indexes serve different patterns. After sharding, query routing and per-shard indexing remain separate: a fast shard index does not prevent scatter-gather.<a id="mongodb-modeling--cite-20-1" class="citation-ref" href="#mongodb-modeling--source-20" aria-label="Source 20">[20]</a><a id="mongodb-modeling--cite-32-1" class="citation-ref" href="#mongodb-modeling--source-32" aria-label="Source 32">[32]</a><a id="mongodb-modeling--cite-36-2" class="citation-ref" href="#mongodb-modeling--source-36" aria-label="Source 36">[36]</a></p>
+<p>Schema version fields can support rolling application migrations: deploy readers accepting old/new shapes, backfill bounded batches with checkpointed IDs, deploy new writers, verify no old writers remain, then tighten validation. Do not turn off validation globally merely because one bulk import has old data. Keep business transformations reversible where possible and retain pre-transform data under policy.<a id="mongodb-modeling--cite-35-5" class="citation-ref" href="#mongodb-modeling--source-35" aria-label="Source 35">[35]</a><a id="mongodb-modeling--cite-37-4" class="citation-ref" href="#mongodb-modeling--source-37" aria-label="Source 37">[37]</a></p>
+
+<h2 id="relational-example">Worked relational transformation</h2>
+<p>Given source order <code>o1001</code> for customer <code>c1</code>, and two pencils at exact decimal price 2.50, construct one order document with that line and total 5.00. Copy the source order identity; group child rows by order identity, sort line items deterministically, and preserve quantity/price types. Never compute a migration total with floating-point arithmetic just because the loader is JavaScript.<a id="mongodb-modeling--cite-35-6" class="citation-ref" href="#mongodb-modeling--source-35" aria-label="Source 35">[35]</a><a id="mongodb-modeling--cite-45-1" class="citation-ref" href="#mongodb-modeling--source-45" aria-label="Source 45">[45]</a></p>
+<p>An order snapshot and a current customer document answer different questions. Preserve the relational system as authority until bulk load, delta capture and business reconciliation pass. Translate joins/routines/constraints intentionally in the application; SQL query text is not valid MongoDB query language. Continue with <a href="mongodb-migration.html#mapping">migration and cutover</a>.</p>
+
+<h2 id="mongodb-modeling--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mongodb-modeling--source-20">[20] <a href="https://www.mongodb.com/docs/v8.0/core/indexes/index-types/index-compound">https://www.mongodb.com/docs/v8.0/core/indexes/index-types/index-compound</a> — Compound Indexes - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-modeling--cite-20-1" aria-label="Return to citation 20, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-modeling--source-32">[32] <a href="https://www.mongodb.com/docs/v8.0/core/sharding-choose-a-shard-key">https://www.mongodb.com/docs/v8.0/core/sharding-choose-a-shard-key</a> — Choose a Shard Key - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-modeling--cite-32-1" aria-label="Return to citation 32, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-modeling--source-35">[35] <a href="https://www.mongodb.com/docs/v8.0/data-modeling">https://www.mongodb.com/docs/v8.0/data-modeling</a> — Data Modeling in MongoDB - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-modeling--cite-35-1" aria-label="Return to citation 35, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-modeling--cite-35-2" aria-label="Return to citation 35, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-modeling--cite-35-3" aria-label="Return to citation 35, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-modeling--cite-35-4" aria-label="Return to citation 35, occurrence 4">↩4</a><a class="citation-return" href="#mongodb-modeling--cite-35-5" aria-label="Return to citation 35, occurrence 5">↩5</a><a class="citation-return" href="#mongodb-modeling--cite-35-6" aria-label="Return to citation 35, occurrence 6">↩6</a></span></div><div class="source-entry" id="mongodb-modeling--source-36">[36] <a href="https://www.mongodb.com/docs/v8.0/reference/limits">https://www.mongodb.com/docs/v8.0/reference/limits</a> — MongoDB Limits and Thresholds - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-modeling--cite-36-1" aria-label="Return to citation 36, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-modeling--cite-36-2" aria-label="Return to citation 36, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-modeling--source-37">[37] <a href="https://www.mongodb.com/docs/v8.0/core/schema-validation">https://www.mongodb.com/docs/v8.0/core/schema-validation</a> — Schema Validation - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-modeling--cite-37-1" aria-label="Return to citation 37, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-modeling--cite-37-2" aria-label="Return to citation 37, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-modeling--cite-37-3" aria-label="Return to citation 37, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-modeling--cite-37-4" aria-label="Return to citation 37, occurrence 4">↩4</a></span></div><div class="source-entry" id="mongodb-modeling--source-40">[40] <a href="https://www.mongodb.com/docs/v8.0/core/transactions">https://www.mongodb.com/docs/v8.0/core/transactions</a> — Transactions - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-modeling--cite-40-1" aria-label="Return to citation 40, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-modeling--cite-40-2" aria-label="Return to citation 40, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-modeling--source-45">[45] <a href="https://www.mongodb.com/docs/database-tools/mongoimport">https://www.mongodb.com/docs/database-tools/mongoimport</a> — mongoimport - Database Tools - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-modeling--cite-45-1" aria-label="Return to citation 45, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-modeling--source-55">[55] <a href="https://www.mongodb.com/docs/v8.0/reference/command/collMod">https://www.mongodb.com/docs/v8.0/reference/command/collMod</a> — collMod (database command) - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-modeling--cite-55-1" aria-label="Return to citation 55, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-modeling--source-74">[74] <a href="https://www.mongodb.com/docs/v8.0/reference/bson-types">https://www.mongodb.com/docs/v8.0/reference/bson-types</a> — BSON Types - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-modeling--cite-74-1" aria-label="Return to citation 74, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-modeling--source-87">[87] <a href="https://www.mongodb.com/docs/v8.0/tutorial/query-for-null-fields.md">https://www.mongodb.com/docs/v8.0/tutorial/query-for-null-fields.md</a><span class="citation-returns"><a class="citation-return" href="#mongodb-modeling--cite-87-1" aria-label="Return to citation 87, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mongodb-storage.html"><span>Previous · MongoDB</span><strong>WiredTiger, transactions and consistency</strong></a></div><div><a rel="next" href="mongodb-installation.html"><span>Next · MongoDB</span><strong>Installation and first start</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/store.html">Explore Store data and handle change ↗</a><div class="current-group"><h2>In MongoDB</h2><ol class="chapter-list"><li><a  href="../chapters/mongodb-storage.html">WiredTiger, transactions and consistency</a></li><li><a aria-current="page" href="../chapters/mongodb-modeling.html">Document modeling and BSON types</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-innodb.html">Storage engines, transactions and InnoDB</a><a href="mysql-objects.html">Objects, sessions and table management</a></div><div><span>PostgreSQL</span><a href="postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

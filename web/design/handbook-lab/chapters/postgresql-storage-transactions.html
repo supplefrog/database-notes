@@ -1,0 +1,234 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Storage, transactions and tablespaces — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="postgresql-storage-transactions"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/store.html">Store data and handle change</a></nav>
+<header class="reader-head"><p class="reader-context">PostgreSQL <span aria-hidden="true">/</span> Store data and handle change</p><h1>Storage, transactions and tablespaces</h1></header>
+<div class="reader-controls"><a href="../tasks/store.html">← Store data and handle change</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="PostgreSQL chapters"><ol class="chapter-list"><li><a  href="../chapters/postgresql-foundations.html">PostgreSQL foundations and tools</a></li><li><a aria-current="page" href="../chapters/postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></li><li><a  href="../chapters/postgresql-install-instances.html">Installation, services and instances</a></li><li><a  href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a  href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li><li><a  href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a  href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li><li><a  href="../chapters/postgresql-backup-recovery.html">Backup and point-in-time recovery</a></li><li><a  href="../chapters/postgresql-replication-ha.html">Replication and high availability</a></li><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a  href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a  href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#layout">Map the cluster before touching files</a><a class="level-2" href="#durability">Durable writes and crash recovery</a><a class="level-2" href="#heap-indexes">Heap, indexes and visibility</a><a class="level-2" href="#isolation-locks">Transactions, snapshots and locks</a><a class="level-2" href="#temporary-tablespaces">Temporary objects and external storage</a><a class="level-2" href="#postgresql-storage-transactions--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-innodb.html">Storage engines, transactions and InnoDB</a><a href="mysql-objects.html">Objects, sessions and table management</a><p class="product-label">MongoDB</p><a href="mongodb-storage.html">WiredTiger, transactions and consistency</a><a href="mongodb-modeling.html">Document modeling and BSON types</a></nav></details></div>
+<article class="prose">
+<h2 id="layout">Map the cluster before touching files</h2>
+<p>A PostgreSQL <strong>cluster</strong> is one initialized data directory served by one server instance, containing multiple databases. It does not by itself mean an HA group. Roles and tablespaces are cluster-wide; a schema is a namespace <em>inside a database</em>. Unlike MySQL’s common usage, database and schema are not synonyms.<a id="postgresql-storage-transactions--cite-6-1" class="citation-ref" href="#postgresql-storage-transactions--source-6" aria-label="Source 6">[6]</a><a id="postgresql-storage-transactions--cite-21-1" class="citation-ref" href="#postgresql-storage-transactions--source-21" aria-label="Source 21">[21]</a><a id="postgresql-storage-transactions--cite-22-1" class="citation-ref" href="#postgresql-storage-transactions--source-22" aria-label="Source 22">[22]</a></p>
+<p>For the <a href="postgresql-foundations.html#scope">RHEL/PGDG target</a>, main config, HBA and data are together under PGDATA unless explicitly relocated. The service takes PGDATA from its systemd environment. Do not invent a separate distribution cluster registry or external config tree.<a id="postgresql-storage-transactions--cite-6-2" class="citation-ref" href="#postgresql-storage-transactions--source-6" aria-label="Source 6">[6]</a><a id="postgresql-storage-transactions--cite-100-1" class="citation-ref" href="#postgresql-storage-transactions--source-100" aria-label="Source 100">[100]</a></p>
+<pre tabindex="0" role="region" aria-label="Storage, transactions and tablespaces: code 1, horizontally scrollable"><code class="language-text">/usr/pgsql-18/bin/                  versioned server and client executables
+/usr/pgsql-18/lib/                  major-specific extension libraries
+/usr/pgsql-18/share/extension/      extension control/SQL files
+/usr/lib/systemd/system/postgresql-18.service   vendor unit (do not edit)
+/etc/systemd/system/postgresql-18.service.d/    local drop-ins
+/var/lib/pgsql/18/data/             default PGDATA
+    postgresql.conf                main settings / reviewed includes
+    pg_hba.conf                    ordered connection authentication
+    pg_ident.conf                  OS/certificate-to-role maps
+    postgresql.auto.conf           ALTER SYSTEM overrides
+    PG_VERSION                     major, not full minor
+    base/&lt;database-OID&gt;/            per-database relation files
+    global/                        cluster-wide catalogs/control
+    pg_wal/                        write-ahead log, not disposable logs
+    pg_xact/                       transaction status
+    pg_multixact/                  shared row-lock state
+    pg_tblspc/                     links to external tablespaces
+    log/                           collector output (configured here)
+/run/postgresql/                   explicit socket directory; tmpfiles-managed
+</code></pre>
+<p>Use the server’s answers as authority, not a remembered package path:</p>
+<pre tabindex="0" role="region" aria-label="Storage, transactions and tablespaces: code 2, horizontally scrollable"><code class="language-sql">SHOW data_directory;
+SHOW config_file;
+SHOW hba_file;
+SHOW ident_file;
+SELECT system_identifier FROM pg_control_system();
+SELECT oid, datname FROM pg_database ORDER BY datname;
+SELECT pg_relation_filepath('pg_catalog.pg_class');
+</code></pre>
+<p>Control information and some paths require elevated privileges. Record system identifier, major version, host, port and tablespace map with every physical backup. A relation OID is not necessarily its current filenode; rewrites and reindexing can change files without changing the SQL object’s identity. Never repair a table by renaming files or editing catalogs.<a id="postgresql-storage-transactions--cite-6-3" class="citation-ref" href="#postgresql-storage-transactions--source-6" aria-label="Source 6">[6]</a><a id="postgresql-storage-transactions--cite-23-1" class="citation-ref" href="#postgresql-storage-transactions--source-23" aria-label="Source 23">[23]</a></p>
+
+<h2 id="durability">Durable writes and crash recovery</h2>
+<p>A dirty page in shared buffers is not yet a durable data-file write. WAL records describing the change must reach durable storage before the corresponding changed data page. With normal synchronous commit, the commit waits for local WAL flush; the checkpointer later establishes a redo starting point so crash recovery need not scan all historical WAL.<a id="postgresql-storage-transactions--cite-7-1" class="citation-ref" href="#postgresql-storage-transactions--source-7" aria-label="Source 7">[7]</a><a id="postgresql-storage-transactions--cite-34-1" class="citation-ref" href="#postgresql-storage-transactions--source-34" aria-label="Source 34">[34]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Storage, transactions and tablespaces: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Component/setting</th>
+<th>Purpose</th>
+<th>Operational consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shared_buffers</code></td>
+<td>Shared database page cache</td>
+<td>Startup setting; leave memory for OS cache, sessions and maintenance.<a id="postgresql-storage-transactions--cite-63-1" class="citation-ref" href="#postgresql-storage-transactions--source-63" aria-label="Source 63">[63]</a></td>
+</tr>
+<tr>
+<td><code>wal_buffers</code></td>
+<td>In-memory staging for WAL</td>
+<td>Not retained backup history.</td>
+</tr>
+<tr>
+<td><code>fsync = on</code></td>
+<td>Request durable writes</td>
+<td>Turning it off risks unrecoverable corruption after OS/power failure.<a id="postgresql-storage-transactions--cite-34-2" class="citation-ref" href="#postgresql-storage-transactions--source-34" aria-label="Source 34">[34]</a></td>
+</tr>
+<tr>
+<td><code>full_page_writes = on</code></td>
+<td>Protect against torn page writes during recovery</td>
+<td>Keep on; also a rewind prerequisite.<a id="postgresql-storage-transactions--cite-34-3" class="citation-ref" href="#postgresql-storage-transactions--source-34" aria-label="Source 34">[34]</a><a id="postgresql-storage-transactions--cite-44-1" class="citation-ref" href="#postgresql-storage-transactions--source-44" aria-label="Source 44">[44]</a></td>
+</tr>
+<tr>
+<td><code>synchronous_commit = on</code></td>
+<td>Wait for commit durability at configured level</td>
+<td><code>off</code> can lose acknowledged recent transactions after crash, even without corruption; not an optimization to apply blindly.<a id="postgresql-storage-transactions--cite-34-4" class="citation-ref" href="#postgresql-storage-transactions--source-34" aria-label="Source 34">[34]</a></td>
+</tr>
+<tr>
+<td><code>checkpoint_timeout</code>, <code>max_wal_size</code></td>
+<td>Time/volume pressure for checkpoints</td>
+<td>More frequent checkpoints increase write load; <code>max_wal_size</code> is a soft limit, not a disk-space cap.<a id="postgresql-storage-transactions--cite-34-5" class="citation-ref" href="#postgresql-storage-transactions--source-34" aria-label="Source 34">[34]</a></td>
+</tr>
+<tr>
+<td>WAL archive / replication slot</td>
+<td>Retain changes for recovery or consumers</td>
+<td>Failures can fill disk independently of checkpoint limits.<a id="postgresql-storage-transactions--cite-33-1" class="citation-ref" href="#postgresql-storage-transactions--source-33" aria-label="Source 33">[33]</a><a id="postgresql-storage-transactions--cite-39-1" class="citation-ref" href="#postgresql-storage-transactions--source-39" aria-label="Source 39">[39]</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>Crash recovery replays WAL automatically on restart. It does not repair deleted files, restore a dropped table or reverse valid but unwanted transactions. Those require <a href="postgresql-backup-recovery.html#pitr">backups and PITR</a>. Leave <code>pg_wal</code> under server control; deleting files there to make room can destroy the recovery path.</p>
+
+<h2 id="heap-indexes">Heap, indexes and visibility</h2>
+<p>Ordinary tables use heap storage; their primary-key index is a separate structure, not an InnoDB-style clustered row store. An index entry leads to a heap tuple whose visibility must normally be checked. The visibility map allows an index-only scan to avoid some heap visits; having all selected columns in an index alone does not promise zero heap fetches.<a id="postgresql-storage-transactions--cite-6-4" class="citation-ref" href="#postgresql-storage-transactions--source-6" aria-label="Source 6">[6]</a><a id="postgresql-storage-transactions--cite-10-1" class="citation-ref" href="#postgresql-storage-transactions--source-10" aria-label="Source 10">[10]</a><a id="postgresql-storage-transactions--cite-76-1" class="citation-ref" href="#postgresql-storage-transactions--source-76" aria-label="Source 76">[76]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Storage, transactions and tablespaces: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Structure</th>
+<th>Use</th>
+<th>Cost/limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Heap relation</td>
+<td>Row versions, pages with free space</td>
+<td>Updates/deletes leave old versions until safe cleanup.</td>
+</tr>
+<tr>
+<td>B-tree</td>
+<td>Equality, range and ordered access</td>
+<td>Extra writes/WAL/storage; column order and selectivity matter.</td>
+</tr>
+<tr>
+<td>GIN</td>
+<td>Inverted access for suitable array, JSONB and text-search operators</td>
+<td>Write/maintenance cost; requires matching operators/classes.</td>
+</tr>
+<tr>
+<td>BRIN</td>
+<td>Summaries of ranges of physical pages</td>
+<td>Useful for correlated large data; lossy checks may visit many rows.</td>
+</tr>
+<tr>
+<td>TOAST</td>
+<td>Out-of-line/compressed large values</td>
+<td>Include TOAST in size/maintenance investigations.</td>
+</tr>
+<tr>
+<td>Free-space / visibility map</td>
+<td>Reusable page space / visibility information</td>
+<td>Maintained by normal operations and vacuum, not hand-edited.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Index methods and operator classes are choices for measured access patterns, not interchangeable speed switches.<a id="postgresql-storage-transactions--cite-28-1" class="citation-ref" href="#postgresql-storage-transactions--source-28" aria-label="Source 28">[28]</a><a id="postgresql-storage-transactions--cite-75-1" class="citation-ref" href="#postgresql-storage-transactions--source-75" aria-label="Source 75">[75]</a></p>
+<pre tabindex="0" role="region" aria-label="Storage, transactions and tablespaces: code 3, horizontally scrollable"><code class="language-sql">SELECT pg_size_pretty(pg_table_size('notes.orders')) AS table_with_toast,
+       pg_size_pretty(pg_indexes_size('notes.orders')) AS indexes,
+       pg_size_pretty(pg_total_relation_size('notes.orders')) AS total;
+</code></pre>
+<p>This inspection assumes the <a href="postgresql-administration.html#objects">adminlab fixture</a>. Growth is not proof of bloat: compare live row counts, row widths and workload before proposing a rewrite.</p>
+
+<h2 id="isolation-locks">Transactions, snapshots and locks</h2>
+<p>MVCC lets readers use snapshots while writers create new row versions. It does <strong>not</strong> eliminate locks. Updates to the same row serialize; DDL can block readers and writers. Keep transactions short, acquire locks in a consistent order and retry the whole transaction after deadlock or serialization failure—not just the last statement.<a id="postgresql-storage-transactions--cite-8-1" class="citation-ref" href="#postgresql-storage-transactions--source-8" aria-label="Source 8">[8]</a><a id="postgresql-storage-transactions--cite-9-1" class="citation-ref" href="#postgresql-storage-transactions--source-9" aria-label="Source 9">[9]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Storage, transactions and tablespaces: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Isolation</th>
+<th>Snapshot behavior</th>
+<th>Application obligation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Read Committed (default)</td>
+<td>New snapshot for each statement</td>
+<td>Recheck assumptions across statements; an earlier read is not a reservation.</td>
+</tr>
+<tr>
+<td>Repeatable Read</td>
+<td>Stable transaction snapshot</td>
+<td>Concurrent update conflicts can abort; retry from the beginning.</td>
+</tr>
+<tr>
+<td>Serializable</td>
+<td>Detects anomalies inconsistent with serial execution</td>
+<td>Handle SQLSTATE <code>40001</code> and bounded retry with backoff.</td>
+</tr>
+<tr>
+<td>Read Uncommitted</td>
+<td>Behaves as Read Committed in PostgreSQL</td>
+<td>No dirty-read mode.<a id="postgresql-storage-transactions--cite-8-2" class="citation-ref" href="#postgresql-storage-transactions--source-8" aria-label="Source 8">[8]</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>Example: reserve a known row while changing it. Run only against the fixture, and replace the proposed update with the real business invariant before production use.</p>
+<pre tabindex="0" role="region" aria-label="Storage, transactions and tablespaces: code 4, horizontally scrollable"><code class="language-sql">BEGIN;
+SET LOCAL lock_timeout = '2s';
+SET LOCAL statement_timeout = '10s';
+SELECT order_id, status FROM notes.orders WHERE order_id = 1 FOR UPDATE;
+UPDATE notes.orders SET status = 'paid'
+WHERE order_id = 1 AND status = 'new';
+COMMIT;
+</code></pre>
+<p>A zero-row update can mean the row already changed; it is not automatically success. A lock timeout aborts the statement and leaves this transaction needing <code>ROLLBACK</code>. <code>ROLLBACK</code> undoes transactional row changes, but sequence allocations are not gapless and are not rolled back.<a id="postgresql-storage-transactions--cite-60-1" class="citation-ref" href="#postgresql-storage-transactions--source-60" aria-label="Source 60">[60]</a> Do not hold the lock while waiting for a user or remote API.</p>
+<p>A two-session lock investigation is explicit: session A opens a transaction and locks the row; session B attempts the update with the short timeout; inspect <code>pg_blocking_pids()</code> before rolling back A. Do not reproduce this on an unknown production row. Use <a href="postgresql-audit-performance.html#waits">wait diagnostics</a>, not random process termination.</p>
+
+<h2 id="temporary-tablespaces">Temporary objects and external storage</h2>
+<p><code>CREATE TEMP TABLE</code> creates a session-local object; <code>ON COMMIT DROP</code> makes its lifecycle transaction-local. Autovacuum cannot maintain another session’s temporary table, so analyze it after a substantial load if subsequent plans depend on its distribution. Unlogged tables are different: persistent objects whose contents are not crash-safe or physically replicated; they are not a substitute for durable application tables.<a id="postgresql-storage-transactions--cite-10-2" class="citation-ref" href="#postgresql-storage-transactions--source-10" aria-label="Source 10">[10]</a><a id="postgresql-storage-transactions--cite-70-1" class="citation-ref" href="#postgresql-storage-transactions--source-70" aria-label="Source 70">[70]</a></p>
+<p>Run this example as the database owner or administrator. The fixture intentionally revokes public database privileges and grants <code>notes_app</code> no <code>TEMPORARY</code> privilege; do not widen runtime permissions just to run this maintenance example.<a id="postgresql-storage-transactions--cite-19-1" class="citation-ref" href="#postgresql-storage-transactions--source-19" aria-label="Source 19">[19]</a></p>
+<pre tabindex="0" role="region" aria-label="Storage, transactions and tablespaces: code 5, horizontally scrollable"><code class="language-sql">BEGIN;
+CREATE TEMP TABLE order_batch (order_id bigint PRIMARY KEY) ON COMMIT DROP;
+INSERT INTO order_batch VALUES (1), (2);
+ANALYZE order_batch;
+SELECT o.* FROM notes.orders AS o JOIN order_batch USING (order_id);
+COMMIT;
+</code></pre>
+<p>A tablespace assigns objects to an existing empty, persistent directory owned by the PostgreSQL OS account. On RHEL, mount it persistently, add <code>RequiresMountsFor=/srv/postgresql/fastspace</code> to the owning unit, and check parent traversal. Before SQL creation, inspect existing local labels, then use <code>sudo semanage fcontext -a -t postgresql_db_t '/srv/postgresql/fastspace(/.*)?'</code> and <code>sudo restorecon -Rv /srv/postgresql/fastspace</code>; verify ownership/mode 0700 and <code>matchpathcon -V</code>. Do not replace an existing conflicting mapping blindly or disable enforcing mode.<a id="postgresql-storage-transactions--cite-102-1" class="citation-ref" href="#postgresql-storage-transactions--source-102" aria-label="Source 102">[102]</a><a id="postgresql-storage-transactions--cite-104-1" class="citation-ref" href="#postgresql-storage-transactions--source-104" aria-label="Source 104">[104]</a> Creating one requires superuser; using it requires <code>CREATE</code> on that tablespace. It is part of the same cluster, not an independent backup or portable collection of tables.<a id="postgresql-storage-transactions--cite-22-2" class="citation-ref" href="#postgresql-storage-transactions--source-22" aria-label="Source 22">[22]</a></p>
+<pre tabindex="0" role="region" aria-label="Storage, transactions and tablespaces: code 6, horizontally scrollable"><code class="language-sql">-- Prerequisite: /srv/postgresql/fastspace exists, empty, owned by postgres.
+CREATE TABLESPACE fastspace LOCATION '/srv/postgresql/fastspace';
+GRANT CREATE ON TABLESPACE fastspace TO notes_owner;
+SELECT spcname, pg_tablespace_location(oid) FROM pg_tablespace;
+</code></pre>
+<p>Moving <code>notes.orders</code> with <code>ALTER TABLE notes.orders SET TABLESPACE fastspace</code> takes a strong lock, consumes copy space and does not move its separate indexes automatically.<a id="postgresql-storage-transactions--cite-71-1" class="citation-ref" href="#postgresql-storage-transactions--source-71" aria-label="Source 71">[71]</a> Schedule and verify every object; reverse the move to the original tablespace if needed. Drop a tablespace only once all databases’ objects have been moved out. A missing mount can make the entire cluster unusable. Base-backup/restore plans must include every tablespace, and same-host drills must remap them rather than reuse live paths.<a id="postgresql-storage-transactions--cite-22-3" class="citation-ref" href="#postgresql-storage-transactions--source-22" aria-label="Source 22">[22]</a><a id="postgresql-storage-transactions--cite-32-1" class="citation-ref" href="#postgresql-storage-transactions--source-32" aria-label="Source 32">[32]</a></p>
+<p>Next: <a href="postgresql-vacuum.html#lifecycle">vacuum, freezing and bloat</a>.</p>
+
+<h2 id="postgresql-storage-transactions--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="postgresql-storage-transactions--source-6">[6] <a href="https://www.postgresql.org/docs/18/storage-file-layout.html">PostgreSQL: Documentation: 18: 66.1.&nbsp;Database File Layout</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-6-1" aria-label="Return to citation 6, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-storage-transactions--cite-6-2" aria-label="Return to citation 6, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-storage-transactions--cite-6-3" aria-label="Return to citation 6, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-storage-transactions--cite-6-4" aria-label="Return to citation 6, occurrence 4">↩4</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-7">[7] <a href="https://www.postgresql.org/docs/18/wal-intro.html">PostgreSQL: Documentation: 18: 28.3.&nbsp;Write-Ahead Logging (WAL)</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-7-1" aria-label="Return to citation 7, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-8">[8] <a href="https://www.postgresql.org/docs/18/transaction-iso.html">PostgreSQL: Documentation: 18: 13.2.&nbsp;Transaction Isolation</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-8-1" aria-label="Return to citation 8, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-storage-transactions--cite-8-2" aria-label="Return to citation 8, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-9">[9] <a href="https://www.postgresql.org/docs/18/explicit-locking.html">PostgreSQL: Documentation: 18: 13.3.&nbsp;Explicit Locking</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-9-1" aria-label="Return to citation 9, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-10">[10] <a href="https://www.postgresql.org/docs/18/routine-vacuuming.html">PostgreSQL: Documentation: 18: 24.1.&nbsp;Routine Vacuuming</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-10-1" aria-label="Return to citation 10, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-storage-transactions--cite-10-2" aria-label="Return to citation 10, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-19">[19] <a href="https://www.postgresql.org/docs/18/sql-grant.html">PostgreSQL: Documentation: 18: GRANT</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-19-1" aria-label="Return to citation 19, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-21">[21] <a href="https://www.postgresql.org/docs/18/ddl-schemas.html">PostgreSQL: Documentation: 18: 5.10.&nbsp;Schemas</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-21-1" aria-label="Return to citation 21, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-22">[22] <a href="https://www.postgresql.org/docs/18/manage-ag-tablespaces.html">PostgreSQL: Documentation: 18: 22.6.&nbsp;Tablespaces</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-22-1" aria-label="Return to citation 22, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-storage-transactions--cite-22-2" aria-label="Return to citation 22, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-storage-transactions--cite-22-3" aria-label="Return to citation 22, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-23">[23] <a href="https://www.postgresql.org/docs/18/functions-admin.html">PostgreSQL: Documentation: 18: 9.28.&nbsp;System Administration Functions</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-23-1" aria-label="Return to citation 23, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-28">[28] <a href="https://www.postgresql.org/docs/18/sql-createindex.html">PostgreSQL: Documentation: 18: CREATE INDEX</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-28-1" aria-label="Return to citation 28, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-32">[32] <a href="https://www.postgresql.org/docs/18/app-pgbasebackup.html">PostgreSQL: Documentation: 18: pg_basebackup</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-32-1" aria-label="Return to citation 32, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-33">[33] <a href="https://www.postgresql.org/docs/18/continuous-archiving.html">PostgreSQL: Documentation: 18: 25.3.&nbsp;Continuous Archiving and Point-in-Time Recovery (PITR)</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-33-1" aria-label="Return to citation 33, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-34">[34] <a href="https://www.postgresql.org/docs/18/runtime-config-wal.html">PostgreSQL: Documentation: 18: 19.5.&nbsp;Write Ahead Log</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-34-1" aria-label="Return to citation 34, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-storage-transactions--cite-34-2" aria-label="Return to citation 34, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-storage-transactions--cite-34-3" aria-label="Return to citation 34, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-storage-transactions--cite-34-4" aria-label="Return to citation 34, occurrence 4">↩4</a><a class="citation-return" href="#postgresql-storage-transactions--cite-34-5" aria-label="Return to citation 34, occurrence 5">↩5</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-39">[39] <a href="https://www.postgresql.org/docs/18/runtime-config-replication.html">PostgreSQL: Documentation: 18: 19.6.&nbsp;Replication</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-39-1" aria-label="Return to citation 39, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-44">[44] <a href="https://www.postgresql.org/docs/18/app-pgrewind.html">PostgreSQL: Documentation: 18: pg_rewind</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-44-1" aria-label="Return to citation 44, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-60">[60] <a href="https://www.postgresql.org/docs/18/functions-sequence.html">PostgreSQL: Documentation: 18: 9.17.&nbsp;Sequence Manipulation Functions</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-60-1" aria-label="Return to citation 60, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-63">[63] <a href="https://www.postgresql.org/docs/18/runtime-config-resource.html">PostgreSQL: Documentation: 18: 19.4.&nbsp;Resource Consumption</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-63-1" aria-label="Return to citation 63, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-70">[70] <a href="https://www.postgresql.org/docs/18/sql-createtable.html">PostgreSQL: Documentation: 18: CREATE TABLE</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-70-1" aria-label="Return to citation 70, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-71">[71] <a href="https://www.postgresql.org/docs/18/sql-altertable.html">PostgreSQL: Documentation: 18: ALTER TABLE</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-71-1" aria-label="Return to citation 71, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-75">[75] <a href="https://www.postgresql.org/docs/18/indexes-types.html">PostgreSQL: Documentation: 18: 11.2.&nbsp;Index Types</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-75-1" aria-label="Return to citation 75, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-76">[76] <a href="https://www.postgresql.org/docs/18/indexes-index-only-scans.html">PostgreSQL: Documentation: 18: 11.9.&nbsp;Index-Only Scans and Covering Indexes</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-76-1" aria-label="Return to citation 76, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-100">[100] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-server-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18-server 18.6-1PGDG.rhel9.7</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-102">[102] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux">Chapter&nbsp;5.&nbsp;Troubleshooting problems related to SELinux | Using SELinux | Red Hat Enterprise Linux | 9 | Red Hat Documentation</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-102-1" aria-label="Return to citation 102, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-storage-transactions--source-104">[104] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/7/html/selinux_users_and_administrators_guide/sect-managing_confined_services-postgresql-configuration_examples">21.4.&nbsp;Configuration Examples | SELinux User’s and Administrator’s Guide | Red Hat Enterprise Linux | 7 | Red Hat Documentation</a><span class="citation-returns"><a class="citation-return" href="#postgresql-storage-transactions--cite-104-1" aria-label="Return to citation 104, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="postgresql-foundations.html"><span>Previous · PostgreSQL</span><strong>PostgreSQL foundations and tools</strong></a></div><div><a rel="next" href="postgresql-install-instances.html"><span>Next · PostgreSQL</span><strong>Installation, services and instances</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/store.html">Explore Store data and handle change ↗</a><div class="current-group"><h2>In PostgreSQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-innodb.html">Storage engines, transactions and InnoDB</a><a href="mysql-objects.html">Objects, sessions and table management</a></div><div><span>MongoDB</span><a href="mongodb-storage.html">WiredTiger, transactions and consistency</a><a href="mongodb-modeling.html">Document modeling and BSON types</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

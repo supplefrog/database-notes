@@ -1,0 +1,228 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Backup and recovery — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mongodb-backup"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/recover.html">Back up, then restore</a></nav>
+<header class="reader-head"><p class="reader-context">MongoDB <span aria-hidden="true">/</span> Back up, then restore</p><h1>Backup and recovery</h1></header>
+<div class="reader-controls"><a href="../tasks/recover.html">← Back up, then restore</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MongoDB chapters"><ol class="chapter-list"><li><a  href="../chapters/mongodb-architecture.html">Architecture, editions and tools</a></li><li><a  href="../chapters/mongodb-storage.html">WiredTiger, transactions and consistency</a></li><li><a  href="../chapters/mongodb-modeling.html">Document modeling and BSON types</a></li><li><a  href="../chapters/mongodb-installation.html">Installation and first start</a></li><li><a  href="../chapters/mongodb-instances.html">Troubleshooting and isolated instances</a></li><li><a  href="../chapters/mongodb-administration.html">Objects, users and administration</a></li><li><a  href="../chapters/mongodb-performance.html">Auditing and performance</a></li><li><a aria-current="page" href="../chapters/mongodb-backup.html">Backup and recovery</a></li><li><a  href="../chapters/mongodb-replication.html">Replica sets and high availability</a></li><li><a  href="../chapters/mongodb-sharding.html">Sharding and resharding</a></li><li><a  href="../chapters/mongodb-security.html">Hardening, TLS and key rotation</a></li><li><a  href="../chapters/mongodb-upgrades.html">Upgrades and feature compatibility</a></li><li><a  href="../chapters/mongodb-migration.html">Relational-to-document migration</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#policy">Choose a recovery contract</a><a class="level-2" href="#logical">Logical dump and isolated restore</a><a class="level-2" href="#oplog">Capture/replay a replica-set dump window</a><a class="level-2" href="#physical">Physical snapshot and cold restore</a><a class="level-2" href="#sharded-backup">Sharded backup means coordinated backup</a><a class="level-2" href="#managed">Managed continuous backup is a separate service</a><a class="level-2" href="#validation">Restore acceptance</a><a class="level-2" href="#mongodb-backup--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a><a href="mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a><p class="product-label">PostgreSQL</p><a href="postgresql-backup-recovery.html">Backup and point-in-time recovery</a></nav></details></div>
+<article class="prose">
+<h2 id="policy">Choose a recovery contract</h2>
+<p>A replica set copies mistakes as faithfully as good writes. Set <strong>RPO</strong> (maximum accepted lost work) and <strong>RTO</strong> (time to restore useful service), then measure them with restores. A backup job finishing is not proof of either.<a id="mongodb-backup--cite-21-1" class="citation-ref" href="#mongodb-backup--source-21" aria-label="Source 21">[21]</a><a id="mongodb-backup--cite-22-1" class="citation-ref" href="#mongodb-backup--source-22" aria-label="Source 22">[22]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Backup and recovery: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Appropriate use</th>
+<th>Consistency/recovery boundary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mongodump</code> without oplog</td>
+<td>Small logical export during a controlled write pause</td>
+<td>With writes running, collections need not represent one instant</td>
+</tr>
+<tr>
+<td>Full replica-set dump + <code>--oplog</code></td>
+<td>Consistent logical restore of one replica set</td>
+<td>Captures dump-window operations, not future continuous PITR</td>
+</tr>
+<tr>
+<td>Coherent filesystem snapshot</td>
+<td>Fast physical recovery</td>
+<td>Whole data/journal state, correct engine/version and topology required</td>
+</tr>
+<tr>
+<td>Cold whole-directory copy</td>
+<td>Planned standalone outage</td>
+<td>Clean shutdown, complete directory; copying a running directory is unsafe</td>
+</tr>
+<tr>
+<td>Atlas continuous backup / Ops Manager</td>
+<td>Managed/coordinated backup products</td>
+<td>Service/subscription-specific; not bundled Community commands</td>
+</tr>
+<tr>
+<td>JSON/CSV export</td>
+<td>Interchange</td>
+<td>Omits important metadata/types/options; not backup replacement</td>
+</tr>
+</tbody>
+</table></div>
+<p>Record source binary/FCV, Tools version, topology, times, namespaces, concerns, backup checksums, encryption/key IDs and restore instructions. Encrypt backups off-host, restrict deletion, retain independent generations, and keep decryption keys available outside the failed host. Retention deletion starts only after verifying the replacement generation and policy; never delete oplog/journal files by hand.<a id="mongodb-backup--cite-2-1" class="citation-ref" href="#mongodb-backup--source-2" aria-label="Source 2">[2]</a><a id="mongodb-backup--cite-3-1" class="citation-ref" href="#mongodb-backup--source-3" aria-label="Source 3">[3]</a><a id="mongodb-backup--cite-21-2" class="citation-ref" href="#mongodb-backup--source-21" aria-label="Source 21">[21]</a></p>
+
+<h2 id="logical">Logical dump and isolated restore</h2>
+<p><strong>Read-heavy source operation; destructive potential on destination.</strong> Use Database Tools 100.17.0 from a trusted worker; the dump/restore flags here are present in the official 100.17.0 tagged sources.<a id="mongodb-backup--cite-69-1" class="citation-ref" href="#mongodb-backup--source-69" aria-label="Source 69">[69]</a><a id="mongodb-backup--cite-70-1" class="citation-ref" href="#mongodb-backup--source-70" aria-label="Source 70">[70]</a> This first route targets a standalone or a deliberately quiesced replica set’s <code>shop</code> database. Pause all writers and schema changes for the whole dump; document the business checkpoint. <code>backup</code> is the source identity; the destination uses its own <code>restore</code> identity.<a id="mongodb-backup--cite-2-2" class="citation-ref" href="#mongodb-backup--source-2" aria-label="Source 2">[2]</a><a id="mongodb-backup--cite-3-2" class="citation-ref" href="#mongodb-backup--source-3" aria-label="Source 3">[3]</a><a id="mongodb-backup--cite-60-1" class="citation-ref" href="#mongodb-backup--source-60" aria-label="Source 60">[60]</a></p>
+<pre tabindex="0" role="region" aria-label="Backup and recovery: code 1, horizontally scrollable"><code class="language-bash">umask 077
+sudo install -d -o "$(id -un)" -g "$(id -gn)" -m 700 /srv/backups/mongodb
+mongodump --host 127.0.0.1 --port 27017 --username backup \
+  --authenticationDatabase admin --db shop \
+  --archive=/srv/backups/mongodb/shop-before-change.archive.gz --gzip
+</code></pre>
+<p>Use a new filename per generation. Require a successful exit status, retain stderr/logs, checksum the completed artifact and copy it off-host before treating it as protected. Resume writes only after source state and the checkpoint are recorded. This database-only archive does not automatically provide the whole instance’s users/roles.<a id="mongodb-backup--cite-2-3" class="citation-ref" href="#mongodb-backup--source-2" aria-label="Source 2">[2]</a></p>
+<p>Create the <a href="mongodb-instances.html#isolation">isolated authenticated instance</a> at 27018, with empty target application namespaces and the <strong>same server major/FCV</strong> as the source. The documented general restore compatibility is same major or same FCV; the conservative drill here uses the same 8.0.29 binary and recorded FCV. Do not use restore as an undocumented cross-major upgrade.<a id="mongodb-backup--cite-2-4" class="citation-ref" href="#mongodb-backup--source-2" aria-label="Source 2">[2]</a><a id="mongodb-backup--cite-3-3" class="citation-ref" href="#mongodb-backup--source-3" aria-label="Source 3">[3]</a></p>
+<pre tabindex="0" role="region" aria-label="Backup and recovery: code 2, horizontally scrollable"><code class="language-bash">mongorestore --host 127.0.0.1 --port 27018 --username restore \
+  --authenticationDatabase admin \
+  --archive=/srv/backups/mongodb/shop-before-change.archive.gz --gzip \
+  --nsInclude='shop.*' --nsFrom='shop.*' --nsTo='shop_restore.*' \
+  --stopOnError
+</code></pre>
+<p>No <code>--drop</code>: this route restores into a new namespace. Verify first that <code>shop_restore</code> is absent; otherwise choose another isolated target. If the dump contains <code>system.profile</code> metadata and the destination has no profiling collection, also grant the destination loader <code>dbAdmin</code> on <code>shop_restore</code> for its creation, then revoke that extra role after the drill. The ordinary <code>restore</code> role alone is not sufficient for this case; profile documents themselves are not restored.<a id="mongodb-backup--cite-60-2" class="citation-ref" href="#mongodb-backup--source-60" aria-label="Source 60">[60]</a><a id="mongodb-backup--cite-85-1" class="citation-ref" href="#mongodb-backup--source-85" aria-label="Source 85">[85]</a> A failed restore can leave partial data. Do not retry over it and assume duplicate errors are harmless; preserve logs, discard only the explicitly identified disposable target, and rerun into a clean target.<a id="mongodb-backup--cite-3-4" class="citation-ref" href="#mongodb-backup--source-3" aria-label="Source 3">[3]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Backup and recovery: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Tool option</th>
+<th>Scope / caution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--archive=FILE</code>, <code>--gzip</code></td>
+<td>Single archive plus compression; supply matching restore options</td>
+</tr>
+<tr>
+<td><code>--db</code>, <code>--collection</code></td>
+<td>Limits dump scope; incompatible with full consistent oplog route</td>
+</tr>
+<tr>
+<td><code>--dumpDbUsersAndRoles</code></td>
+<td>Explicit database user/role export; security-sensitive</td>
+</tr>
+<tr>
+<td><code>--nsInclude</code></td>
+<td>Restore namespace selection; quote wildcards from the shell</td>
+</tr>
+<tr>
+<td><code>--nsFrom</code>, <code>--nsTo</code></td>
+<td>Namespace rewrite; not allowed with oplog replay</td>
+</tr>
+<tr>
+<td><code>--stopOnError</code></td>
+<td>Stop on write errors; does not roll back already restored documents</td>
+</tr>
+<tr>
+<td><code>--drop</code></td>
+<td>Drops collections present in backup, not unrelated destination collections</td>
+</tr>
+<tr>
+<td><code>--config=FILE</code></td>
+<td>Tools sensitive-options YAML alternative; restrict permissions</td>
+</tr>
+</tbody>
+</table></div>
+<p>If restoring <code>admin</code> with <code>--drop</code>, users are replaced and authentication can fail midway unless the required existing/backup credentials work. Never use that flag casually on an operational server. Restored view pipelines and cross-namespace references must be checked after namespace rewriting, not assumed to follow application naming changes.<a id="mongodb-backup--cite-2-5" class="citation-ref" href="#mongodb-backup--source-2" aria-label="Source 2">[2]</a><a id="mongodb-backup--cite-3-5" class="citation-ref" href="#mongodb-backup--source-3" aria-label="Source 3">[3]</a></p>
+
+<h2 id="oplog">Capture/replay a replica-set dump window</h2>
+<p>Use this route for a <strong>full single replica set</strong>, not <code>mongos</code> or a whole sharded cluster. Confirm oplog history spans the dump, sufficient disk, stable topology and no prohibited DDL/user/role/default-concern changes during the dump. An oplog rollover or prohibited operation makes the attempt unusable; inspect the tool exit/log rather than preserving a partial dump as “success.”<a id="mongodb-backup--cite-2-6" class="citation-ref" href="#mongodb-backup--source-2" aria-label="Source 2">[2]</a><a id="mongodb-backup--cite-31-1" class="citation-ref" href="#mongodb-backup--source-31" aria-label="Source 31">[31]</a></p>
+<p>The host names/CA come from the <a href="mongodb-replication.html#setup">secured replica set</a>. On the backup worker:</p>
+<pre tabindex="0" role="region" aria-label="Backup and recovery: code 3, horizontally scrollable"><code class="language-bash">mongodump --uri='mongodb://db1.example.net:27017,db2.example.net:27017,db3.example.net:27017/?replicaSet=rs0&amp;authSource=admin' \
+  --username backup --ssl --sslCAFile=/etc/mongodb/tls/ca.pem \
+  --oplog --out=/srv/backups/mongodb/rs0-full-001
+</code></pre>
+<p>Do not add <code>--db</code>, <code>--collection</code>, or query filters. Ordinary dump metadata recreates indexes/views; the root <code>oplog.bson</code> carries captured changes. Freeze schema and privilege changes during this window even though ordinary application writes may continue. A full dump includes sensitive user/role definitions; protect it accordingly.<a id="mongodb-backup--cite-2-7" class="citation-ref" href="#mongodb-backup--source-2" aria-label="Source 2">[2]</a></p>
+<p><strong>Destination-only privilege escalation for recovery.</strong> Use a fresh isolated 27018 instance, not the populated target of the preceding exercise. Bootstrap its administrator with the unique name <code>drill_useradmin</code> instead of <code>useradmin</code>, and create <code>drill_restore</code> with the ordinary <code>restore</code> role. Confirm neither name occurs in the source backup; select different names if they do. Do not create the other source-named bootstrap accounts on this destination. Authenticated as <code>drill_useradmin</code>, add the temporary replay role below. Oplog replay requires broader access than the ordinary <code>restore</code> role:[60]<a id="mongodb-backup--cite-85-2" class="citation-ref" href="#mongodb-backup--source-85" aria-label="Source 85">[85]</a></p>
+<pre tabindex="0" role="region" aria-label="Backup and recovery: code 4, horizontally scrollable"><code class="language-javascript">use admin
+db.createRole({role: "oplogReplayOnlyForDrill", privileges: [
+  {resource: {anyResource: true}, actions: ["anyAction"]}
+], roles: []});
+db.grantRolesToUser("drill_restore", [{role: "oplogReplayOnlyForDrill", db: "admin"}]);
+</code></pre>
+<p>Restore the <strong>entire</strong> dump into this otherwise empty isolated deployment. Its bootstrap users must not conflict with source users carrying different credentials: establish the credential/role restoration plan before running, and never experiment against production <code>admin</code>.<a id="mongodb-backup--cite-3-6" class="citation-ref" href="#mongodb-backup--source-3" aria-label="Source 3">[3]</a><a id="mongodb-backup--cite-60-3" class="citation-ref" href="#mongodb-backup--source-60" aria-label="Source 60">[60]</a></p>
+<pre tabindex="0" role="region" aria-label="Backup and recovery: code 5, horizontally scrollable"><code class="language-bash">mongorestore --host 127.0.0.1 --port 27018 --username drill_restore \
+  --authenticationDatabase admin --dir=/srv/backups/mongodb/rs0-full-001 \
+  --oplogReplay --stopOnError
+</code></pre>
+<p>No namespace filter/rewrite with <code>--oplogReplay</code>. Retain source recovery credentials securely for post-restore administration; verify whether the restore identity/role changed, then revoke/remove the temporary replay privilege using the effective administrator. The distinct destination recovery identities above avoid name collisions, but still require a post-restore access review. Revoke the temporary role from <code>drill_restore</code>, remove the temporary role, and disable/remove the recovery accounts only after proving an approved source administrator can authenticate on the restored target. Do not remove your sole working administrator.<a id="mongodb-backup--cite-3-7" class="citation-ref" href="#mongodb-backup--source-3" aria-label="Source 3">[3]</a><a id="mongodb-backup--cite-60-4" class="citation-ref" href="#mongodb-backup--source-60" aria-label="Source 60">[60]</a></p>
+<p><code>--oplogLimit</code> is not a universal “restore to any timestamp” switch. The dump captures only its own window, not earlier consistent baselines or later writes; arbitrary truncation can produce inconsistent data. Continuous PITR needs a verified base plus uninterrupted, correctly ordered retained history and a supported recovery process. Do not build it by copying random oplog BSON and claiming parity with a managed backup service.<a id="mongodb-backup--cite-3-8" class="citation-ref" href="#mongodb-backup--source-3" aria-label="Source 3">[3]</a></p>
+
+<h2 id="physical">Physical snapshot and cold restore</h2>
+<p>A physical backup contains storage-engine state. Keep all data and journal files coherent. For online snapshots, use an atomic storage snapshot across the required volumes; if data and journal are separated, lock/suspend writes as documented. Snapshot copy-on-write space must survive until the full backup copy completes. A snapshot on the same failed disk is not offsite protection.<a id="mongodb-backup--cite-21-3" class="citation-ref" href="#mongodb-backup--source-21" aria-label="Source 21">[21]</a></p>
+<p>A simple self-hosted <strong>cold standalone</strong> route avoids storage-vendor snapshot syntax. Have sudo access, a write pause, a clean backup destination and a supported filesystem. Stop the source cleanly, verify termination, then copy the whole directory:</p>
+<pre tabindex="0" role="region" aria-label="Backup and recovery: code 6, horizontally scrollable"><code class="language-bash">sudo systemctl stop mongod
+sudo systemctl is-active mongod
+sudo install -d -o root -g root -m 700 /srv/backups/mongodb
+sudo mkdir -m 700 /srv/backups/mongodb/cold-001
+sudo cp -a /var/lib/mongo/. /srv/backups/mongodb/cold-001/
+sudo systemctl start mongod
+</code></pre>
+<p>Do not proceed from <code>is-active</code> alone if a separate manually launched process can own the path. Record successful copy/ownership and source restart checks, then encrypt/checksum/copy the artifact off-host. Record numeric UID/GID, mount identity, SELinux local rules and policy revision alongside config/unit/TLS key identifiers (not private key contents). On an isolated recovery host, stop <code>mongod-restore</code>, move its disposable previous directory aside, create an empty owned <code>/srv/mongodb/restore</code>, and copy the full backup there. Keep the original backup read-only; start only a working copy with the matching storage options, bound to loopback at 27018.<a id="mongodb-backup--cite-21-4" class="citation-ref" href="#mongodb-backup--source-21" aria-label="Source 21">[21]</a><a id="mongodb-backup--cite-22-2" class="citation-ref" href="#mongodb-backup--source-22" aria-label="Source 22">[22]</a></p>
+<p>The <a href="mongodb-instances.html#selinux-custom">restore-service policy gate</a> applies to physical restores too. Copying preserved labels/numeric owners from the source does not prove destination correctness. On the <strong>stopped disposable target only</strong>, set the restored tree to that host’s <code>mongod:mongod</code>, apply its persistent dbPath mapping with <code>restorecon</code>, and verify the mount, DAC, effective labels and confined startup. Do not recursively relabel the retained immutable backup or expose restored replica identities to production.<a id="mongodb-backup--cite-100-1" class="citation-ref" href="#mongodb-backup--source-100" aria-label="Source 100">[100]</a><a id="mongodb-backup--cite-110-1" class="citation-ref" href="#mongodb-backup--source-110" aria-label="Source 110">[110]</a></p>
+<pre tabindex="0" role="region" aria-label="Backup and recovery: code 7, horizontally scrollable"><code class="language-bash"># Target only; the complete backup has already been copied and validated.
+sudo chown -R mongod:mongod /srv/mongodb/restore
+sudo restorecon -Rv /srv/mongodb/restore
+sudo ls -ldZ /srv/mongodb/restore
+sudo systemctl start mongod-restore
+sudo ps -eZ | grep mongod
+sudo ausearch -m AVC,USER_AVC -ts recent
+</code></pre>
+<p>For a <strong>replica-set physical backup</strong>, node-local replication identity comes with the files. Do not start a restored member on the production network. To form a new set from it:[22]</p>
+<ol>
+<li>Work on the isolated copied directory; start it as a standalone, preserving storage/TLS/auth settings but without production replica-set membership. Authenticate using restored administrative credentials.</li>
+<li>On this isolated copy only, confirm host/path/port, then remove old node-local replication metadata:</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Backup and recovery: code 8, horizontally scrollable"><code class="language-javascript">// DESTRUCTIVE: isolated restored copy only, never a live member
+// Requires authorized administrative access to local.
+db.getSiblingDB("local").dropDatabase();
+</code></pre>
+<ol start="3">
+<li>Shut down cleanly. Add a <strong>new</strong> <code>replication.replSetName</code>, internal key and isolated host addresses; restart, initiate a single-member recovery set, then add empty secondaries for initial sync.</li>
+<li>Validate the restored data and newly built topology before cutover. Never clone the same stale membership into several running nodes and hope election makes it safe.</li>
+</ol>
+<p>The <code>local</code> removal is not a corruption repair or routine replica-member replacement. On Enterprise encrypted storage with AES256-GCM, cold-restore key rollover has additional mandatory requirements; this Community/OS-encrypted baseline does not cover that feature by pretending the same copy is sufficient.<a id="mongodb-backup--cite-11-1" class="citation-ref" href="#mongodb-backup--source-11" aria-label="Source 11">[11]</a><a id="mongodb-backup--cite-22-3" class="citation-ref" href="#mongodb-backup--source-22" aria-label="Source 22">[22]</a></p>
+
+<h2 id="sharded-backup">Sharded backup means coordinated backup</h2>
+<p>Stopping the balancer alone does not stop application writes. Exact cluster-wide consistency requires no in-flight operations and coordinated quiescence of shards <strong>and config-server metadata</strong>. Different independent per-shard dumps/snapshots can cut a cross-shard transaction or migration at different points.<a id="mongodb-backup--cite-26-1" class="citation-ref" href="#mongodb-backup--source-26" aria-label="Source 26">[26]</a></p>
+<p>For the documented 8.0 filesystem route, schedule an outage/window, block new writers and DDL/resharding, wait for in-flight work, and use the appropriate maintenance identities:</p>
+<ol>
+<li>On <code>mongos</code>, <code>sh.stopBalancer()</code>; verify <code>sh.getBalancerState()</code> is false and no balancing round/migration remains.</li>
+<li>Run <code>db.getSiblingDB("admin").fsyncLock()</code> on <code>mongos</code> <strong>and</strong> separately on the config-server replica-set primary. The router lock covers shard writes; config metadata must also be locked. Confirm lock results and the documented <code>$currentOp</code> lock diagnostics on both endpoints.</li>
+<li>Snapshot the config-server primary and every shard primary, including each node’s coherent data/journal volumes. Record one topology-wide backup manifest; do not omit the config backup.</li>
+<li>In guaranteed cleanup, issue <code>db.getSiblingDB("admin").fsyncUnlock()</code> on both locked endpoints, verify unlocked state, then restore the prior balancer state and admit traffic.</li>
+<li>If any snapshot/lock fails, mark the <strong>whole set</strong> incomplete, unlock what was locked and repeat from a clean window. Do not label the surviving shard files a consistent cluster backup.<a id="mongodb-backup--cite-26-2" class="citation-ref" href="#mongodb-backup--source-26" aria-label="Source 26">[26]</a></li>
+</ol>
+<p><code>fsyncLock</code> disrupts writes; retain an independent operator connection and a time-bounded recovery plan. Storage-provider snapshot commands depend on the actual volume layout and are not invented here. Restoring a sharded physical backup must rebuild the matching topology/config metadata in isolation; do not apply the single-replica-set <code>local</code> recipe blindly to a whole cluster. Ops Manager/Atlas provide separately licensed/managed coordinated alternatives; they are options, not Community commands.<a id="mongodb-backup--cite-22-4" class="citation-ref" href="#mongodb-backup--source-22" aria-label="Source 22">[22]</a><a id="mongodb-backup--cite-26-3" class="citation-ref" href="#mongodb-backup--source-26" aria-label="Source 26">[26]</a><a id="mongodb-backup--cite-60-5" class="citation-ref" href="#mongodb-backup--source-60" aria-label="Source 60">[60]</a></p>
+
+<h2 id="managed">Managed continuous backup is a separate service</h2>
+<p>Atlas Cloud Backup is a configured service feature, unavailable on Free clusters. Its snapshot storage uses the cloud provider; cross-region copies, retention and restoration permissions remain explicit customer decisions. A cluster existing in Atlas does not prove a recoverable backup policy exists.<a id="mongodb-backup--cite-81-1" class="citation-ref" href="#mongodb-backup--source-81" aria-label="Source 81">[81]</a></p>
+<p>Atlas point-in-time restore requires Continuous Cloud Backup on an eligible dedicated cluster and a timestamp within the retained restore window; scheduled snapshots alone do not establish that capability.<a id="mongodb-backup--cite-93-1" class="citation-ref" href="#mongodb-backup--source-93" aria-label="Source 93">[93]</a><a id="mongodb-backup--cite-97-1" class="citation-ref" href="#mongodb-backup--source-97" aria-label="Source 97">[97]</a> Select the source time and compatible destination, rehearse application cutover, and validate the restored business checkpoint. Sharded restores require topology-aware handling, not independent selection of convenient shard timestamps.<a id="mongodb-backup--cite-90-1" class="citation-ref" href="#mongodb-backup--source-90" aria-label="Source 90">[90]</a><a id="mongodb-backup--cite-93-2" class="citation-ref" href="#mongodb-backup--source-93" aria-label="Source 93">[93]</a></p>
+<p>Ops Manager coordinates snapshot capture and oplog collection using deployed agents and its backup storage. It is an independently installed/operated backup product, not an additional flag on Community <code>mongodump</code>. Confirm deployment-version support, subscription/entitlements, agent reachability, storage capacity and recovery credentials before choosing it. Neither service removes the need to test restores or protect deletion authority.<a id="mongodb-backup--cite-83-1" class="citation-ref" href="#mongodb-backup--source-83" aria-label="Source 83">[83]</a></p>
+
+<h2 id="validation">Restore acceptance</h2>
+<p>Use <code>operator</code> with <code>readWrite</code>/<code>dbAdmin</code> on the restored database, not just the write-oriented <code>restore</code> account. On 27018, grant these destination-only roles as needed via <code>useradmin</code> and revoke after the drill.<a id="mongodb-backup--cite-18-1" class="citation-ref" href="#mongodb-backup--source-18" aria-label="Source 18">[18]</a><a id="mongodb-backup--cite-59-1" class="citation-ref" href="#mongodb-backup--source-59" aria-label="Source 59">[59]</a></p>
+<pre tabindex="0" role="region" aria-label="Backup and recovery: code 9, horizontally scrollable"><code class="language-javascript">const restored = db.getSiblingDB("shop_restore");
+restored.getCollectionInfos();
+restored.orders.getIndexes();
+restored.orders.countDocuments({});
+restored.orders.aggregate([
+  {$group: {_id: "$tenantId", orders: {$sum: 1}, amount: {$sum: "$total"}}},
+  {$sort: {_id: 1}}
+]).toArray();
+restored.runCommand({validate: "orders", full: true});
+</code></pre>
+<p>For full oplog/physical restores the database is <code>shop</code>, not <code>shop_restore</code>. <code>validate</code> can be expensive and affect concurrency; run the full check on the isolated copy. Acceptance includes no tool errors, engine validation, expected BSON types, validators, indexes/uniqueness, views, users/roles, checkpoint-matched business totals, representative application reads/writes and measured restore time. Compare to the <strong>backup checkpoint</strong>, not a source that continued changing.<a id="mongodb-backup--cite-3-9" class="citation-ref" href="#mongodb-backup--source-3" aria-label="Source 3">[3]</a><a id="mongodb-backup--cite-59-2" class="citation-ref" href="#mongodb-backup--source-59" aria-label="Source 59">[59]</a></p>
+<p>Keep the source authoritative until acceptance. A failed drill leaves the source untouched; repair backup policy rather than deleting the only known-good copy. Once a restored system accepts new writes, rollback requires reconciliation, not simply redirecting clients to an older snapshot.</p>
+
+<h2 id="mongodb-backup--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mongodb-backup--source-2">[2] <a href="https://www.mongodb.com/docs/database-tools/mongodump">https://www.mongodb.com/docs/database-tools/mongodump</a> — mongodump - Database Tools - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-2-1" aria-label="Return to citation 2, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-backup--cite-2-2" aria-label="Return to citation 2, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-backup--cite-2-3" aria-label="Return to citation 2, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-backup--cite-2-4" aria-label="Return to citation 2, occurrence 4">↩4</a><a class="citation-return" href="#mongodb-backup--cite-2-5" aria-label="Return to citation 2, occurrence 5">↩5</a><a class="citation-return" href="#mongodb-backup--cite-2-6" aria-label="Return to citation 2, occurrence 6">↩6</a><a class="citation-return" href="#mongodb-backup--cite-2-7" aria-label="Return to citation 2, occurrence 7">↩7</a></span></div><div class="source-entry" id="mongodb-backup--source-3">[3] <a href="https://www.mongodb.com/docs/database-tools/mongorestore">https://www.mongodb.com/docs/database-tools/mongorestore</a> — mongorestore - Database Tools - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-3-1" aria-label="Return to citation 3, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-backup--cite-3-2" aria-label="Return to citation 3, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-backup--cite-3-3" aria-label="Return to citation 3, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-backup--cite-3-4" aria-label="Return to citation 3, occurrence 4">↩4</a><a class="citation-return" href="#mongodb-backup--cite-3-5" aria-label="Return to citation 3, occurrence 5">↩5</a><a class="citation-return" href="#mongodb-backup--cite-3-6" aria-label="Return to citation 3, occurrence 6">↩6</a><a class="citation-return" href="#mongodb-backup--cite-3-7" aria-label="Return to citation 3, occurrence 7">↩7</a><a class="citation-return" href="#mongodb-backup--cite-3-8" aria-label="Return to citation 3, occurrence 8">↩8</a><a class="citation-return" href="#mongodb-backup--cite-3-9" aria-label="Return to citation 3, occurrence 9">↩9</a></span></div><div class="source-entry" id="mongodb-backup--source-11">[11] <a href="https://www.mongodb.com/docs/v8.0/core/security-encryption-at-rest">https://www.mongodb.com/docs/v8.0/core/security-encryption-at-rest</a> — Encryption at Rest - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-11-1" aria-label="Return to citation 11, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-backup--source-18">[18] <a href="https://www.mongodb.com/docs/v8.0/tutorial/manage-users-and-roles">https://www.mongodb.com/docs/v8.0/tutorial/manage-users-and-roles</a> — Manage Users and Roles on Self-Managed Deployments - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-18-1" aria-label="Return to citation 18, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-backup--source-21">[21] <a href="https://www.mongodb.com/docs/v8.0/tutorial/backup-with-filesystem-snapshots">https://www.mongodb.com/docs/v8.0/tutorial/backup-with-filesystem-snapshots</a> — Back Up a Self-Managed Deployment with Filesystem Snapshots - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-21-1" aria-label="Return to citation 21, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-backup--cite-21-2" aria-label="Return to citation 21, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-backup--cite-21-3" aria-label="Return to citation 21, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-backup--cite-21-4" aria-label="Return to citation 21, occurrence 4">↩4</a></span></div><div class="source-entry" id="mongodb-backup--source-22">[22] <a href="https://www.mongodb.com/docs/v8.0/tutorial/restore-replica-set-from-backup">https://www.mongodb.com/docs/v8.0/tutorial/restore-replica-set-from-backup</a> — Restore a Self-Managed Replica Set from MongoDB Backups - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-22-1" aria-label="Return to citation 22, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-backup--cite-22-2" aria-label="Return to citation 22, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-backup--cite-22-3" aria-label="Return to citation 22, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-backup--cite-22-4" aria-label="Return to citation 22, occurrence 4">↩4</a></span></div><div class="source-entry" id="mongodb-backup--source-26">[26] <a href="https://www.mongodb.com/docs/v8.0/tutorial/backup-sharded-cluster-with-filesystem-snapshots">https://www.mongodb.com/docs/v8.0/tutorial/backup-sharded-cluster-with-filesystem-snapshots</a> — Back Up a Sharded Cluster with File System Snapshots - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-26-1" aria-label="Return to citation 26, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-backup--cite-26-2" aria-label="Return to citation 26, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-backup--cite-26-3" aria-label="Return to citation 26, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-backup--source-31">[31] <a href="https://www.mongodb.com/docs/v8.0/core/replica-set-oplog">https://www.mongodb.com/docs/v8.0/core/replica-set-oplog</a> — Replica Set Oplog - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-31-1" aria-label="Return to citation 31, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-backup--source-59">[59] <a href="https://www.mongodb.com/docs/v8.0/reference/method/db.collection.validate">https://www.mongodb.com/docs/v8.0/reference/method/db.collection.validate</a> — Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-59-1" aria-label="Return to citation 59, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-backup--cite-59-2" aria-label="Return to citation 59, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-backup--source-60">[60] <a href="https://www.mongodb.com/docs/database-tools/mongorestore/mongorestore-behavior-access-usage">https://www.mongodb.com/docs/database-tools/mongorestore/mongorestore-behavior-access-usage</a> — mongorestore Behavior, Access, and Usage - Database Tools - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-60-1" aria-label="Return to citation 60, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-backup--cite-60-2" aria-label="Return to citation 60, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-backup--cite-60-3" aria-label="Return to citation 60, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-backup--cite-60-4" aria-label="Return to citation 60, occurrence 4">↩4</a><a class="citation-return" href="#mongodb-backup--cite-60-5" aria-label="Return to citation 60, occurrence 5">↩5</a></span></div><div class="source-entry" id="mongodb-backup--source-69">[69] <a href="https://raw.githubusercontent.com/mongodb/mongo-tools/100.17.0/mongodump/options.go">https://raw.githubusercontent.com/mongodb/mongo-tools/100.17.0/mongodump/options.go</a> — MongoDB Database Tools 100.17.0 mongodump options
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-69-1" aria-label="Return to citation 69, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-backup--source-70">[70] <a href="https://raw.githubusercontent.com/mongodb/mongo-tools/100.17.0/mongorestore/options.go">https://raw.githubusercontent.com/mongodb/mongo-tools/100.17.0/mongorestore/options.go</a> — MongoDB Database Tools 100.17.0 mongorestore options
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-70-1" aria-label="Return to citation 70, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-backup--source-81">[81] <a href="https://www.mongodb.com/docs/atlas/backup/cloud-backup/overview">https://www.mongodb.com/docs/atlas/backup/cloud-backup/overview</a> — Back Up Your Cluster - Atlas - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-81-1" aria-label="Return to citation 81, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-backup--source-83">[83] <a href="https://www.mongodb.com/docs/ops-manager/current/core/backup-overview">https://www.mongodb.com/docs/ops-manager/current/core/backup-overview</a> — Backup Process - Ops Manager - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-83-1" aria-label="Return to citation 83, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-backup--source-85">[85] <a href="https://www.mongodb.com/docs/v8.0/reference/built-in-roles.md">https://www.mongodb.com/docs/v8.0/reference/built-in-roles.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-85-1" aria-label="Return to citation 85, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-backup--cite-85-2" aria-label="Return to citation 85, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-backup--source-90">[90] <a href="https://www.mongodb.com/docs/atlas/backup/cloud-backup/restore-overview.md">https://www.mongodb.com/docs/atlas/backup/cloud-backup/restore-overview.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-90-1" aria-label="Return to citation 90, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-backup--source-93">[93] <a href="https://www.mongodb.com/docs/atlas/backup/cloud-backup/restore-from-continuous.md">https://www.mongodb.com/docs/atlas/backup/cloud-backup/restore-from-continuous.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-93-1" aria-label="Return to citation 93, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-backup--cite-93-2" aria-label="Return to citation 93, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-backup--source-97">[97] <a href="https://www.mongodb.com/docs/atlas/backup/cloud-backup/dedicated-cluster-backup.md">https://www.mongodb.com/docs/atlas/backup/cloud-backup/dedicated-cluster-backup.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-97-1" aria-label="Return to citation 97, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-backup--source-100">[100] <a href="https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongodb-org.spec">https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongodb-org.spec</a> — MongoDB r8.0.29 RPM specification
+<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-backup--source-110">[110] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux</a> — RHEL 9 SELinux diagnostics and persistent contexts<span class="citation-returns"><a class="citation-return" href="#mongodb-backup--cite-110-1" aria-label="Return to citation 110, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mongodb-performance.html"><span>Previous · MongoDB</span><strong>Auditing and performance</strong></a></div><div><a rel="next" href="mongodb-replication.html"><span>Next · MongoDB</span><strong>Replica sets and high availability</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/recover.html">Explore Back up, then restore ↗</a><div class="current-group"><h2>In MongoDB</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mongodb-backup.html">Backup and recovery</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a><a href="mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></div><div><span>PostgreSQL</span><a href="postgresql-backup-recovery.html">Backup and point-in-time recovery</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

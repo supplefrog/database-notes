@@ -1,0 +1,331 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Users, processes and resource monitoring — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="os-users-processes"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../operating-systems.html">Operating systems</a><a href="../operating-systems.html">Work on the host</a></nav>
+<header class="reader-head"><p class="reader-context">OS <span aria-hidden="true">/</span> Work on the host</p><h1>Users, processes and resource monitoring</h1></header>
+<div class="reader-controls"><a href="../operating-systems.html">← Work on the host</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="OS chapters"><ol class="chapter-list"><li><a  href="../chapters/os-processes.html">Processes and scheduling</a></li><li><a  href="../chapters/os-memory.html">Memory and virtual memory</a></li><li><a  href="../chapters/os-kernel-devices.html">Devices, kernel services and isolation</a></li><li><a  href="../chapters/os-boot.html">From power-on to login</a></li><li><a  href="../chapters/os-linux-foundations.html">Linux distributions, terminals and shells</a></li><li><a  href="../chapters/os-shell-files.html">Finding, editing and protecting files</a></li><li><a aria-current="page" href="../chapters/os-users-processes.html">Users, processes and resource monitoring</a></li><li><a  href="../chapters/os-services.html">Systemd service types</a></li><li><a  href="../chapters/os-storage.html">Filesystems, RAID, directories and partitions</a></li><li><a  href="../chapters/os-networking.html">Networking, SSH and file transfer</a></li><li><a  href="../chapters/os-access-security.html">Access control, passwords and recovery</a></li><li><a  href="../chapters/os-windows.html">Windows tools and licensing</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#os-users-processes--section-1">Local users and groups</a><a class="level-2" href="#os-users-processes--section-2">Processes, signals and jobs</a><a class="level-2" href="#os-users-processes--section-3">top</a><a class="level-2" href="#os-users-processes--section-4">Memory and I/O monitoring</a><a class="level-2" href="#os-users-processes--section-5">Resource limits</a><a class="level-2" href="#os-users-processes--section-6">Package cleanup and RPM database recovery</a><a class="level-2" href="#os-users-processes--section-7">Sources</a></nav></details></div>
+<article class="prose"><p><span id="os-b-0457" class="source-anchor"></span></p>
+
+<h2 id="os-users-processes--section-1">Local users and groups</h2>
+<p>These are <strong>RHEL 9 local-account</strong> tools. Identity-service accounts need their own administration workflow. Before changing identity, record the UID/GID and groups, check running processes and file ownership, and preserve an independent administrative login. Deleting an account or reassigning an ID can orphan files or grant unintended access.<a id="os-users-processes--cite-8-1" class="citation-ref" href="#os-users-processes--source-8" aria-label="Source 8">[8]</a><a id="os-users-processes--cite-35-1" class="citation-ref" href="#os-users-processes--source-35" aria-label="Source 35">[35]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Users, processes and resource monitoring: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>useradd USER</code></td>
+<td>Create a local account using configured defaults; set the intended options explicitly</td>
+</tr>
+<tr>
+<td><code>adduser USER</code></td>
+<td>Distribution-dependent frontend: RHEL commonly provides useradd-equivalent behavior; Debian’s adduser is a higher-level, usually interactive tool</td>
+</tr>
+<tr>
+<td><code>useradd -g GROUP USER</code></td>
+<td>Choose an existing primary group; the default primary-group policy varies</td>
+</tr>
+<tr>
+<td><code>useradd -G group1,group2 USER</code></td>
+<td>Choose supplementary groups</td>
+</tr>
+<tr>
+<td><code>useradd -m USER</code></td>
+<td>Create the home directory if needed</td>
+</tr>
+<tr>
+<td><code>useradd -m -d /home/custom USER</code></td>
+<td>Set and create a custom home path; verify path ownership and SELinux labeling</td>
+</tr>
+<tr>
+<td><code>passwd USER</code></td>
+<td>Set/change a local password interactively; never put it on a command line</td>
+</tr>
+<tr>
+<td><code>usermod -g GROUP USER</code></td>
+<td>Change primary group; audit ownership implications</td>
+</tr>
+<tr>
+<td><code>usermod -G group1,group2 USER</code></td>
+<td><strong>Replace</strong> supplementary membership with the specified list</td>
+</tr>
+<tr>
+<td><code>usermod -aG group1,group2 USER</code></td>
+<td>Append supplementary memberships without discarding existing ones</td>
+</tr>
+<tr>
+<td><code>usermod -d /home/new USER</code></td>
+<td>Change recorded home path; does not move contents unless the appropriate move option is used</td>
+</tr>
+<tr>
+<td><code>userdel USER</code></td>
+<td>Delete the account; does not by itself remove all files or terminate every owned workload.<a id="os-users-processes--cite-104-1" class="citation-ref" href="#os-users-processes--source-104" aria-label="Source 104">[104]</a></td>
+</tr>
+<tr>
+<td><code>gpasswd -M user1,user2,user3 GROUP</code></td>
+<td><strong>Replace</strong> the group’s member list, not merely append users</td>
+</tr>
+<tr>
+<td><code>groups USER</code> / <code>id USER</code></td>
+<td>Inspect groups / UID, primary GID and supplementary groups</td>
+</tr>
+<tr>
+<td><code>groupadd GROUP</code></td>
+<td>Create a group.<a id="os-users-processes--cite-105-1" class="citation-ref" href="#os-users-processes--source-105" aria-label="Source 105">[105]</a></td>
+</tr>
+<tr>
+<td><code>groupadd -g 1003 GROUP</code></td>
+<td>Example explicit GID; verify that it is available and permitted by local policy</td>
+</tr>
+<tr>
+<td><code>groupmod -n NEW OLD</code></td>
+<td>Rename a group.<a id="os-users-processes--cite-106-1" class="citation-ref" href="#os-users-processes--source-106" aria-label="Source 106">[106]</a></td>
+</tr>
+<tr>
+<td><code>groupmod -g NEWGID GROUP</code></td>
+<td>Change GID; existing file ownership may need a carefully scoped migration</td>
+</tr>
+<tr>
+<td><code>groupdel GROUP</code></td>
+<td>Remove a group; check primary-group dependencies and files first.<a id="os-users-processes--cite-107-1" class="citation-ref" href="#os-users-processes--source-107" aria-label="Source 107">[107]</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>Verify the resulting account with <code>id</code> and a new login session. Existing processes do not automatically gain a newly assigned supplementary group. Avoid removing the only working administrator or assigning IDs already used by files/central identities.<a id="os-users-processes--cite-35-2" class="citation-ref" href="#os-users-processes--source-35" aria-label="Source 35">[35]</a><a id="os-users-processes--cite-36-1" class="citation-ref" href="#os-users-processes--source-36" aria-label="Source 36">[36]</a><a id="os-users-processes--cite-63-1" class="citation-ref" href="#os-users-processes--source-63" aria-label="Source 63">[63]</a></p>
+<p><span id="os-b-0479" class="source-anchor"></span></p>
+
+<h2 id="os-users-processes--section-2">Processes, signals and jobs</h2>
+<p>Start with a read-only process listing and verify owner, PID and command before signalling. A PID can be reused; recheck immediately before the action. For a managed service, prefer its documented service-stop procedure to killing a random child.<a id="os-users-processes--cite-38-1" class="citation-ref" href="#os-users-processes--source-38" aria-label="Source 38">[38]</a><a id="os-users-processes--cite-37-1" class="citation-ref" href="#os-users-processes--source-37" aria-label="Source 37">[37]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Users, processes and resource monitoring: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command or key</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ps</code></td>
+<td>Snapshot of selected processes; selection and output depend on options</td>
+</tr>
+<tr>
+<td><code>ps ux</code></td>
+<td>BSD-style user format, including the invoking user’s processes without a controlling terminal; avoid the ambiguous mixed spelling <code>ps -ux</code></td>
+</tr>
+<tr>
+<td><code>ps a</code></td>
+<td>BSD-style selection expands to terminal-associated processes of other users</td>
+</tr>
+<tr>
+<td><code>ps -a</code></td>
+<td>Unix-style selection of terminal-associated processes excluding session leaders</td>
+</tr>
+<tr>
+<td><code>ps aux</code></td>
+<td>Common BSD-style all-process snapshot in user format</td>
+</tr>
+<tr>
+<td><code>kill PID</code> / <code>kill -s TERM PID</code></td>
+<td>Send SIGTERM; default action is termination, but a program can handle or ignore it</td>
+</tr>
+<tr>
+<td><code>kill -s KILL PID</code></td>
+<td>SIGKILL; cannot be caught, blocked or ignored. No application cleanup; use only after an approved graceful-stop attempt and data-risk assessment</td>
+</tr>
+<tr>
+<td><code>kill -s CONT PID</code></td>
+<td>Continue a stopped process; does not choose foreground/background terminal membership</td>
+</tr>
+<tr>
+<td><code>kill -l</code></td>
+<td>List signal names/numbers for the platform</td>
+</tr>
+<tr>
+<td><code>pkill -x NAME</code></td>
+<td>Signal exact matching process names; can still affect multiple instances. Inspect matches first rather than using broad patterns.<a id="os-users-processes--cite-108-1" class="citation-ref" href="#os-users-processes--source-108" aria-label="Source 108">[108]</a></td>
+</tr>
+<tr>
+<td><code>Ctrl+c</code></td>
+<td>Terminal normally sends SIGINT to the foreground process group; default termination, catchable/ignorable</td>
+</tr>
+<tr>
+<td><code>Ctrl+z</code></td>
+<td>Terminal normally sends <strong>SIGTSTP</strong>, default stop; catchable/ignorable. The shell regains control; the job is stopped, not running in the background</td>
+</tr>
+<tr>
+<td><code>Ctrl+\</code></td>
+<td>Terminal normally sends SIGQUIT, whose default action is termination with a core dump when enabled; dumps can contain secrets</td>
+</tr>
+<tr>
+<td><code>jobs</code></td>
+<td>List jobs known to this shell, including stopped and background-running jobs</td>
+</tr>
+<tr>
+<td><code>fg %1</code></td>
+<td>Bring shell job 1 to the foreground and continue it if stopped</td>
+</tr>
+<tr>
+<td><code>bg %1</code></td>
+<td>Continue shell job 1 in the background; terminal access may still stop it</td>
+</tr>
+<tr>
+<td><code>crontab -l</code> / <code>crontab -e</code></td>
+<td>List/edit the current user’s schedule; <code>crontab -u USER -l</code> targets another user when authorized</td>
+</tr>
+<tr>
+<td><code>* * * * * command</code></td>
+<td>User-crontab minute, hour, day-of-month, month, day-of-week, then command</td>
+</tr>
+<tr>
+<td><code>@monthly command</code></td>
+<td>Cronie monthly shorthand; first day of the month at midnight</td>
+</tr>
+<tr>
+<td><code>sar -u 1 3</code></td>
+<td>sysstat CPU-utilization samples, one second apart, three reports.<a id="os-users-processes--cite-115-1" class="citation-ref" href="#os-users-processes--source-115" aria-label="Source 115">[115]</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>Use signal <strong>names</strong> in portable recipes; numbers such as 9/15/18/20 are architecture-dependent except where a particular platform defines them. SIGSTOP, unlike SIGTSTP, cannot be caught or ignored. Shell <code>fg</code>/<code>bg</code> are job-control operations, not a property chosen by SIGCONT.<a id="os-users-processes--cite-37-2" class="citation-ref" href="#os-users-processes--source-37" aria-label="Source 37">[37]</a><a id="os-users-processes--cite-18-1" class="citation-ref" href="#os-users-processes--source-18" aria-label="Source 18">[18]</a></p>
+<p>Cron runs with a limited environment: use deliberate paths, logging and permissions; avoid scheduling a command that overlaps its previous run or exposes credentials. In a user crontab there is no extra username field. If both day-of-month and day-of-week are restricted, Cronie normally matches either field, not their intersection. <code>sar</code> history requires configured data collection; installing a tool does not create past data.<a id="os-users-processes--cite-56-1" class="citation-ref" href="#os-users-processes--source-56" aria-label="Source 56">[56]</a><a id="os-users-processes--cite-51-1" class="citation-ref" href="#os-users-processes--source-51" aria-label="Source 51">[51]</a></p>
+<p><span id="os-b-0502" class="source-anchor"></span></p>
+
+<h2 id="os-users-processes--section-3">top</h2>
+<p><code>top</code> is an interactive view, not a historical audit. The following keys refer to procps-ng; consult its <code>h</code> help for the installed build.<a id="os-users-processes--cite-39-1" class="citation-ref" href="#os-users-processes--source-39" aria-label="Source 39">[39]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Users, processes and resource monitoring: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command/key</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>top -p PID</code></td>
+<td>Monitor a selected PID (a list can be supplied as supported)</td>
+</tr>
+<tr>
+<td><code>o</code>, then <code>COMMAND=chrome</code></td>
+<td>Add an “other filter” expression; comparison/filter behavior follows top’s rules</td>
+</tr>
+<tr>
+<td><code>L</code></td>
+<td>Locate a string in the current display; not the same operation as filtering</td>
+</tr>
+<tr>
+<td><code>k</code></td>
+<td>Prompt to signal a process; an authorized state-changing action</td>
+</tr>
+<tr>
+<td><code>r</code></td>
+<td>Prompt to renice a process; privilege limits apply</td>
+</tr>
+<tr>
+<td><code>h</code></td>
+<td>Interactive help</td>
+</tr>
+</tbody>
+</table></div>
+<p>Filtering is not inherently superior to locating: filter to restrict visible rows, locate to navigate. For <code>k</code> or <code>r</code>, verify the process and consider service impact before confirming.</p>
+<p><span id="os-b-0518" class="source-anchor"></span></p>
+
+<h2 id="os-users-processes--section-4">Memory and I/O monitoring</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Users, processes and resource monitoring: table 4, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vmstat 1 3</code></td>
+<td>Process, memory, paging, I/O and CPU statistics; rate counters in the first report are averages since boot, then interval averages; process and memory counts are instantaneous in both</td>
+</tr>
+<tr>
+<td><code>iostat 1 3</code></td>
+<td>sysstat CPU/device I/O statistics; first report covers since boot, subsequent reports the interval. Select the correct device layer</td>
+</tr>
+</tbody>
+</table></div>
+<p>A busy logical device may share underlying physical storage with others. Correlate memory pressure, paging, I/O latency and application behavior rather than diagnosing from one utilization number.<a id="os-users-processes--cite-71-1" class="citation-ref" href="#os-users-processes--source-71" aria-label="Source 71">[71]</a><a id="os-users-processes--cite-72-1" class="citation-ref" href="#os-users-processes--source-72" aria-label="Source 72">[72]</a><a id="os-users-processes--cite-1-1" class="citation-ref" href="#os-users-processes--source-1" aria-label="Source 1">[1]</a></p>
+<p><span id="os-b-0523" class="source-anchor"></span></p>
+
+<h2 id="os-users-processes--section-5">Resource limits</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Users, processes and resource monitoring: table 5, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Interface</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ulimit -S -a</code> / <code>ulimit -H -a</code></td>
+<td>Show this Bash process’s soft / hard resource limits</td>
+</tr>
+<tr>
+<td><code>ulimit -S -n 4096</code></td>
+<td>Example request for a soft open-file limit, allowed only up to the applicable hard limit; applies to this shell and its future children</td>
+</tr>
+<tr>
+<td><code>ulimit -H -n VALUE</code></td>
+<td>Change the hard limit where permitted; an unprivileged shell generally cannot raise it again after lowering it</td>
+</tr>
+<tr>
+<td><code>/etc/security/limits.conf</code> and <code>/etc/security/limits.d/</code></td>
+<td>Limits for sessions that actually invoke <code>pam_limits</code>; not a global retroactive switch for every running process</td>
+</tr>
+<tr>
+<td>systemd <code>LimitNOFILE=</code></td>
+<td>Per-service process limit, configured in the service’s unit/drop-in</td>
+</tr>
+<tr>
+<td>systemd <code>MemoryMax=</code>, <code>CPUQuota=</code></td>
+<td>Cgroup-backed resource controls, different from <code>ulimit</code> process limits</td>
+</tr>
+</tbody>
+</table></div>
+<p>Choose limits from the workload’s needs, current usage and host budget; a larger limit is not free capacity. Back up prior policy, test with a fresh relevant login or a planned service restart, and verify the target process’s effective limits. Editing PAM limits does not automatically modify system services or existing sessions.<a id="os-users-processes--cite-18-2" class="citation-ref" href="#os-users-processes--source-18" aria-label="Source 18">[18]</a><a id="os-users-processes--cite-46-1" class="citation-ref" href="#os-users-processes--source-46" aria-label="Source 46">[46]</a><a id="os-users-processes--cite-55-1" class="citation-ref" href="#os-users-processes--source-55" aria-label="Source 55">[55]</a></p>
+<p>For grouped CPU/memory/I/O budgets, see <a href="os-kernel-devices.html#os-b-0122">cgroups</a>. systemd resource-control options should be checked against the installed manager/controller configuration.<a id="os-users-processes--cite-47-1" class="citation-ref" href="#os-users-processes--source-47" aria-label="Source 47">[47]</a></p>
+
+<h2 id="os-users-processes--section-6">Package cleanup and RPM database recovery</h2>
+<p>On RHEL 9, <code>yum</code> is a compatibility interface to DNF. <code>dnf autoremove</code> selects packages marked as dependencies that are no longer required according to package-manager state; that does <strong>not</strong> prove the application owner no longer needs them.<a id="os-users-processes--cite-50-1" class="citation-ref" href="#os-users-processes--source-50" aria-label="Source 50">[50]</a></p>
+<p>Preview before any approved cleanup:</p>
+<pre tabindex="0" role="region" aria-label="Users, processes and resource monitoring: code 1, horizontally scrollable"><code class="language-bash">sudo dnf --assumeno autoremove
+</code></pre>
+<p>Review every proposed removal and dependency, protect explicitly required packages, and have a tested recovery path before applying a removal transaction. Verify applications afterward.</p>
+<p><code>rpm --rebuilddb</code> / <code>rpmdb --rebuilddb</code> rebuilds the installed-package database; it does not reinstall files or repair arbitrary filesystem damage. Use only for a diagnosed database problem under the distribution’s recovery procedure: prevent concurrent package transactions, take a recoverable backup of the actual configured database, preserve logs and investigate storage errors first. <code>rpmdb --verifydb</code> verifies database integrity; it is not package-file verification. Recheck database queries and application/package health after recovery. Do not delete database files as a speculative “fix.”<a id="os-users-processes--cite-49-1" class="citation-ref" href="#os-users-processes--source-49" aria-label="Source 49">[49]</a></p>
+
+<h2 id="os-users-processes--section-7">Sources</h2>
+<div class="source-list"><div class="source-entry" id="os-users-processes--source-1">[1] <a href="https://docs.kernel.org/admin-guide/mm/concepts.html">https://docs.kernel.org/admin-guide/mm/concepts.html</a> — Linux memory concepts; version-independent concepts
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-8">[8] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/configuring_basic_system_settings/index">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/configuring_basic_system_settings/index</a> — RHEL 9
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-8-1" aria-label="Return to citation 8, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-18">[18] <a href="https://www.gnu.org/software/bash/manual/bash.html">https://www.gnu.org/software/bash/manual/bash.html</a> — GNU Bash reference; common Bash 5.x features only
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-18-1" aria-label="Return to citation 18, occurrence 1">↩1</a><a class="citation-return" href="#os-users-processes--cite-18-2" aria-label="Return to citation 18, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-users-processes--source-35">[35] <a href="https://man7.org/linux/man-pages/man8/usermod.8.html">https://man7.org/linux/man-pages/man8/usermod.8.html</a> — shadow-utils user modification
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-35-1" aria-label="Return to citation 35, occurrence 1">↩1</a><a class="citation-return" href="#os-users-processes--cite-35-2" aria-label="Return to citation 35, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-users-processes--source-36">[36] <a href="https://man7.org/linux/man-pages/man1/gpasswd.1.html">https://man7.org/linux/man-pages/man1/gpasswd.1.html</a> — shadow-utils group modification
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-36-1" aria-label="Return to citation 36, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-37">[37] <a href="https://man7.org/linux/man-pages/man7/signal.7.html">https://man7.org/linux/man-pages/man7/signal.7.html</a> — Linux man-pages signals
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-37-1" aria-label="Return to citation 37, occurrence 1">↩1</a><a class="citation-return" href="#os-users-processes--cite-37-2" aria-label="Return to citation 37, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-users-processes--source-38">[38] <a href="https://man7.org/linux/man-pages/man1/ps.1.html">https://man7.org/linux/man-pages/man1/ps.1.html</a> — procps-ng ps
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-38-1" aria-label="Return to citation 38, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-39">[39] <a href="https://man7.org/linux/man-pages/man1/top.1.html">https://man7.org/linux/man-pages/man1/top.1.html</a> — procps-ng top
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-39-1" aria-label="Return to citation 39, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-46">[46] <a href="https://man7.org/linux/man-pages/man8/pam_limits.8.html">https://man7.org/linux/man-pages/man8/pam_limits.8.html</a> — Linux-PAM limits
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-46-1" aria-label="Return to citation 46, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-47">[47] <a href="https://raw.githubusercontent.com/systemd/systemd/v252/man/systemd.resource-control.xml">https://raw.githubusercontent.com/systemd/systemd/v252/man/systemd.resource-control.xml</a> — systemd v252 resource control
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-47-1" aria-label="Return to citation 47, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-49">[49] <a href="https://man7.org/linux/man-pages/man8/rpmdb.8.html">https://man7.org/linux/man-pages/man8/rpmdb.8.html</a> — RPM upstream database manual
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-49-1" aria-label="Return to citation 49, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-50">[50] <a href="https://dnf.readthedocs.io/en/latest/command_ref.html">https://dnf.readthedocs.io/en/latest/command_ref.html</a> — DNF 4 command reference
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-50-1" aria-label="Return to citation 50, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-51">[51] <a href="https://sysstat.github.io">https://sysstat.github.io</a> — sysstat tools
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-51-1" aria-label="Return to citation 51, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-55">[55] <a href="https://raw.githubusercontent.com/systemd/systemd/v252/man/systemd.exec.xml">https://raw.githubusercontent.com/systemd/systemd/v252/man/systemd.exec.xml</a> — systemd v252 service execution limits
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-55-1" aria-label="Return to citation 55, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-56">[56] <a href="https://man7.org/linux/man-pages/man5/crontab.5.html">https://man7.org/linux/man-pages/man5/crontab.5.html</a> — Cronie crontab
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-56-1" aria-label="Return to citation 56, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-63">[63] <a href="https://man7.org/linux/man-pages/man8/useradd.8.html">https://man7.org/linux/man-pages/man8/useradd.8.html</a> — shadow-utils account creation
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-63-1" aria-label="Return to citation 63, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-71">[71] <a href="https://man7.org/linux/man-pages/man8/vmstat.8.html">https://man7.org/linux/man-pages/man8/vmstat.8.html</a> — procps-ng vmstat
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-71-1" aria-label="Return to citation 71, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-72">[72] <a href="https://man7.org/linux/man-pages/man1/iostat.1.html">https://man7.org/linux/man-pages/man1/iostat.1.html</a> — sysstat iostat
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-104">[104] <a href="https://man7.org/linux/man-pages/man8/userdel.8.html">https://man7.org/linux/man-pages/man8/userdel.8.html</a> — shadow-utils userdel
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-104-1" aria-label="Return to citation 104, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-105">[105] <a href="https://man7.org/linux/man-pages/man8/groupadd.8.html">https://man7.org/linux/man-pages/man8/groupadd.8.html</a> — shadow-utils groupadd
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-105-1" aria-label="Return to citation 105, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-106">[106] <a href="https://man7.org/linux/man-pages/man8/groupmod.8.html">https://man7.org/linux/man-pages/man8/groupmod.8.html</a> — shadow-utils groupmod
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-106-1" aria-label="Return to citation 106, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-107">[107] <a href="https://man7.org/linux/man-pages/man8/groupdel.8.html">https://man7.org/linux/man-pages/man8/groupdel.8.html</a> — shadow-utils groupdel
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-107-1" aria-label="Return to citation 107, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-108">[108] <a href="https://man7.org/linux/man-pages/man1/pgrep.1.html">https://man7.org/linux/man-pages/man1/pgrep.1.html</a> — procps-ng pgrep/pkill
+<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-108-1" aria-label="Return to citation 108, occurrence 1">↩</a></span></div><div class="source-entry" id="os-users-processes--source-115">[115] <a href="https://man7.org/linux/man-pages/man1/sar.1.html">https://man7.org/linux/man-pages/man1/sar.1.html</a> — sysstat sar samples and history<span class="citation-returns"><a class="citation-return" href="#os-users-processes--cite-115-1" aria-label="Return to citation 115, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="os-shell-files.html"><span>Previous · OS</span><strong>Finding, editing and protecting files</strong></a></div><div><a rel="next" href="os-services.html"><span>Next · OS</span><strong>Systemd service types</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../operating-systems.html">Explore Work on the host ↗</a><div class="current-group"><h2>In this group</h2><ol class="chapter-list"><li><a  href="../chapters/os-linux-foundations.html">Linux distributions, terminals and shells</a></li><li><a  href="../chapters/os-shell-files.html">Finding, editing and protecting files</a></li><li><a aria-current="page" href="../chapters/os-users-processes.html">Users, processes and resource monitoring</a></li><li><a  href="../chapters/os-services.html">Systemd service types</a></li><li><a  href="../chapters/os-storage.html">Filesystems, RAID, directories and partitions</a></li><li><a  href="../chapters/os-networking.html">Networking, SSH and file transfer</a></li><li><a  href="../chapters/os-access-security.html">Access control, passwords and recovery</a></li></ol></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

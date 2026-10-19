@@ -1,0 +1,14 @@
+{
+  "name": "database-notes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "build": "node scripts/build-web.mjs",
+    "check": "python scripts/validate-web.py",
+    "verify:live": "node scripts/verify-live.mjs"
+  }
+}

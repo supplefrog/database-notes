@@ -1,0 +1,256 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Troubleshooting and isolated instances — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mongodb-instances"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/run.html">Get a server running</a></nav>
+<header class="reader-head"><p class="reader-context">MongoDB <span aria-hidden="true">/</span> Get a server running</p><h1>Troubleshooting and isolated instances</h1></header>
+<div class="reader-controls"><a href="../tasks/run.html">← Get a server running</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MongoDB chapters"><ol class="chapter-list"><li><a  href="../chapters/mongodb-architecture.html">Architecture, editions and tools</a></li><li><a  href="../chapters/mongodb-storage.html">WiredTiger, transactions and consistency</a></li><li><a  href="../chapters/mongodb-modeling.html">Document modeling and BSON types</a></li><li><a  href="../chapters/mongodb-installation.html">Installation and first start</a></li><li><a aria-current="page" href="../chapters/mongodb-instances.html">Troubleshooting and isolated instances</a></li><li><a  href="../chapters/mongodb-administration.html">Objects, users and administration</a></li><li><a  href="../chapters/mongodb-performance.html">Auditing and performance</a></li><li><a  href="../chapters/mongodb-backup.html">Backup and recovery</a></li><li><a  href="../chapters/mongodb-replication.html">Replica sets and high availability</a></li><li><a  href="../chapters/mongodb-sharding.html">Sharding and resharding</a></li><li><a  href="../chapters/mongodb-security.html">Hardening, TLS and key rotation</a></li><li><a  href="../chapters/mongodb-upgrades.html">Upgrades and feature compatibility</a></li><li><a  href="../chapters/mongodb-migration.html">Relational-to-document migration</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#diagnose">Diagnose the first failing boundary</a><a class="level-2" href="#selinux-custom">Integrate custom paths, ports and units</a><a class="level-2" href="#isolation">Separate instance identity and resources</a><a class="level-2" href="#relocate">Relocate a standalone safely</a><a class="level-2" href="#service-logs">Stop and rotate deliberately</a><a class="level-2" href="#mongodb-instances--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-installation.html">Installing MySQL on Linux</a><a href="mysql-configuration.html">Configuration and systemd services</a><a href="mysql-troubleshooting.html">Startup, OS security and multiple instances</a><a href="mysql-client-storage.html">Client workflow and moving the data directory</a><p class="product-label">PostgreSQL</p><a href="postgresql-install-instances.html">Installation, services and instances</a></nav></details></div>
+<article class="prose">
+<h2 id="diagnose">Diagnose the first failing boundary</h2>
+<p>Read-only first. A successful TCP connection proves neither authentication nor replica-set readiness.<a id="mongodb-instances--cite-6-1" class="citation-ref" href="#mongodb-instances--source-6" aria-label="Source 6">[6]</a><a id="mongodb-instances--cite-104-1" class="citation-ref" href="#mongodb-instances--source-104" aria-label="Source 104">[104]</a></p>
+<pre tabindex="0" role="region" aria-label="Troubleshooting and isolated instances: code 1, horizontally scrollable"><code class="language-bash">sudo systemctl status mongod --no-pager
+sudo systemctl cat mongod
+sudo journalctl -u mongod -n 100 --no-pager
+sudo ss -ltnp
+sudo stat /etc/mongod.conf /var/lib/mongo /var/log/mongodb
+sudo -u mongod test -w /var/lib/mongo
+sudo -u mongod test -w /var/log/mongodb
+</code></pre>
+<p>Inspect <code>/var/log/mongodb/mongod.log</code> as well as the journal. Redact client data, tokens and infrastructure details before sharing logs.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Troubleshooting and isolated instances: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Check</th>
+<th>Safe next action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Unit not found</td>
+<td>Correct official package; unit search paths</td>
+<td><code>systemctl daemon-reload</code> after installing/changing a unit, not after merely editing YAML</td>
+</tr>
+<tr>
+<td>YAML/unknown-option error</td>
+<td>Spaces, hierarchy, exact 8.0 option</td>
+<td>Restore prior config; never solve by deleting all security settings</td>
+</tr>
+<tr>
+<td>Address already in use</td>
+<td>Listener/process on chosen port</td>
+<td>Correct instance port; do not kill an unidentified process</td>
+</tr>
+<tr>
+<td>Permission denied</td>
+<td>Service user, every parent directory, log/cert/key permissions</td>
+<td>Fix only intended owner/path; avoid recursive world-writable permissions</td>
+</tr>
+<tr>
+<td><code>DBPathInUse</code> / lock failure</td>
+<td>Another process using same path</td>
+<td>Identify owner; do not remove lock files while a server may be alive</td>
+</tr>
+<tr>
+<td>TLS handshake failure</td>
+<td>CA chain, SAN hostname, expiry, clocks, client certificate policy</td>
+<td>Repair trust/identity; never <code>tlsAllowInvalidCertificates</code> as the fix</td>
+</tr>
+<tr>
+<td>Authentication failure</td>
+<td>Username, <code>authSource</code>, mechanism, expired/rotated credentials</td>
+<td>Test a fresh authenticated session; distinguish Unauthorized from bad credentials</td>
+</tr>
+<tr>
+<td>No primary / selection timeout</td>
+<td>Member DNS, ports, majority, <code>rs.status()</code></td>
+<td>Repair topology/network; direct connection is diagnostic, not an HA fix</td>
+</tr>
+<tr>
+<td>Disk full / OOM</td>
+<td>Free space, log growth, cache/resource budget</td>
+<td>Add capacity or reduce pressure; do not remove WiredTiger/journal files</td>
+</tr>
+</tbody>
+</table></div>
+<p>On RHEL 9 check <strong>both DAC and SELinux</strong>: ownership alone cannot fix a label/domain denial. Use <code>getenforce</code>, <code>ls -ldZ</code>, <code>matchpathcon -V</code>, <code>ps -eZ</code> and <code>sudo ausearch -m AVC,USER_AVC -ts recent</code>. Check auditd if audit results are empty. Repair known labeling/configuration problems first; never use permissive mode or blindly install <code>audit2allow</code> output. <code>bindIp</code> selects local interfaces, not a client allowlist; apply <a href="mongodb-security.html#firewall">scoped firewalld access</a>.<a id="mongodb-instances--cite-110-1" class="citation-ref" href="#mongodb-instances--source-110" aria-label="Source 110">[110]</a></p>
+
+<h2 id="selinux-custom">Integrate custom paths, ports and units</h2>
+<p>A second process or relocated <code>dbPath</code> is <strong>outside the standard RPM policy assumptions</strong>. Prefer a separate restore host with the ordinary package layout when you do not have an approved custom integration. The following persistent label mappings are inputs to that integration, <strong>not a claim that relabeling alone provides a complete custom policy</strong>. Have the SELinux owner inspect the loaded policy, domain transition, parent-directory traversal, runtime and secret access; rehearse startup, shutdown, log rotation and recovery under enforcing mode before authorizing use.<a id="mongodb-instances--cite-103-1" class="citation-ref" href="#mongodb-instances--source-103" aria-label="Source 103">[103]</a><a id="mongodb-instances--cite-104-2" class="citation-ref" href="#mongodb-instances--source-104" aria-label="Source 104">[104]</a><a id="mongodb-instances--cite-110-2" class="citation-ref" href="#mongodb-instances--source-110" aria-label="Source 110">[110]</a></p>
+<p>For the same-trust restore instance below, the base MongoDB policy defines these types. Check existing local rules (<code>semanage fcontext -l -C</code>) before adding; if an exact rule exists, inspect it and deliberately modify that rule rather than applying duplicate mappings or overwriting unrelated labels.<a id="mongodb-instances--cite-107-1" class="citation-ref" href="#mongodb-instances--source-107" aria-label="Source 107">[107]</a><a id="mongodb-instances--cite-108-1" class="citation-ref" href="#mongodb-instances--source-108" aria-label="Source 108">[108]</a></p>
+<pre tabindex="0" role="region" aria-label="Troubleshooting and isolated instances: code 2, horizontally scrollable"><code class="language-bash">sudo semanage fcontext -l -C
+sudo semanage fcontext -a -t mongod_var_lib_t '/srv/mongodb/restore(/.*)?'
+sudo semanage fcontext -a -t mongod_runtime_t '/run/mongodb-restore(/.*)?'
+sudo semanage fcontext -a -t mongod_unit_file_t '/etc/systemd/system/mongod-restore\.service'
+sudo restorecon -Rv /srv/mongodb/restore
+# Run after saving the unit/config; /run directory is created by systemd.
+sudo restorecon -v /etc/systemd/system/mongod-restore.service /etc/mongod-restore.conf
+sudo semanage port -l | grep '^mongod_port_t'
+</code></pre>
+<p>The pinned policy names runtime type <code>mongod_runtime_t</code> with <code>mongod_var_run_t</code> as an alias. Data needs <code>mongod_var_lib_t</code>; logs need <code>mongod_log_t</code>. The existing <code>/var/log/mongodb(/.*)?</code> mapping includes <code>restore.log</code>. A new log directory needs its own persistent <code>semanage fcontext -a -t mongod_log_t '/chosen/log(/.*)?'</code> and <code>restorecon -Rv /chosen/log</code>, plus ownership and traversable parents. Do not use one transient <code>chcon</code> as a persistent solution.<a id="mongodb-instances--cite-107-2" class="citation-ref" href="#mongodb-instances--source-107" aria-label="Source 107">[107]</a><a id="mongodb-instances--cite-108-2" class="citation-ref" href="#mongodb-instances--source-108" aria-label="Source 108">[108]</a><a id="mongodb-instances--cite-110-3" class="citation-ref" href="#mongodb-instances--source-110" aria-label="Source 110">[110]</a></p>
+<p>The base RHEL port type normally already includes TCP 27017–27019. <strong>Inspect before adding</strong>: the restore port 27018 and shard/config ports 27018/27019 must not be blindly re-added. For a genuinely unassigned custom port, after policy review use, for example, <code>sudo semanage port -a -t mongod_port_t -p tcp 28020</code>. If another service owns the port label, stop and choose/review the conflict; do not steal it with <code>-m</code>. Change YAML, client/member endpoints, firewall and monitoring together. Port labeling is not a firewall rule.<a id="mongodb-instances--cite-103-2" class="citation-ref" href="#mongodb-instances--source-103" aria-label="Source 103">[103]</a><a id="mongodb-instances--cite-105-1" class="citation-ref" href="#mongodb-instances--source-105" aria-label="Source 105">[105]</a><a id="mongodb-instances--cite-110-4" class="citation-ref" href="#mongodb-instances--source-110" aria-label="Source 110">[110]</a></p>
+<p>After starting the reviewed service, require <code>mongod_t</code>, the intended runtime/path labels, no unexplained AVC denials, correct effective settings and authenticated allowed/denied operations. <code>sudo -u mongod test -r FILE</code> tests DAC, <strong>not the daemon’s SELinux domain</strong>. Unconfined execution is not success. A failed custom policy gate means stop the instance and repair/escalate; do not make the whole host permissive.<a id="mongodb-instances--cite-108-3" class="citation-ref" href="#mongodb-instances--source-108" aria-label="Source 108">[108]</a><a id="mongodb-instances--cite-110-5" class="citation-ref" href="#mongodb-instances--source-110" aria-label="Source 110">[110]</a></p>
+<p>For relocated data on a separate mount, add a root-owned drop-in <code>/etc/systemd/system/mongod.service.d/storage.conf</code>:</p>
+<pre tabindex="0" role="region" aria-label="Troubleshooting and isolated instances: code 3, horizontally scrollable"><code class="language-ini">[Unit]
+RequiresMountsFor=/srv/mongodb/main
+</code></pre>
+<p>Configure and verify the mount itself in the platform’s persistent mount configuration. <code>RequiresMountsFor</code> orders/requires known mount units; it does not invent a mount or prove the expected volume is mounted. Check <code>findmnt --target /srv/mongodb/main</code>, filesystem UUID/source/options, ownership and labels before copying and after a controlled reboot. Do not allow startup on an empty underlying root-filesystem directory if a required volume is missing. For extra safety use an approved <code>ConditionPathIsMountPoint</code> on the <strong>actual</strong> mountpoint when appropriate. Reload systemd after unit/drop-in edits, not for a YAML-only change.</p>
+
+<h2 id="isolation">Separate instance identity and resources</h2>
+<p>Use another standalone instance for a disposable exercise or restore; do not call two processes on one disk “HA.” Independent paths and users do not reserve CPU/RAM/I/O. Set a combined memory budget and use service/cgroup limits only after observing startup and workload behavior.<a id="mongodb-instances--cite-6-2" class="citation-ref" href="#mongodb-instances--source-6" aria-label="Source 6">[6]</a><a id="mongodb-instances--cite-10-1" class="citation-ref" href="#mongodb-instances--source-10" aria-label="Source 10">[10]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Troubleshooting and isolated instances: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Main package instance</th>
+<th>Disposable restore instance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Service</td>
+<td><code>mongod</code></td>
+<td><code>mongod-restore</code></td>
+</tr>
+<tr>
+<td>Config</td>
+<td><code>/etc/mongod.conf</code></td>
+<td><code>/etc/mongod-restore.conf</code></td>
+</tr>
+<tr>
+<td><code>dbPath</code></td>
+<td><code>/var/lib/mongo</code></td>
+<td><code>/srv/mongodb/restore</code></td>
+</tr>
+<tr>
+<td>Log</td>
+<td><code>/var/log/mongodb/mongod.log</code></td>
+<td><code>/var/log/mongodb/restore.log</code></td>
+</tr>
+<tr>
+<td>TCP</td>
+<td>27017</td>
+<td>27018</td>
+</tr>
+<tr>
+<td>Bind</td>
+<td>Loopback until hardened</td>
+<td>Loopback only</td>
+</tr>
+<tr>
+<td>OS account</td>
+<td><code>mongod</code></td>
+<td><code>mongod</code> in this disposable same-trust example; use separate account for security separation</td>
+</tr>
+</tbody>
+</table></div>
+<p>Create a new <strong>empty</strong> target directory. Never copy a running dbPath into it. On a fresh host create the path first, then apply the persistent mappings above after saving its unit/config; the order matters because restorecon cannot label an absent path.<a id="mongodb-instances--cite-21-1" class="citation-ref" href="#mongodb-instances--source-21" aria-label="Source 21">[21]</a><a id="mongodb-instances--cite-110-6" class="citation-ref" href="#mongodb-instances--source-110" aria-label="Source 110">[110]</a></p>
+<pre tabindex="0" role="region" aria-label="Troubleshooting and isolated instances: code 4, horizontally scrollable"><code class="language-bash">sudo install -d -o mongod -g mongod -m 700 /srv/mongodb/restore
+</code></pre>
+<p><code>/etc/mongod-restore.conf</code>:</p>
+<pre tabindex="0" role="region" aria-label="Troubleshooting and isolated instances: code 5, horizontally scrollable"><code class="language-yaml">storage:
+  dbPath: /srv/mongodb/restore
+  wiredTiger:
+    engineConfig:
+      cacheSizeGB: 0.5
+systemLog:
+  destination: file
+  path: /var/log/mongodb/restore.log
+  logAppend: true
+net:
+  port: 27018
+  bindIp: 127.0.0.1
+  unixDomainSocket:
+    enabled: false
+security:
+  authorization: enabled
+</code></pre>
+<p>The 0.5 GB cache is an explicit small-lab allocation, not a production recommendation or a total memory cap. This same-trust custom unit preserves the RPM foreground/glibc/limit contract; it is <strong>not</strong> supplied or automatically confined by the RPM. Complete the <a href="mongodb-instances.html#selinux-custom">custom integration gate</a> before starting.<a id="mongodb-instances--cite-101-1" class="citation-ref" href="#mongodb-instances--source-101" aria-label="Source 101">[101]</a><a id="mongodb-instances--cite-103-3" class="citation-ref" href="#mongodb-instances--source-103" aria-label="Source 103">[103]</a> <code>/etc/systemd/system/mongod-restore.service</code>:[6]<a id="mongodb-instances--cite-10-2" class="citation-ref" href="#mongodb-instances--source-10" aria-label="Source 10">[10]</a></p>
+<pre tabindex="0" role="region" aria-label="Troubleshooting and isolated instances: code 6, horizontally scrollable"><code class="language-ini">[Unit]
+Description=MongoDB isolated restore instance
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/mongodb/restore
+
+[Service]
+Type=simple
+User=mongod
+Group=mongod
+Environment="MONGODB_CONFIG_OVERRIDE_NOFORK=1"
+Environment="GLIBC_TUNABLES=glibc.pthread.rseq=0"
+RuntimeDirectory=mongodb-restore
+RuntimeDirectoryMode=0750
+ExecStart=/usr/bin/mongod --config /etc/mongod-restore.conf
+Restart=no
+LimitNOFILE=64000
+LimitNPROC=64000
+LimitMEMLOCK=infinity
+LimitFSIZE=infinity
+LimitCPU=infinity
+LimitAS=infinity
+TasksMax=infinity
+TimeoutStopSec=infinity
+
+[Install]
+WantedBy=multi-user.target
+</code></pre>
+<pre tabindex="0" role="region" aria-label="Troubleshooting and isolated instances: code 7, horizontally scrollable"><code class="language-bash">sudo chown root:mongod /etc/mongod-restore.conf
+sudo chmod 640 /etc/mongod-restore.conf
+sudo restorecon -v /etc/mongod-restore.conf /etc/systemd/system/mongod-restore.service
+sudo systemd-analyze verify /etc/systemd/system/mongod-restore.service
+sudo systemctl daemon-reload
+# Start only after the custom SELinux/mount checks below are accepted.
+sudo systemctl start mongod-restore
+sudo systemctl status mongod-restore --no-pager
+mongosh --host 127.0.0.1 --port 27018
+</code></pre>
+<p>Run the <a href="mongodb-installation.html#bootstrap">first-user bootstrap</a> at <strong>27018</strong>, creating destination-specific credentials. Do not assume main-instance users exist here. Check <code>getCmdLineOpts</code>, protected access and paths at 27018 before restoring. Do not enable restore-instance boot start; stop it after the drill. Keep authentication enabled even on this isolated instance because other local users may connect.<a id="mongodb-instances--cite-7-1" class="citation-ref" href="#mongodb-instances--source-7" aria-label="Source 7">[7]</a><a id="mongodb-instances--cite-9-1" class="citation-ref" href="#mongodb-instances--source-9" aria-label="Source 9">[9]</a></p>
+
+<h2 id="relocate">Relocate a standalone safely</h2>
+<p><strong>Disruptive; physical data copy.</strong> This procedure moves one standalone, not a sharded cluster and not a replica-set failover. Have a restorable backup, destination capacity, maintenance window and a recorded old config. Keep the old directory intact until acceptance.<a id="mongodb-instances--cite-6-3" class="citation-ref" href="#mongodb-instances--source-6" aria-label="Source 6">[6]</a><a id="mongodb-instances--cite-21-2" class="citation-ref" href="#mongodb-instances--source-21" aria-label="Source 21">[21]</a></p>
+<ol>
+<li>Quiesce application writes; stop the exact service cleanly. Confirm it stopped and no process uses the old <code>dbPath</code>.</li>
+<li>Create an empty destination on supported local storage; copy the <strong>whole stopped</strong> directory, preserving ownership/modes. This example uses <code>/srv/mongodb/main</code> and assumes it did not previously exist.</li>
+<li>Change only <code>storage.dbPath</code>, plus any required confinement/mount policy. Verify persistent mount availability before boot start.</li>
+<li>Start and inspect recovery logs, effective path, users, collections/indexes and application read/write checks.</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Troubleshooting and isolated instances: code 8, horizontally scrollable"><code class="language-bash">sudo systemctl stop mongod
+sudo systemctl is-active mongod
+sudo install -d -o mongod -g mongod -m 700 /srv/mongodb/main
+sudo cp -a /var/lib/mongo/. /srv/mongodb/main/
+# STOP on copy error; confirm size/file inventory and intended ownership.
+sudo semanage fcontext -a -t mongod_var_lib_t '/srv/mongodb/main(/.*)?'
+sudo restorecon -Rv /srv/mongodb/main
+# Edit /etc/mongod.conf: storage.dbPath: /srv/mongodb/main
+# Add the mount dependency/drop-in described below; complete policy review.
+sudo systemctl daemon-reload
+sudo systemctl start mongod
+</code></pre>
+<p>Inspect the source mount using <code>findmnt --target /var/lib/mongo</code> and target mount using <code>findmnt --target /srv/mongodb/main</code> before the copy. The fcontext addition in this example assumes no existing exact local mapping; use the conflict checks above. An inactive result is expected after stop, but confirm process termination separately before copying. Copy failure means do not start from the partial target. If validation fails <strong>before new writes</strong>, stop, restore the old path/config and restart. Once new writes have landed at the new location, reverting paths loses them; stop traffic and reconcile/restore instead. Never run both directory copies as competing authoritative servers.<a id="mongodb-instances--cite-21-3" class="citation-ref" href="#mongodb-instances--source-21" aria-label="Source 21">[21]</a></p>
+
+<h2 id="service-logs">Stop and rotate deliberately</h2>
+<p><code>systemctl stop mongod</code> requests orderly shutdown; <code>kill -9</code> is not normal administration. Inspect <code>systemctl show mongod -p TimeoutStopUSec -p SendSIGKILL</code>: the vendor unit does not specify its own stop timeout, so systemd defaults/drop-ins matter. For shutdowns that need more time, use an approved service drop-in (for example <code>TimeoutStopSec=infinity</code> under <code>[Service]</code>) and a supervised escalation plan; do not assume the default timeout cannot end in SIGKILL.<a id="mongodb-instances--cite-101-2" class="citation-ref" href="#mongodb-instances--source-101" aria-label="Source 101">[101]</a> On a replica set, use a secondary-first maintenance plan rather than stopping the primary casually. <code>systemctl restart</code> disconnects clients; driver retry behavior does not make it invisible.<a id="mongodb-instances--cite-27-1" class="citation-ref" href="#mongodb-instances--source-27" aria-label="Source 27">[27]</a><a id="mongodb-instances--cite-104-3" class="citation-ref" href="#mongodb-instances--source-104" aria-label="Source 104">[104]</a></p>
+<p>Default file-log rotation by MongoDB renames the old file and opens a new one. Run as an identity with <code>logRotate</code> privilege (<code>clusterAdmin</code> includes cluster-management capabilities):[43]<a id="mongodb-instances--cite-85-1" class="citation-ref" href="#mongodb-instances--source-85" aria-label="Source 85">[85]</a></p>
+<pre tabindex="0" role="region" aria-label="Troubleshooting and isolated instances: code 9, horizontally scrollable"><code class="language-javascript">db.getSiblingDB("admin").runCommand({logRotate: 1});
+</code></pre>
+<p>Check the new log receives entries, then compress/archive only the closed old file under retention policy. If integrating OS logrotate with <code>systemLog.logRotate: reopen</code>, also set <code>logAppend: true</code>, rename externally, and issue <code>logRotate</code>; do not mix the two rotation modes or truncate a live log blindly. Logs may contain query data and need restrictive access, rotation and off-host retention appropriate to policy.<a id="mongodb-instances--cite-43-1" class="citation-ref" href="#mongodb-instances--source-43" aria-label="Source 43">[43]</a></p>
+
+<h2 id="mongodb-instances--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mongodb-instances--source-6">[6] <a href="https://www.mongodb.com/docs/v8.0/reference/configuration-options">https://www.mongodb.com/docs/v8.0/reference/configuration-options</a> — Self-Managed Configuration File Options - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-6-1" aria-label="Return to citation 6, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-instances--cite-6-2" aria-label="Return to citation 6, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-instances--cite-6-3" aria-label="Return to citation 6, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-instances--source-7">[7] <a href="https://www.mongodb.com/docs/v8.0/core/localhost-exception">https://www.mongodb.com/docs/v8.0/core/localhost-exception</a> — Localhost Exception in Self-Managed Deployments - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-7-1" aria-label="Return to citation 7, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-instances--source-9">[9] <a href="https://www.mongodb.com/docs/v8.0/tutorial/enable-authentication">https://www.mongodb.com/docs/v8.0/tutorial/enable-authentication</a> — Enable Access Control on Self-Managed Deployments - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-9-1" aria-label="Return to citation 9, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-instances--source-10">[10] <a href="https://www.mongodb.com/docs/v8.0/core/wiredtiger">https://www.mongodb.com/docs/v8.0/core/wiredtiger</a> — WiredTiger Storage Engine - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-10-1" aria-label="Return to citation 10, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-instances--cite-10-2" aria-label="Return to citation 10, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-instances--source-21">[21] <a href="https://www.mongodb.com/docs/v8.0/tutorial/backup-with-filesystem-snapshots">https://www.mongodb.com/docs/v8.0/tutorial/backup-with-filesystem-snapshots</a> — Back Up a Self-Managed Deployment with Filesystem Snapshots - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-21-1" aria-label="Return to citation 21, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-instances--cite-21-2" aria-label="Return to citation 21, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-instances--cite-21-3" aria-label="Return to citation 21, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-instances--source-27">[27] <a href="https://www.mongodb.com/docs/v8.0/release-notes/8.0-upgrade-replica-set">https://www.mongodb.com/docs/v8.0/release-notes/8.0-upgrade-replica-set</a> — Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-27-1" aria-label="Return to citation 27, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-instances--source-43">[43] <a href="https://www.mongodb.com/docs/v8.0/tutorial/rotate-log-files">https://www.mongodb.com/docs/v8.0/tutorial/rotate-log-files</a> — Rotate Log Files - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-43-1" aria-label="Return to citation 43, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-instances--source-85">[85] <a href="https://www.mongodb.com/docs/v8.0/reference/built-in-roles.md">https://www.mongodb.com/docs/v8.0/reference/built-in-roles.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-85-1" aria-label="Return to citation 85, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-instances--source-101">[101] <a href="https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongod.service">https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongod.service</a> — MongoDB r8.0.29 RPM systemd unit
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-101-1" aria-label="Return to citation 101, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-instances--cite-101-2" aria-label="Return to citation 101, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-instances--source-103">[103] <a href="https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/README.md">https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/README.md</a> — Official MongoDB SELinux policy scope and assumptions
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-103-1" aria-label="Return to citation 103, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-instances--cite-103-2" aria-label="Return to citation 103, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-instances--cite-103-3" aria-label="Return to citation 103, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-instances--source-104">[104] <a href="https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-red-hat.md">https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-red-hat.md</a> — MongoDB 8.0 RHEL install manual (mixed-platform passages flagged)
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-104-1" aria-label="Return to citation 104, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-instances--cite-104-2" aria-label="Return to citation 104, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-instances--cite-104-3" aria-label="Return to citation 104, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-instances--source-105">[105] <a href="https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-red-hat-tarball.md">https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-red-hat-tarball.md</a> — MongoDB 8.0 RHEL tarball and custom SELinux guidance
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-105-1" aria-label="Return to citation 105, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-instances--source-107">[107] <a href="https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/selinux/mongodb.fc">https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/selinux/mongodb.fc</a> — MongoDB SELinux pinned file contexts
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-107-1" aria-label="Return to citation 107, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-instances--cite-107-2" aria-label="Return to citation 107, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-instances--source-108">[108] <a href="https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/selinux/mongodb.te">https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/selinux/mongodb.te</a> — MongoDB SELinux pinned type enforcement
+<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-108-1" aria-label="Return to citation 108, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-instances--cite-108-2" aria-label="Return to citation 108, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-instances--cite-108-3" aria-label="Return to citation 108, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-instances--source-110">[110] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux</a> — RHEL 9 SELinux diagnostics and persistent contexts<span class="citation-returns"><a class="citation-return" href="#mongodb-instances--cite-110-1" aria-label="Return to citation 110, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-instances--cite-110-2" aria-label="Return to citation 110, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-instances--cite-110-3" aria-label="Return to citation 110, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-instances--cite-110-4" aria-label="Return to citation 110, occurrence 4">↩4</a><a class="citation-return" href="#mongodb-instances--cite-110-5" aria-label="Return to citation 110, occurrence 5">↩5</a><a class="citation-return" href="#mongodb-instances--cite-110-6" aria-label="Return to citation 110, occurrence 6">↩6</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mongodb-installation.html"><span>Previous · MongoDB</span><strong>Installation and first start</strong></a></div><div><a rel="next" href="mongodb-administration.html"><span>Next · MongoDB</span><strong>Objects, users and administration</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/run.html">Explore Get a server running ↗</a><div class="current-group"><h2>In MongoDB</h2><ol class="chapter-list"><li><a  href="../chapters/mongodb-installation.html">Installation and first start</a></li><li><a aria-current="page" href="../chapters/mongodb-instances.html">Troubleshooting and isolated instances</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-installation.html">Installing MySQL on Linux</a><a href="mysql-configuration.html">Configuration and systemd services</a><a href="mysql-troubleshooting.html">Startup, OS security and multiple instances</a><a href="mysql-client-storage.html">Client workflow and moving the data directory</a></div><div><span>PostgreSQL</span><a href="postgresql-install-instances.html">Installation, services and instances</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

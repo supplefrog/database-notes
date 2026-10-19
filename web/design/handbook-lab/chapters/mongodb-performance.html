@@ -1,0 +1,215 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Auditing and performance — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mongodb-performance"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/observe.html">See what the server is doing</a></nav>
+<header class="reader-head"><p class="reader-context">MongoDB <span aria-hidden="true">/</span> See what the server is doing</p><h1>Auditing and performance</h1></header>
+<div class="reader-controls"><a href="../tasks/observe.html">← See what the server is doing</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MongoDB chapters"><ol class="chapter-list"><li><a  href="../chapters/mongodb-architecture.html">Architecture, editions and tools</a></li><li><a  href="../chapters/mongodb-storage.html">WiredTiger, transactions and consistency</a></li><li><a  href="../chapters/mongodb-modeling.html">Document modeling and BSON types</a></li><li><a  href="../chapters/mongodb-installation.html">Installation and first start</a></li><li><a  href="../chapters/mongodb-instances.html">Troubleshooting and isolated instances</a></li><li><a  href="../chapters/mongodb-administration.html">Objects, users and administration</a></li><li><a aria-current="page" href="../chapters/mongodb-performance.html">Auditing and performance</a></li><li><a  href="../chapters/mongodb-backup.html">Backup and recovery</a></li><li><a  href="../chapters/mongodb-replication.html">Replica sets and high availability</a></li><li><a  href="../chapters/mongodb-sharding.html">Sharding and resharding</a></li><li><a  href="../chapters/mongodb-security.html">Hardening, TLS and key rotation</a></li><li><a  href="../chapters/mongodb-upgrades.html">Upgrades and feature compatibility</a></li><li><a  href="../chapters/mongodb-migration.html">Relational-to-document migration</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#audit">Logs, profiling and auditing are different</a><a class="level-2" href="#profiler">Profile a bounded window</a><a class="level-2" href="#explain">Explain one exact access pattern</a><a class="level-2" href="#indexes">Index decisions and reversible experiments</a><a class="level-2" href="#monitoring">Slow operation or overloaded host?</a><a class="level-2" href="#mongodb-performance--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-audit.html">Auditing activity</a><a href="mysql-performance.html">Execution plans, indexes and diagnostics</a><p class="product-label">PostgreSQL</p><a href="postgresql-vacuum.html">Vacuum, freezing and bloat</a><a href="postgresql-audit-performance.html">Audit, statistics and performance</a></nav></details></div>
+<article class="prose">
+<h2 id="audit">Logs, profiling and auditing are different</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Auditing and performance: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Facility</th>
+<th>Community 8.0</th>
+<th>What it records / limitation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Diagnostic log</td>
+<td>Yes</td>
+<td>Startup, connections, errors, slow operations; not complete compliance audit</td>
+</tr>
+<tr>
+<td>Database profiler</td>
+<td>Yes, on <code>mongod</code></td>
+<td>Selected operation documents in <code>system.profile</code>; overhead and sensitive values</td>
+</tr>
+<tr>
+<td>FTDC diagnostic data</td>
+<td>Yes</td>
+<td>Periodic diagnostic metrics and host metadata; disk/retention cost, not an event audit.<a id="mongodb-performance--cite-96-1" class="citation-ref" href="#mongodb-performance--source-96" aria-label="Source 96">[96]</a></td>
+</tr>
+<tr>
+<td>Security audit facility</td>
+<td>Enterprise; Atlas availability depends on deployment</td>
+<td>Security/access event policy; separately configured and protected</td>
+</tr>
+<tr>
+<td>Host/storage audit</td>
+<td>OS tooling</td>
+<td>File/process access, not a substitute for database authorization events</td>
+</tr>
+</tbody>
+</table></div>
+<p>Do not tell a Community operator to turn on Enterprise <code>auditLog</code> options. Where compliance requires the supported audit facility, decide edition/service and review event coverage, filters, failed/successful authorization events, output protection and retention. Application access logging plus immutable external log storage can supplement Community, but does not become equivalent by renaming a log.<a id="mongodb-performance--cite-15-1" class="citation-ref" href="#mongodb-performance--source-15" aria-label="Source 15">[15]</a><a id="mongodb-performance--cite-23-1" class="citation-ref" href="#mongodb-performance--source-23" aria-label="Source 23">[23]</a></p>
+
+<h2 id="profiler">Profile a bounded window</h2>
+<p>Requires <code>enableProfiler</code>/appropriate database administration privilege on <code>shop</code>; reading <code>system.profile</code> also needs access. Connect directly to the intended <code>mongod</code>; profiling is not available on <code>mongos</code>. Scope matters: the profiling level is per database; slow-operation threshold/sample settings affect diagnostic behavior more broadly on that process.<a id="mongodb-performance--cite-23-2" class="citation-ref" href="#mongodb-performance--source-23" aria-label="Source 23">[23]</a></p>
+<pre tabindex="0" role="region" aria-label="Auditing and performance: code 1, horizontally scrollable"><code class="language-javascript">const shop = db.getSiblingDB("shop");
+const before = shop.getProfilingStatus();
+printjson(before);
+// Level 1 + filter, rather than recording every operation:
+shop.setProfilingLevel(1, {filter: {ns: "shop.orders", millis: {$gte: 50}}});
+// Run the authorized representative workload for a short, supervised window.
+shop.system.profile.find({ns: "shop.orders"}, {
+  ts: 1, millis: 1, planSummary: 1, keysExamined: 1, docsExamined: 1, nreturned: 1
+}).sort({$natural: -1}).limit(20);
+// Restore observed settings, including whether a filter previously existed:
+shop.setProfilingLevel(before.was, {
+  slowms: before.slowms, sampleRate: before.sampleRate,
+  filter: before.filter || "unset"
+});
+shop.getProfilingStatus();
+</code></pre>
+<p>When a profiler filter is configured it supersedes <code>slowms</code>/sample-rate selection for profiling/slow-log selection as documented. Save the prior state outside the shell before enabling if a disconnect is possible. Level 2 captures all operations and can be expensive; do not leave it on by accident. <code>system.profile</code> is capped and rolls over, so copy required incident evidence promptly under data-access policy. Disabling profiling does not erase already collected sensitive documents.<a id="mongodb-performance--cite-23-3" class="citation-ref" href="#mongodb-performance--source-23" aria-label="Source 23">[23]</a><a id="mongodb-performance--cite-84-1" class="citation-ref" href="#mongodb-performance--source-84" aria-label="Source 84">[84]</a></p>
+
+<h2 id="explain">Explain one exact access pattern</h2>
+<p>Use the <a href="mongodb-administration.html#fixture">three-order fixture</a>. The query is “recent orders for tenant t1,” not a benchmark. <code>executionStats</code> executes the read; it can be expensive on production. No timing or plan result below is claimed to have been measured.<a id="mongodb-performance--cite-20-1" class="citation-ref" href="#mongodb-performance--source-20" aria-label="Source 20">[20]</a><a id="mongodb-performance--cite-24-1" class="citation-ref" href="#mongodb-performance--source-24" aria-label="Source 24">[24]</a></p>
+<pre tabindex="0" role="region" aria-label="Auditing and performance: code 2, horizontally scrollable"><code class="language-javascript">const shop = db.getSiblingDB("shop");
+shop.orders.explain("queryPlanner")
+  .find({tenantId: "t1"}).sort({placedAt: -1}).limit(10);
+shop.orders.explain("executionStats")
+  .find({tenantId: "t1"}).sort({placedAt: -1}).limit(10);
+// Compare the existing fixture index explicitly, without changing global policy:
+shop.orders.explain("executionStats")
+  .find({tenantId: "t1"}).sort({placedAt: -1}).hint("tenant_recent").limit(10);
+</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Auditing and performance: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Mode/field</th>
+<th>Read it as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>queryPlanner</code></td>
+<td>Winning/rejected candidate structure without running to completion</td>
+</tr>
+<tr>
+<td><code>executionStats</code></td>
+<td>Execution statistics for the winning plan; actual work</td>
+</tr>
+<tr>
+<td><code>allPlansExecution</code></td>
+<td>Additional candidate trial statistics; not full end-to-end runs of every plan</td>
+</tr>
+<tr>
+<td><code>nReturned</code></td>
+<td>Documents produced; compare with work examined</td>
+</tr>
+<tr>
+<td><code>totalKeysExamined</code></td>
+<td>Index entries scanned</td>
+</tr>
+<tr>
+<td><code>totalDocsExamined</code></td>
+<td>Documents fetched/examined; not necessarily unique documents</td>
+</tr>
+<tr>
+<td><code>COLLSCAN</code>, <code>IXSCAN</code>, <code>FETCH</code>, <code>SORT</code></td>
+<td>Collection/index access, document fetch, explicit sorting; plan layouts vary by execution engine</td>
+</tr>
+</tbody>
+</table></div>
+<p>The tiny fixture may make a collection scan reasonable. A good representative result has bounded examined work relative to returned rows and avoids a large blocking sort; do not promise zero fetches unless the query is actually covered. <code>explain</code> does not populate/use the plan cache in the same way as ordinary query execution; compare real workload behavior too.<a id="mongodb-performance--cite-24-2" class="citation-ref" href="#mongodb-performance--source-24" aria-label="Source 24">[24]</a></p>
+<p>For a covered projection, deliberately include all filter/sort/output fields and omit <code>_id</code> unless it is indexed:</p>
+<pre tabindex="0" role="region" aria-label="Auditing and performance: code 3, horizontally scrollable"><code class="language-javascript">shop.orders.createIndex({tenantId: 1, placedAt: -1, total: 1}, {name: "tenant_recent_total"});
+shop.orders.explain("executionStats")
+  .find({tenantId: "t1"}, {_id: 0, tenantId: 1, placedAt: 1, total: 1})
+  .sort({placedAt: -1}).hint("tenant_recent_total").limit(10);
+</code></pre>
+<p>Creating indexes costs I/O, CPU, disk and write amplification. Check disk and replication lag, schedule builds, and compare sustained workloads before keeping both indexes. An index with tenant equality followed by descending time supports this access pattern; reversing fields can lose that useful prefix.<a id="mongodb-performance--cite-20-2" class="citation-ref" href="#mongodb-performance--source-20" aria-label="Source 20">[20]</a></p>
+
+<h2 id="indexes">Index decisions and reversible experiments</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Auditing and performance: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Index feature</th>
+<th>Use</th>
+<th>Cost / constraint</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Compound</td>
+<td>Match common equality/sort/range patterns</td>
+<td>Prefix/order matters; one giant index does not serve all queries</td>
+</tr>
+<tr>
+<td>Multikey</td>
+<td>Index array values</td>
+<td>Expansion increases work; a compound multikey index permits at most one indexed array field per document.<a id="mongodb-performance--cite-79-1" class="citation-ref" href="#mongodb-performance--source-79" aria-label="Source 79">[79]</a></td>
+</tr>
+<tr>
+<td>Unique</td>
+<td>Enforce business identity</td>
+<td>Existing duplicates block build; sharded uniqueness must fit shard-key rules</td>
+</tr>
+<tr>
+<td>Partial</td>
+<td>Index only documents meeting a filter</td>
+<td>Queries must imply the filter to use it safely.<a id="mongodb-performance--cite-76-1" class="citation-ref" href="#mongodb-performance--source-76" aria-label="Source 76">[76]</a></td>
+</tr>
+<tr>
+<td>TTL</td>
+<td>Expire eligible time-based records</td>
+<td>Asynchronous deletion; not an exact scheduler or backup retention mechanism.<a id="mongodb-performance--cite-77-1" class="citation-ref" href="#mongodb-performance--source-77" aria-label="Source 77">[77]</a></td>
+</tr>
+<tr>
+<td>Hidden</td>
+<td>Exclude an index from planner selection</td>
+<td>Still maintained and consumes space; unique constraints still enforced</td>
+</tr>
+</tbody>
+</table></div>
+<p>Inspect usage/workload, then hide a redundant candidate before deleting it. The experiment below requires a supporting <code>tenant_recent</code> index and explicit approval to alter the second index:[20]<a id="mongodb-performance--cite-36-1" class="citation-ref" href="#mongodb-performance--source-36" aria-label="Source 36">[36]</a><a id="mongodb-performance--cite-42-1" class="citation-ref" href="#mongodb-performance--source-42" aria-label="Source 42">[42]</a></p>
+<pre tabindex="0" role="region" aria-label="Auditing and performance: code 4, horizontally scrollable"><code class="language-javascript">shop.orders.hideIndex("tenant_recent_total");
+shop.orders.getIndexes();
+// Observe representative application reads and writes.
+shop.orders.unhideIndex("tenant_recent_total");
+</code></pre>
+<p>Hidden unique indexes still enforce uniqueness and all hidden indexes are maintained on writes.<a id="mongodb-performance--cite-98-1" class="citation-ref" href="#mongodb-performance--source-98" aria-label="Source 98">[98]</a> Rollback is unhide, not rebuild. A hidden index cannot be tested by hinting it.<a id="mongodb-performance--cite-98-2" class="citation-ref" href="#mongodb-performance--source-98" aria-label="Source 98">[98]</a> Drop only after a complete workload cycle establishes it is unnecessary and the exact name is recorded; dropping it is not rolled back by unhiding. Retain the creation specification if rebuilding is the recovery plan.<a id="mongodb-performance--cite-42-2" class="citation-ref" href="#mongodb-performance--source-42" aria-label="Source 42">[42]</a></p>
+
+<h2 id="monitoring">Slow operation or overloaded host?</h2>
+<pre tabindex="0" role="region" aria-label="Auditing and performance: code 5, horizontally scrollable"><code class="language-javascript">const s = db.getSiblingDB("admin").serverStatus();
+printjson({connections: s.connections, opcounters: s.opcounters,
+  locks: s.locks, wiredTigerCache: s.wiredTiger &amp;&amp; s.wiredTiger.cache});
+</code></pre>
+<p>Use a monitoring identity, compare deltas and align timestamps with application latency. Inspect <a href="mongodb-administration.html#operations">current operations</a> for waits and query shapes. <code>mongostat</code> and <code>mongotop</code> from the separately pinned Database Tools provide repeated samples; run with authentication/TLS like other clients, not an embedded password.<a id="mongodb-performance--cite-10-1" class="citation-ref" href="#mongodb-performance--source-10" aria-label="Source 10">[10]</a><a id="mongodb-performance--cite-104-1" class="citation-ref" href="#mongodb-performance--source-104" aria-label="Source 104">[104]</a><a id="mongodb-performance--cite-51-1" class="citation-ref" href="#mongodb-performance--source-51" aria-label="Source 51">[51]</a></p>
+<ol>
+<li><strong>High scan counts:</strong> verify predicate types/collation, index prefixes, selectivity and sort coverage before adding RAM.</li>
+<li><strong>Locks/DDL waits:</strong> identify the holder and business operation; cancelling waiters may not remove the cause.</li>
+<li><strong>Cache eviction + I/O:</strong> inspect working-set size, long transactions, index growth and storage latency together.</li>
+<li><strong>Connection pressure:</strong> inspect driver pool counts/limits and application concurrency; raising server limits can amplify overload.</li>
+<li><strong>Replication lag:</strong> correlate disk/write pressure and oplog window; a stale secondary is not a free read-scaling solution.</li>
+<li><strong>No apparent DB pressure:</strong> measure application queuing, network latency, retries and downstream calls before tuning the database.</li>
+</ol>
+<p>For RHEL host symptoms, correlate <code>journalctl -u mongod</code>, <code>/var/log/mongodb/mongod.log</code>, audit AVCs, storage latency and the actual process limits (<code>systemctl show mongod</code>, <code>/proc/PID/limits</code>). A login-shell <code>ulimit</code> does not describe the service. Preserve the RPM glibc environment and review RHEL <code>tuned</code>/THP settings against MongoDB 8.0 guidance instead of applying an older release’s tuning script.<a id="mongodb-performance--cite-62-1" class="citation-ref" href="#mongodb-performance--source-62" aria-label="Source 62">[62]</a><a id="mongodb-performance--cite-101-1" class="citation-ref" href="#mongodb-performance--source-101" aria-label="Source 101">[101]</a><a id="mongodb-performance--cite-110-1" class="citation-ref" href="#mongodb-performance--source-110" aria-label="Source 110">[110]</a></p>
+<p>Keep one hypothesis/change at a time with a rollback value and representative before/after window. Never quote the fixture’s timing as a capacity result.<a id="mongodb-performance--cite-10-2" class="citation-ref" href="#mongodb-performance--source-10" aria-label="Source 10">[10]</a><a id="mongodb-performance--cite-24-3" class="citation-ref" href="#mongodb-performance--source-24" aria-label="Source 24">[24]</a><a id="mongodb-performance--cite-31-1" class="citation-ref" href="#mongodb-performance--source-31" aria-label="Source 31">[31]</a></p>
+
+<h2 id="mongodb-performance--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mongodb-performance--source-10">[10] <a href="https://www.mongodb.com/docs/v8.0/core/wiredtiger">https://www.mongodb.com/docs/v8.0/core/wiredtiger</a> — WiredTiger Storage Engine - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-10-1" aria-label="Return to citation 10, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-performance--cite-10-2" aria-label="Return to citation 10, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-performance--source-15">[15] <a href="https://www.mongodb.com/docs/v8.0/core/auditing">https://www.mongodb.com/docs/v8.0/core/auditing</a> — Auditing - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-15-1" aria-label="Return to citation 15, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-performance--source-20">[20] <a href="https://www.mongodb.com/docs/v8.0/core/indexes/index-types/index-compound">https://www.mongodb.com/docs/v8.0/core/indexes/index-types/index-compound</a> — Compound Indexes - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-20-1" aria-label="Return to citation 20, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-performance--cite-20-2" aria-label="Return to citation 20, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-performance--source-23">[23] <a href="https://www.mongodb.com/docs/v8.0/tutorial/manage-the-database-profiler">https://www.mongodb.com/docs/v8.0/tutorial/manage-the-database-profiler</a> — Database Profiler - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-23-1" aria-label="Return to citation 23, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-performance--cite-23-2" aria-label="Return to citation 23, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-performance--cite-23-3" aria-label="Return to citation 23, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-performance--source-24">[24] <a href="https://www.mongodb.com/docs/v8.0/reference/explain-results">https://www.mongodb.com/docs/v8.0/reference/explain-results</a> — Explain Results - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-24-1" aria-label="Return to citation 24, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-performance--cite-24-2" aria-label="Return to citation 24, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-performance--cite-24-3" aria-label="Return to citation 24, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-performance--source-31">[31] <a href="https://www.mongodb.com/docs/v8.0/core/replica-set-oplog">https://www.mongodb.com/docs/v8.0/core/replica-set-oplog</a> — Replica Set Oplog - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-31-1" aria-label="Return to citation 31, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-performance--source-36">[36] <a href="https://www.mongodb.com/docs/v8.0/reference/limits">https://www.mongodb.com/docs/v8.0/reference/limits</a> — MongoDB Limits and Thresholds - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-36-1" aria-label="Return to citation 36, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-performance--source-42">[42] <a href="https://www.mongodb.com/docs/v8.0/reference/method/db.collection.hideIndex">https://www.mongodb.com/docs/v8.0/reference/method/db.collection.hideIndex</a> — Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-42-1" aria-label="Return to citation 42, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-performance--cite-42-2" aria-label="Return to citation 42, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-performance--source-51">[51] <a href="https://www.mongodb.com/docs/v8.0/reference/operator/aggregation/currentOp">https://www.mongodb.com/docs/v8.0/reference/operator/aggregation/currentOp</a> — $currentOp (aggregation stage) - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-51-1" aria-label="Return to citation 51, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-performance--source-62">[62] <a href="https://www.mongodb.com/docs/v8.0/administration/production-notes">https://www.mongodb.com/docs/v8.0/administration/production-notes</a> — Production Notes for Self-Managed Deployments - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-62-1" aria-label="Return to citation 62, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-performance--source-76">[76] <a href="https://www.mongodb.com/docs/v8.0/core/index-partial">https://www.mongodb.com/docs/v8.0/core/index-partial</a> — Partial Indexes - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-76-1" aria-label="Return to citation 76, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-performance--source-77">[77] <a href="https://www.mongodb.com/docs/v8.0/core/index-ttl">https://www.mongodb.com/docs/v8.0/core/index-ttl</a> — TTL Indexes - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-77-1" aria-label="Return to citation 77, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-performance--source-79">[79] <a href="https://www.mongodb.com/docs/v8.0/core/indexes/index-types/index-multikey">https://www.mongodb.com/docs/v8.0/core/indexes/index-types/index-multikey</a> — Multikey Indexes - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-79-1" aria-label="Return to citation 79, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-performance--source-84">[84] <a href="https://www.mongodb.com/docs/v8.0/reference/method/db.setProfilingLevel">https://www.mongodb.com/docs/v8.0/reference/method/db.setProfilingLevel</a> — Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-84-1" aria-label="Return to citation 84, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-performance--source-96">[96] <a href="https://www.mongodb.com/docs/v8.0/administration/full-time-diagnostic-data-capture.md">https://www.mongodb.com/docs/v8.0/administration/full-time-diagnostic-data-capture.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-96-1" aria-label="Return to citation 96, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-performance--source-98">[98] <a href="https://www.mongodb.com/docs/v8.0/core/index-hidden.md">https://www.mongodb.com/docs/v8.0/core/index-hidden.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-98-1" aria-label="Return to citation 98, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-performance--cite-98-2" aria-label="Return to citation 98, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-performance--source-101">[101] <a href="https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongod.service">https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongod.service</a> — MongoDB r8.0.29 RPM systemd unit
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-101-1" aria-label="Return to citation 101, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-performance--source-104">[104] <a href="https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-red-hat.md">https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-red-hat.md</a> — MongoDB 8.0 RHEL install manual (mixed-platform passages flagged)
+<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-104-1" aria-label="Return to citation 104, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-performance--source-110">[110] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux</a> — RHEL 9 SELinux diagnostics and persistent contexts<span class="citation-returns"><a class="citation-return" href="#mongodb-performance--cite-110-1" aria-label="Return to citation 110, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mongodb-administration.html"><span>Previous · MongoDB</span><strong>Objects, users and administration</strong></a></div><div><a rel="next" href="mongodb-backup.html"><span>Next · MongoDB</span><strong>Backup and recovery</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/observe.html">Explore See what the server is doing ↗</a><div class="current-group"><h2>In MongoDB</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mongodb-performance.html">Auditing and performance</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-audit.html">Auditing activity</a><a href="mysql-performance.html">Execution plans, indexes and diagnostics</a></div><div><span>PostgreSQL</span><a href="postgresql-vacuum.html">Vacuum, freezing and bloat</a><a href="postgresql-audit-performance.html">Audit, statistics and performance</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

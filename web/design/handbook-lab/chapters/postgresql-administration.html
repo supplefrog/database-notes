@@ -1,0 +1,350 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Objects, roles and administration — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="postgresql-administration"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/use.html">Work with objects and access</a></nav>
+<header class="reader-head"><p class="reader-context">PostgreSQL <span aria-hidden="true">/</span> Work with objects and access</p><h1>Objects, roles and administration</h1></header>
+<div class="reader-controls"><a href="../tasks/use.html">← Work with objects and access</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="PostgreSQL chapters"><ol class="chapter-list"><li><a  href="../chapters/postgresql-foundations.html">PostgreSQL foundations and tools</a></li><li><a  href="../chapters/postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></li><li><a  href="../chapters/postgresql-install-instances.html">Installation, services and instances</a></li><li><a aria-current="page" href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a  href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li><li><a  href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a  href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li><li><a  href="../chapters/postgresql-backup-recovery.html">Backup and point-in-time recovery</a></li><li><a  href="../chapters/postgresql-replication-ha.html">Replication and high availability</a></li><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a  href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a  href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#roles">Separate ownership from application access</a><a class="level-2" href="#objects">Build one small administration fixture</a><a class="level-3" href="#permissions">Verify permissions, including denials</a><a class="level-2" href="#psql">Use psql for inspection and repeatable scripts</a><a class="level-2" href="#settings">Change settings at the right scope</a><a class="level-2" href="#sessions">Inspect and stop a session deliberately</a><a class="level-2" href="#postgresql-administration--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-accounts-settings.html">Settings, accounts, roles and privileges</a><p class="product-label">MongoDB</p><a href="mongodb-administration.html">Objects, users and administration</a></nav></details></div>
+<article class="prose">
+<h2 id="roles">Separate ownership from application access</h2>
+<p>A role may own objects, receive privileges, belong to other roles and optionally log in. Do not make the application the database owner or a superuser simply to avoid grant errors. Ownership includes powers that ordinary grants cannot remove; a no-login owner plus narrow runtime roles gives a clearer boundary.<a id="postgresql-administration--cite-18-1" class="citation-ref" href="#postgresql-administration--source-18" aria-label="Source 18">[18]</a><a id="postgresql-administration--cite-19-1" class="citation-ref" href="#postgresql-administration--source-19" aria-label="Source 19">[19]</a><a id="postgresql-administration--cite-59-1" class="citation-ref" href="#postgresql-administration--source-59" aria-label="Source 59">[59]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Objects, roles and administration: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Role in this example</th>
+<th>Login</th>
+<th>Allowed work</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>postgres</code></td>
+<td>Local OS peer administration</td>
+<td>Bootstrap, maintenance requiring superuser; never the application identity.</td>
+</tr>
+<tr>
+<td><code>notes_owner</code></td>
+<td>No</td>
+<td>Own database/schema/objects; assumed only by authorized migrations.</td>
+</tr>
+<tr>
+<td><code>notes_read</code></td>
+<td>No</td>
+<td>Read objects explicitly granted in <code>notes</code>.</td>
+</tr>
+<tr>
+<td><code>notes_write</code></td>
+<td>No</td>
+<td>Read and modify rows plus use identity sequences; no schema creation.</td>
+</tr>
+<tr>
+<td><code>notes_app</code></td>
+<td>Yes</td>
+<td>Inherits <code>notes_write</code>; cannot become the object owner.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Run the following once in a fresh cluster as <code>postgres</code>. Stop on errors/name collisions; do not repurpose existing roles without reviewing their memberships.</p>
+<pre tabindex="0" role="region" aria-label="Objects, roles and administration: code 1, horizontally scrollable"><code class="language-sql">\set ON_ERROR_STOP on
+CREATE ROLE notes_owner NOLOGIN;
+CREATE ROLE notes_read NOLOGIN;
+CREATE ROLE notes_write NOLOGIN;
+CREATE ROLE notes_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+GRANT notes_write TO notes_app WITH INHERIT TRUE, SET FALSE;
+CREATE DATABASE adminlab OWNER notes_owner;
+REVOKE ALL ON DATABASE adminlab FROM PUBLIC;
+GRANT CONNECT ON DATABASE adminlab TO notes_read, notes_write;
+</code></pre>
+<p><code>CREATE DATABASE</code> cannot run inside a transaction block. Set a password interactively with psql <code>\password notes_app</code> after confirming <code>SHOW password_encryption</code> is <code>scram-sha-256</code>; never put a password in command history or these notes. The initial local peer policy requires the matching OS identity, so an app without that OS account connects by loopback TCP/SCRAM; remote access additionally requires <a href="postgresql-hardening.html#tls">TLS</a>.<a id="postgresql-administration--cite-13-1" class="citation-ref" href="#postgresql-administration--source-13" aria-label="Source 13">[13]</a><a id="postgresql-administration--cite-15-1" class="citation-ref" href="#postgresql-administration--source-15" aria-label="Source 15">[15]</a></p>
+<pre tabindex="0" role="region" aria-label="Objects, roles and administration: code 2, horizontally scrollable"><code class="language-sql">\connect adminlab
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+SET ROLE notes_owner;
+CREATE SCHEMA notes AUTHORIZATION notes_owner;
+GRANT USAGE ON SCHEMA notes TO notes_read, notes_write;
+ALTER DEFAULT PRIVILEGES FOR ROLE notes_owner IN SCHEMA notes
+  GRANT SELECT ON TABLES TO notes_read;
+ALTER DEFAULT PRIVILEGES FOR ROLE notes_owner IN SCHEMA notes
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO notes_write;
+ALTER DEFAULT PRIVILEGES FOR ROLE notes_owner IN SCHEMA notes
+  GRANT USAGE, SELECT ON SEQUENCES TO notes_write;
+ALTER DEFAULT PRIVILEGES FOR ROLE notes_owner
+  REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+RESET ROLE;
+</code></pre>
+<p>Default privileges apply to <strong>future objects created by the specified role</strong>, not all future objects in a database and not existing objects. Migrations must <code>SET ROLE notes_owner</code> before creating tables; inherited membership alone does not make that role the creator. A schema-level default grant is additive to global defaults, which is why the function <code>EXECUTE</code> revocation above has no <code>IN SCHEMA</code> clause.<a id="postgresql-administration--cite-20-1" class="citation-ref" href="#postgresql-administration--source-20" aria-label="Source 20">[20]</a></p>
+
+<h2 id="objects">Build one small administration fixture</h2>
+<p>Use only the new <code>adminlab</code> database. This fixture supports later plan, permission, backup and replication examples; it is not production schema advice. The deterministic generator inserts 2,000 rows. Existing joins teaching remains in the <a href="postgresql-joins.html">canonical joins lesson</a>, not duplicated here.</p>
+<pre tabindex="0" role="region" aria-label="Objects, roles and administration: code 3, horizontally scrollable"><code class="language-sql">\set ON_ERROR_STOP on
+BEGIN;
+SET LOCAL ROLE notes_owner;
+CREATE TABLE notes.orders (
+  order_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  customer_id integer NOT NULL CHECK (customer_id &gt; 0),
+  amount numeric(12,2) NOT NULL CHECK (amount &gt;= 0),
+  status text NOT NULL CHECK (status IN ('new','paid','cancelled')),
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO notes.orders (customer_id, amount, status, created_at)
+SELECT (g % 100) + 1, (g % 500)::numeric / 10,
+       CASE WHEN g % 3 = 0 THEN 'paid' ELSE 'new' END,
+       timestamptz '2026-01-01 00:00:00+00' + g * interval '1 minute'
+FROM generate_series(1,2000) AS g;
+
+CREATE VIEW notes.paid_orders AS
+SELECT order_id, customer_id, amount FROM notes.orders WHERE status = 'paid';
+CREATE FUNCTION notes.touch_order() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER
+SET search_path = pg_catalog
+AS $$
+BEGIN
+  NEW.updated_at := CURRENT_TIMESTAMP;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER orders_touch BEFORE UPDATE ON notes.orders
+FOR EACH ROW EXECUTE FUNCTION notes.touch_order();
+COMMIT;
+ANALYZE notes.orders;
+SELECT count(*), min(order_id), max(order_id), sum(amount) FROM notes.orders;
+</code></pre>
+<p>A trigger function returns the row to store; <code>SECURITY INVOKER</code> uses the caller’s privileges instead of elevating to the owner. This timestamp trigger is not an audit trail: it records neither old values nor authenticated actor. A normal view is stored query text, not a physical copy; its owner’s access can matter, so review view security before using one to expose restricted data.<a id="postgresql-administration--cite-50-1" class="citation-ref" href="#postgresql-administration--source-50" aria-label="Source 50">[50]</a><a id="postgresql-administration--cite-77-1" class="citation-ref" href="#postgresql-administration--source-77" aria-label="Source 77">[77]</a></p>
+<p>Identity generates values through an implicit sequence; the primary key separately enforces uniqueness. Allocations can have gaps. A manual import of explicit IDs must resynchronize the sequence before writers resume; see <a href="postgresql-migration.html#load">migration</a>.<a id="postgresql-administration--cite-48-1" class="citation-ref" href="#postgresql-administration--source-48" aria-label="Source 48">[48]</a><a id="postgresql-administration--cite-60-1" class="citation-ref" href="#postgresql-administration--source-60" aria-label="Source 60">[60]</a></p>
+<p>For existing objects that predate the defaults, apply grants explicitly as owner:</p>
+<pre tabindex="0" role="region" aria-label="Objects, roles and administration: code 4, horizontally scrollable"><code class="language-sql">SET ROLE notes_owner;
+GRANT SELECT ON ALL TABLES IN SCHEMA notes TO notes_read;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA notes TO notes_write;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA notes TO notes_write;
+RESET ROLE;
+</code></pre>
+<p>Do not grant <code>TRUNCATE</code>, <code>TRIGGER</code>, ownership or <code>CREATE</code> just to support ordinary inserts. Extension installation is separate: first install its reviewed package for major 18, inspect <code>pg_available_extensions</code>, then <code>CREATE EXTENSION</code> in the intended database using required privileges. Some modules additionally require preloading and a restart.<a id="postgresql-administration--cite-19-2" class="citation-ref" href="#postgresql-administration--source-19" aria-label="Source 19">[19]</a><a id="postgresql-administration--cite-54-1" class="citation-ref" href="#postgresql-administration--source-54" aria-label="Source 54">[54]</a></p>
+
+<h3 id="permissions">Verify permissions, including denials</h3>
+<pre tabindex="0" role="region" aria-label="Objects, roles and administration: code 5, horizontally scrollable"><code class="language-sql">\du+
+\dn+
+\dp notes.*
+\ddp
+SELECT has_database_privilege('notes_app','adminlab','CONNECT'),
+       has_schema_privilege('notes_app','notes','USAGE'),
+       has_table_privilege('notes_app','notes.orders','INSERT'),
+       has_schema_privilege('notes_app','notes','CREATE');
+</code></pre>
+<p>Connect in a <strong>new</strong> session as <code>notes_app</code> using the approved endpoint. Do not trust only an inspection query executed as superuser. Use the bootstrap loopback SCRAM endpoint before hardening, or the verified TLS endpoint afterward.<a id="postgresql-administration--cite-14-1" class="citation-ref" href="#postgresql-administration--source-14" aria-label="Source 14">[14]</a><a id="postgresql-administration--cite-18-2" class="citation-ref" href="#postgresql-administration--source-18" aria-label="Source 18">[18]</a><a id="postgresql-administration--cite-19-3" class="citation-ref" href="#postgresql-administration--source-19" aria-label="Source 19">[19]</a></p>
+<pre tabindex="0" role="region" aria-label="Objects, roles and administration: code 6, horizontally scrollable"><code class="language-sql">SELECT current_user, current_database();
+SELECT order_id, amount FROM notes.orders ORDER BY order_id LIMIT 3;
+BEGIN;
+INSERT INTO notes.orders(customer_id, amount, status)
+VALUES (42, 1.25, 'new') RETURNING order_id;
+ROLLBACK;
+</code></pre>
+<p>The row insert must succeed and leave no row after rollback; its consumed identity value is not reclaimed.<a id="postgresql-administration--cite-60-2" class="citation-ref" href="#postgresql-administration--source-60" aria-label="Source 60">[60]</a> Separately, in interactive psql (not in the setup script), run <code>CREATE TABLE notes.denied_test(id integer);</code> and <code>SET ROLE notes_owner;</code>. Both must fail with a permission error. If either succeeds, stop: review unexpected memberships/ownership before any application use. Do not silently drop an unexpectedly created object as though the test passed. Test readers separately because another inherited group can restore a revoked permission.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Objects, roles and administration: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Change</th>
+<th>Command</th>
+<th>Limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Block new logins</td>
+<td><code>ALTER ROLE notes_app NOLOGIN;</code></td>
+<td>Existing sessions remain; separately review termination.</td>
+</tr>
+<tr>
+<td>Remove a membership</td>
+<td><code>REVOKE notes_write FROM notes_app;</code></td>
+<td>Direct/other inherited grants may still allow access.</td>
+</tr>
+<tr>
+<td>Restore login</td>
+<td><code>ALTER ROLE notes_app LOGIN;</code></td>
+<td>HBA/password/database grants must also permit it.</td>
+</tr>
+<tr>
+<td>Change password</td>
+<td><code>\password notes_app</code></td>
+<td>Rotation does not disconnect old sessions.</td>
+</tr>
+<tr>
+<td>Remove a role</td>
+<td><code>DROP ROLE role_name</code></td>
+<td>First resolve ownership and dependencies in every database.</td>
+</tr>
+</tbody>
+</table></div>
+<p>For decommissioning, inventory owned/shared objects, reassign ownership to the approved successor, and revoke remaining privileges in <strong>each</strong> database before dropping the role. <code>DROP OWNED</code> can delete objects; it is not a harmless grant cleanup when the role still owns data. Keep a dependency report and backup. HBA is a connection filter, not an alternative to object grants.<a id="postgresql-administration--cite-14-2" class="citation-ref" href="#postgresql-administration--source-14" aria-label="Source 14">[14]</a><a id="postgresql-administration--cite-19-4" class="citation-ref" href="#postgresql-administration--source-19" aria-label="Source 19">[19]</a></p>
+
+<h2 id="psql">Use psql for inspection and repeatable scripts</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Objects, roles and administration: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command/option</th>
+<th>Purpose</th>
+<th>Scope/caution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>\conninfo</code>, <code>\l+</code>, <code>\dn+</code></td>
+<td>Connection, databases, schemas</td>
+<td>Check port/database before mutation.</td>
+</tr>
+<tr>
+<td><code>\dt notes.*</code>, <code>\d+ notes.orders</code>, <code>\di notes.*</code></td>
+<td>Tables, table detail, indexes</td>
+<td>Pattern and search path affect what is shown.</td>
+</tr>
+<tr>
+<td><code>\df+ notes.*</code>, <code>\dv notes.*</code>, <code>\dx</code></td>
+<td>Functions, views, installed extensions</td>
+<td>Inspect definitions/owners, not only names.</td>
+</tr>
+<tr>
+<td><code>\x auto</code>, <code>\pset pager off</code>, <code>\timing on</code></td>
+<td>Expanded output, no pager, elapsed time</td>
+<td>Client presentation, not server settings.</td>
+</tr>
+<tr>
+<td><code>\o /secure/report.txt</code>, then <code>\o</code></td>
+<td>Begin/end query-output capture</td>
+<td>Protect files; query results can contain secrets.</td>
+</tr>
+<tr>
+<td><code>-f reviewed.sql -v ON_ERROR_STOP=1 -X</code></td>
+<td>Script with failure exit status, no startup file</td>
+<td>Wrap suitable SQL in a transaction if all-or-nothing is needed.</td>
+</tr>
+<tr>
+<td><code>--single-transaction</code> / <code>-1</code></td>
+<td>One transaction around <code>-f</code>/<code>-c</code> work</td>
+<td>Not for <code>CREATE DATABASE</code>, <code>VACUUM</code>, concurrent index creation.</td>
+</tr>
+<tr>
+<td><code>\copy ...</code></td>
+<td>Client-side file import/export</td>
+<td>Server <code>COPY '/path'</code> reads server files and needs separate privileges.</td>
+</tr>
+</tbody>
+</table></div>
+<p>These flags are psql behavior, not SQL executed by the server.<a id="postgresql-administration--cite-13-2" class="citation-ref" href="#postgresql-administration--source-13" aria-label="Source 13">[13]</a></p>
+<pre tabindex="0" role="region" aria-label="Objects, roles and administration: code 7, horizontally scrollable"><code class="language-bash"># Local administrator, reviewed script; no password in arguments.
+sudo -u postgres /usr/pgsql-18/bin/psql \
+  -X -v ON_ERROR_STOP=1 -h /run/postgresql -p 5432 -d adminlab -f /secure/reviewed.sql
+</code></pre>
+<p>The OS account executing psql must be able to read/write its script/output paths. <code>\copy (SELECT order_id, amount FROM notes.orders ORDER BY order_id) TO '/secure/orders.csv' WITH (FORMAT csv, HEADER true)</code> writes on that client. Secure reports and delete them under the same retention policy as exported data.</p>
+
+<h2 id="settings">Change settings at the right scope</h2>
+<p>There is no universal MySQL <code>SET GLOBAL</code> translation. Some parameters are session-settable, some superuser-only, some reloadable, and some startup-only. Query <code>pg_settings.context</code>, <code>source</code>, <code>sourcefile</code> and <code>pending_restart</code> before changing one.<a id="postgresql-administration--cite-12-1" class="citation-ref" href="#postgresql-administration--source-12" aria-label="Source 12">[12]</a><a id="postgresql-administration--cite-58-1" class="citation-ref" href="#postgresql-administration--source-58" aria-label="Source 58">[58]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Objects, roles and administration: table 4, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Mechanism</th>
+<th>Example</th>
+<th>Lifetime / reversal</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Inspect</td>
+<td><code>SHOW work_mem;</code></td>
+<td>Current session’s effective value.</td>
+</tr>
+<tr>
+<td>Transaction-local</td>
+<td><code>SET LOCAL statement_timeout = '10s';</code></td>
+<td>Ends on commit/rollback; use inside <code>BEGIN</code>.</td>
+</tr>
+<tr>
+<td>Session</td>
+<td><code>SET work_mem = '16MB';</code></td>
+<td>Until reset/disconnect; <code>RESET work_mem</code>.</td>
+</tr>
+<tr>
+<td>Database default</td>
+<td><code>ALTER DATABASE adminlab SET statement_timeout = '30s';</code></td>
+<td>New sessions; <code>ALTER DATABASE adminlab RESET statement_timeout</code>.</td>
+</tr>
+<tr>
+<td>Role/database default</td>
+<td><code>ALTER ROLE notes_app IN DATABASE adminlab SET lock_timeout = '2s';</code></td>
+<td>New matching logins; same command with <code>RESET lock_timeout</code>.</td>
+</tr>
+<tr>
+<td>Config file</td>
+<td>Edit <code>postgresql.conf</code> or controlled includes</td>
+<td>Reload or restart per context; restore recorded previous value.</td>
+</tr>
+<tr>
+<td>Persistent SQL</td>
+<td><code>ALTER SYSTEM SET log_min_duration_statement = '500ms';</code></td>
+<td>Writes <code>postgresql.auto.conf</code>; then reload. Undo with <code>ALTER SYSTEM RESET ...</code>, then reload.</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>postgresql.auto.conf</code> overrides the main file; command-line settings can override files; role/database/session settings override applicable defaults. File includes and duplicate entries have order. Do not let automation and manual <code>ALTER SYSTEM</code> silently fight over the same parameter. <code>ALTER SYSTEM</code> cannot run in a transaction block.<a id="postgresql-administration--cite-12-2" class="citation-ref" href="#postgresql-administration--source-12" aria-label="Source 12">[12]</a></p>
+<pre tabindex="0" role="region" aria-label="Objects, roles and administration: code 8, horizontally scrollable"><code class="language-sql">SELECT name, setting, unit, context, source, sourcefile, pending_restart
+FROM pg_settings
+WHERE name IN ('work_mem','shared_buffers','statement_timeout',
+               'listen_addresses','log_min_duration_statement');
+SELECT pg_reload_conf();
+SELECT name, setting, pending_restart FROM pg_settings
+WHERE pending_restart;
+</code></pre>
+<p>Reload returning true means a signal was sent, not that every setting parsed/applied. Check file errors, server logs and a fresh session’s value. Restart settings such as port/shared buffers require a scheduled <a href="postgresql-install-instances.html#service">service restart</a>, not repeated reloads.</p>
+
+<h2 id="sessions">Inspect and stop a session deliberately</h2>
+<pre tabindex="0" role="region" aria-label="Objects, roles and administration: code 9, horizontally scrollable"><code class="language-sql">SELECT pid, usename, application_name, client_addr, state,
+       xact_start, query_start, wait_event_type, wait_event,
+       pg_blocking_pids(pid) AS blockers, left(query, 160) AS query
+FROM pg_stat_activity
+WHERE datname = 'adminlab' AND pid &lt;&gt; pg_backend_pid()
+ORDER BY xact_start NULLS LAST;
+</code></pre>
+<p>Query text can contain sensitive values; monitoring privileges and captured reports must be restricted. Ordinary users see limited information about others; grant monitoring roles deliberately rather than superuser.<a id="postgresql-administration--cite-25-1" class="citation-ref" href="#postgresql-administration--source-25" aria-label="Source 25">[25]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Objects, roles and administration: table 5, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Meaning</th>
+<th>Decision before use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SELECT pg_cancel_backend(&amp;lt;confirmed_pid&amp;gt;);</code></td>
+<td>Cancel the active query, keep session</td>
+<td>Confirm PID, user, query start and application; the transaction may still require rollback.</td>
+</tr>
+<tr>
+<td><code>SELECT pg_terminate_backend(&amp;lt;confirmed_pid&amp;gt;, 5000);</code></td>
+<td>Disconnect session, abort active transaction; wait up to 5 seconds</td>
+<td>Coordinate app retry and possible external side effects; does not undo already committed work.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The angle-bracket PID is deliberately not runnable SQL. Re-query the exact target immediately before signaling to avoid PID reuse. Permissions depend on role membership/<code>pg_signal_backend</code>; only superusers may signal superuser backends. A true cancellation return is not proof a business action was reversed—read back activity and application state.<a id="postgresql-administration--cite-23-1" class="citation-ref" href="#postgresql-administration--source-23" aria-label="Source 23">[23]</a></p>
+<p>For an idle-in-transaction blocker, cancelling a nonexistent running query is insufficient: ask its owner to commit/rollback, or terminate only after incident review. Continue with <a href="postgresql-audit-performance.html#waits">wait and performance analysis</a>.</p>
+
+<h2 id="postgresql-administration--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="postgresql-administration--source-12">[12] <a href="https://www.postgresql.org/docs/18/config-setting.html">PostgreSQL: Documentation: 18: 19.1.&nbsp;Setting Parameters</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-12-1" aria-label="Return to citation 12, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-administration--cite-12-2" aria-label="Return to citation 12, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-administration--source-13">[13] <a href="https://www.postgresql.org/docs/18/app-psql.html">PostgreSQL: Documentation: 18: psql</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-13-1" aria-label="Return to citation 13, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-administration--cite-13-2" aria-label="Return to citation 13, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-administration--source-14">[14] <a href="https://www.postgresql.org/docs/18/auth-pg-hba-conf.html">PostgreSQL: Documentation: 18: 20.1.&nbsp;The pg_hba.conf File</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-14-1" aria-label="Return to citation 14, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-administration--cite-14-2" aria-label="Return to citation 14, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-administration--source-15">[15] <a href="https://www.postgresql.org/docs/18/auth-password.html">PostgreSQL: Documentation: 18: 20.5.&nbsp;Password Authentication</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-15-1" aria-label="Return to citation 15, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-administration--source-18">[18] <a href="https://www.postgresql.org/docs/18/role-membership.html">PostgreSQL: Documentation: 18: 21.3.&nbsp;Role Membership</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-18-1" aria-label="Return to citation 18, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-administration--cite-18-2" aria-label="Return to citation 18, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-administration--source-19">[19] <a href="https://www.postgresql.org/docs/18/sql-grant.html">PostgreSQL: Documentation: 18: GRANT</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-19-1" aria-label="Return to citation 19, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-administration--cite-19-2" aria-label="Return to citation 19, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-administration--cite-19-3" aria-label="Return to citation 19, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-administration--cite-19-4" aria-label="Return to citation 19, occurrence 4">↩4</a></span></div><div class="source-entry" id="postgresql-administration--source-20">[20] <a href="https://www.postgresql.org/docs/18/sql-alterdefaultprivileges.html">PostgreSQL: Documentation: 18: ALTER DEFAULT PRIVILEGES</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-20-1" aria-label="Return to citation 20, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-administration--source-23">[23] <a href="https://www.postgresql.org/docs/18/functions-admin.html">PostgreSQL: Documentation: 18: 9.28.&nbsp;System Administration Functions</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-23-1" aria-label="Return to citation 23, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-administration--source-25">[25] <a href="https://www.postgresql.org/docs/18/monitoring-stats.html">PostgreSQL: Documentation: 18: 27.2.&nbsp;The Cumulative Statistics System</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-25-1" aria-label="Return to citation 25, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-administration--source-48">[48] <a href="https://www.postgresql.org/docs/18/ddl-identity-columns.html">PostgreSQL: Documentation: 18: 5.3.&nbsp;Identity Columns</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-48-1" aria-label="Return to citation 48, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-administration--source-50">[50] <a href="https://www.postgresql.org/docs/18/plpgsql-trigger.html">PostgreSQL: Documentation: 18: 41.10.&nbsp;Trigger Functions</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-50-1" aria-label="Return to citation 50, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-administration--source-54">[54] <a href="https://www.postgresql.org/docs/18/extend-extensions.html">PostgreSQL: Documentation: 18: 36.17.&nbsp;Packaging Related Objects into an Extension</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-54-1" aria-label="Return to citation 54, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-administration--source-58">[58] <a href="https://www.postgresql.org/docs/18/view-pg-settings.html">PostgreSQL: Documentation: 18: 53.25.&nbsp;pg_settings</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-58-1" aria-label="Return to citation 58, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-administration--source-59">[59] <a href="https://www.postgresql.org/docs/18/sql-createrole.html">PostgreSQL: Documentation: 18: CREATE ROLE</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-59-1" aria-label="Return to citation 59, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-administration--source-60">[60] <a href="https://www.postgresql.org/docs/18/functions-sequence.html">PostgreSQL: Documentation: 18: 9.17.&nbsp;Sequence Manipulation Functions</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-60-1" aria-label="Return to citation 60, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-administration--cite-60-2" aria-label="Return to citation 60, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-administration--source-77">[77] <a href="https://www.postgresql.org/docs/18/sql-createview.html">PostgreSQL: Documentation: 18: CREATE VIEW</a><span class="citation-returns"><a class="citation-return" href="#postgresql-administration--cite-77-1" aria-label="Return to citation 77, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="postgresql-install-instances.html"><span>Previous · PostgreSQL</span><strong>Installation, services and instances</strong></a></div><div><a rel="next" href="postgresql-joins.html"><span>Next · PostgreSQL</span><strong>Joins: keep the rows you mean</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/use.html">Explore Work with objects and access ↗</a><div class="current-group"><h2>In PostgreSQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a  href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></div><div><span>MongoDB</span><a href="mongodb-administration.html">Objects, users and administration</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

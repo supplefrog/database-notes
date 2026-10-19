@@ -1,0 +1,145 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Execution plans, indexes and diagnostics — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-performance"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/observe.html">See what the server is doing</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> See what the server is doing</p><h1>Execution plans, indexes and diagnostics</h1></header>
+<div class="reader-controls"><a href="../tasks/observe.html">← See what the server is doing</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a aria-current="page" href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-0630">Performance Monitoring / Tuning</a><a class="level-3" href="#mysql-b-0632">Plans, traces and indexes</a><a class="level-2" href="#mysql-b-0671">sys schema</a><a class="level-3" href="#mysql-b-0679">Information Schema</a><a class="level-2" href="#mysql-performance--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-vacuum.html">Vacuum, freezing and bloat</a><a href="postgresql-audit-performance.html">Audit, statistics and performance</a><p class="product-label">MongoDB</p><a href="mongodb-performance.html">Auditing and performance</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-performance; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-performance--cite-1-1" class="citation-ref" href="#mysql-performance--source-1" aria-label="Source 1">[1]</a><a id="mysql-performance--cite-72-1" class="citation-ref" href="#mysql-performance--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-performance--performance-monitoring-tuning" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0630">Performance Monitoring / Tuning</h2>
+<p><span id="mysql-performance--optimizer" class="source-anchor"></span>
+<span id="mysql-b-0631" class="source-anchor"></span>
+</p>
+<h3 id="mysql-b-0632">Plans, traces and indexes</h3>
+<p>Substitute an existing table/condition/index in the schematic statements below. On production, <code>ANALYZE TABLE</code> can affect plans and acquire locks; <code>EXPLAIN ANALYZE</code> <strong>executes</strong> the statement and can be expensive. Rehearse with a bounded SELECT on representative test data before applying changes.</p>
+<pre tabindex="0" role="region" aria-label="Execution plans, indexes and diagnostics: code 1, horizontally scrollable"><code class="language-sql">ANALYZE TABLE your_table;
+EXPLAIN FORMAT=JSON SELECT * FROM your_table WHERE your_condition;
+EXPLAIN ANALYZE SELECT * FROM your_table WHERE your_condition;
+</code></pre>
+<p>Estimated costs/rows are not elapsed runtime. <code>EXPLAIN ANALYZE</code> provides actual timings/rows/loops in TREE format in this target, not an assurance that every supported <code>EXPLAIN</code> form can be executed safely.</p>
+<p>For a single-session optimizer trace, save the prior settings and read the trace immediately after the statement:</p>
+<pre tabindex="0" role="region" aria-label="Execution plans, indexes and diagnostics: code 2, horizontally scrollable"><code class="language-sql">SET @old_trace = @@session.optimizer_trace;
+SET SESSION optimizer_trace='enabled=on';
+SELECT * FROM your_table WHERE your_condition;
+SELECT TRACE FROM information_schema.OPTIMIZER_TRACE\G
+SET SESSION optimizer_trace=@old_trace;
+</code></pre>
+<p>Trace output can contain sensitive SQL. Statement execution and trace collection add work.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Execution plans, indexes and diagnostics: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Schematic SQL and interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Suggest eligible indexes</td>
+<td><code>SELECT * FROM your_table USE INDEX (idx_name) WHERE your_condition;</code> restricts considered named indexes but does <strong>not force</strong> their use; a table scan remains possible.</td>
+</tr>
+<tr>
+<td>Stronger index hint</td>
+<td><code>FORCE INDEX (idx_name)</code> changes scan cost treatment; measure rather than assume it improves the query. Index hints can become stale as data changes.</td>
+</tr>
+<tr>
+<td>Disable index merge in this session</td>
+<td>Save <code>@@session.optimizer_switch</code>, then <code>SET SESSION optimizer_switch='index_merge=off';</code>. Restore the saved string after the comparison.</td>
+</tr>
+<tr>
+<td>Reset defaults</td>
+<td><code>SET SESSION optimizer_switch='default';</code> resets defaults, not necessarily the session’s original custom settings.</td>
+</tr>
+<tr>
+<td>Inspect switches</td>
+<td><code>SHOW SESSION VARIABLES LIKE 'optimizer_switch';</code></td>
+</tr>
+<tr>
+<td>List indexes</td>
+<td><code>SHOW INDEX FROM your_table;</code></td>
+</tr>
+<tr>
+<td>Add candidate covering index</td>
+<td><code>CREATE INDEX idx_covering ON your_table(col1, col2, col3);</code> only covers queries whose needed columns fit; column order matters for predicates/order/grouping.</td>
+</tr>
+<tr>
+<td>Remove an index</td>
+<td><code>DROP INDEX idx_name ON your_table;</code> only after checking constraints and workload dependence; plan DDL resource/lock costs and a recreation path.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Compare plans, latency distribution, rows examined, write overhead and storage before/after. A full scan is not automatically a missing-index defect; it can be cheapest for small tables or broad predicates.</p>
+<p><a id="mysql-performance--cite-32-1" class="citation-ref" href="#mysql-performance--source-32" aria-label="Source 32">[32]</a><a id="mysql-performance--cite-34-1" class="citation-ref" href="#mysql-performance--source-34" aria-label="Source 34">[34]</a><a id="mysql-performance--cite-94-1" class="citation-ref" href="#mysql-performance--source-94" aria-label="Source 94">[94]</a></p>
+<p><span id="mysql-performance--sys-schema" class="source-anchor"></span>
+<span id="mysql-b-0670" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0671">sys schema</h2>
+<p>These are diagnostic <strong>views</strong>, not independent copies of application data. Their results depend on enabled instrumentation and collection/reset history.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Execution plans, indexes and diagnostics: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>View</th>
+<th>Meaning and caution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sys.user_summary</code></td>
+<td>User-level statement, I/O and connection aggregates.</td>
+</tr>
+<tr>
+<td><code>sys.user_summary_by_file_io</code></td>
+<td>File I/O operations and latency by user.</td>
+</tr>
+<tr>
+<td><code>sys.innodb_buffer_stats_by_table</code></td>
+<td>Buffer-page information grouped by schema/table. Querying this view can itself harm production performance; reproduce on a test instance unless its cost has been explicitly accepted.</td>
+</tr>
+<tr>
+<td><code>sys.schema_tables_with_full_table_scans</code></td>
+<td>Reports table-access statistics with full scans; a scan is not automatically an indexing defect.</td>
+</tr>
+<tr>
+<td><code>sys.processlist</code></td>
+<td>Detailed current session/process information, based on Performance Schema.</td>
+</tr>
+</tbody>
+</table></div>
+<p><a id="mysql-performance--cite-132-1" class="citation-ref" href="#mysql-performance--source-132" aria-label="Source 132">[132]</a><a id="mysql-performance--cite-133-1" class="citation-ref" href="#mysql-performance--source-133" aria-label="Source 133">[133]</a><a id="mysql-performance--cite-134-1" class="citation-ref" href="#mysql-performance--source-134" aria-label="Source 134">[134]</a><a id="mysql-performance--cite-135-1" class="citation-ref" href="#mysql-performance--source-135" aria-label="Source 135">[135]</a><a id="mysql-performance--cite-136-1" class="citation-ref" href="#mysql-performance--source-136" aria-label="Source 136">[136]</a></p>
+<p><span id="mysql-performance--information-schema" class="source-anchor"></span>
+</p>
+<h3 id="mysql-b-0679">Information Schema</h3>
+<p><span id="mysql-b-0680" class="source-anchor"></span></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Execution plans, indexes and diagnostics: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Description</th>
+</tr>
+</thead>
+</table></div>
+<p>| <code>information_schema.tables</code> | Table/database/engine metadata. InnoDB <code>TABLE_ROWS</code> is an estimate; counts, timestamps and sizes have engine-specific meaning. |
+| <code>information_schema.table_privileges</code> | Table-level privileges visible to the current account; does not alone enumerate global/schema/role-derived effective access. Combine with <code>SHOW GRANTS</code> and role review. |</p>
+<p><a id="mysql-performance--cite-36-1" class="citation-ref" href="#mysql-performance--source-36" aria-label="Source 36">[36]</a><a id="mysql-performance--cite-39-1" class="citation-ref" href="#mysql-performance--source-39" aria-label="Source 39">[39]</a><a id="mysql-performance--cite-40-1" class="citation-ref" href="#mysql-performance--source-40" aria-label="Source 40">[40]</a></p>
+
+<h2 id="mysql-performance--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-performance--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-performance--source-32">[32] <a href="https://dev.mysql.com/doc/refman/8.4/en/explain.html">https://dev.mysql.com/doc/refman/8.4/en/explain.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.8.2 EXPLAIN Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-32-1" aria-label="Return to citation 32, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-performance--source-34">[34] <a href="https://dev.mysql.com/doc/refman/8.4/en/index-hints.html">https://dev.mysql.com/doc/refman/8.4/en/index-hints.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 10.9.4 Index Hints
+<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-34-1" aria-label="Return to citation 34, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-performance--source-36">[36] <a href="https://dev.mysql.com/doc/refman/8.4/en/information-schema.html">https://dev.mysql.com/doc/refman/8.4/en/information-schema.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 28 INFORMATION_SCHEMA Tables
+<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-36-1" aria-label="Return to citation 36, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-performance--source-39">[39] <a href="https://dev.mysql.com/doc/refman/8.4/en/grant.html">https://dev.mysql.com/doc/refman/8.4/en/grant.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.7.1.6 GRANT Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-39-1" aria-label="Return to citation 39, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-performance--source-40">[40] <a href="https://dev.mysql.com/doc/refman/8.4/en/roles.html">https://dev.mysql.com/doc/refman/8.4/en/roles.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.2.10 Using Roles
+<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-40-1" aria-label="Return to citation 40, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-performance--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-performance--source-94">[94] <a href="https://dev.mysql.com/doc/refman/8.4/en/optimizer-tracing-typical-usage.html">https://dev.mysql.com/doc/refman/8.4/en/optimizer-tracing-typical-usage.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 10.15.1 Typical Usage
+<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-94-1" aria-label="Return to citation 94, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-performance--source-132">[132] <a href="https://dev.mysql.com/doc/refman/8.4/en/sys-user-summary.html">https://dev.mysql.com/doc/refman/8.4/en/sys-user-summary.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 30.4.3.41 The user_summary and x$user_summary Views
+<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-132-1" aria-label="Return to citation 132, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-performance--source-133">[133] <a href="https://dev.mysql.com/doc/refman/8.4/en/sys-user-summary-by-file-io.html">https://dev.mysql.com/doc/refman/8.4/en/sys-user-summary-by-file-io.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 30.4.3.42 The user_summary_by_file_io and x$user_summary_by_file_io Views
+<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-133-1" aria-label="Return to citation 133, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-performance--source-134">[134] <a href="https://dev.mysql.com/doc/refman/8.4/en/sys-innodb-buffer-stats-by-table.html">https://dev.mysql.com/doc/refman/8.4/en/sys-innodb-buffer-stats-by-table.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 30.4.3.8 The innodb_buffer_stats_by_table and x$innodb_buffer_stats_by_table
+Views
+<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-134-1" aria-label="Return to citation 134, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-performance--source-135">[135] <a href="https://dev.mysql.com/doc/refman/8.4/en/sys-schema-tables-with-full-table-scans.html">https://dev.mysql.com/doc/refman/8.4/en/sys-schema-tables-with-full-table-scans.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 30.4.3.31 The schema_tables_with_full_table_scans and
+x$schema_tables_with_full_table_scans Views
+<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-135-1" aria-label="Return to citation 135, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-performance--source-136">[136] <a href="https://dev.mysql.com/doc/refman/8.4/en/sys-processlist.html">https://dev.mysql.com/doc/refman/8.4/en/sys-processlist.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 30.4.3.22 The processlist and x$processlist Views<span class="citation-returns"><a class="citation-return" href="#mysql-performance--cite-136-1" aria-label="Return to citation 136, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-audit.html"><span>Previous · MySQL</span><strong>Auditing activity</strong></a></div><div><a rel="next" href="mysql-backup-logical.html"><span>Next · MySQL</span><strong>Logical backups, restore tests and point-in-time recovery</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/observe.html">Explore See what the server is doing ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a aria-current="page" href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-vacuum.html">Vacuum, freezing and bloat</a><a href="postgresql-audit-performance.html">Audit, statistics and performance</a></div><div><span>MongoDB</span><a href="mongodb-performance.html">Auditing and performance</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

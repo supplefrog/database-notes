@@ -1,0 +1,188 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Relational-to-document migration — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mongodb-migration"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/change.html">Protect it and change it safely</a></nav>
+<header class="reader-head"><p class="reader-context">MongoDB <span aria-hidden="true">/</span> Protect it and change it safely</p><h1>Relational-to-document migration</h1></header>
+<div class="reader-controls"><a href="../tasks/change.html">← Protect it and change it safely</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MongoDB chapters"><ol class="chapter-list"><li><a  href="../chapters/mongodb-architecture.html">Architecture, editions and tools</a></li><li><a  href="../chapters/mongodb-storage.html">WiredTiger, transactions and consistency</a></li><li><a  href="../chapters/mongodb-modeling.html">Document modeling and BSON types</a></li><li><a  href="../chapters/mongodb-installation.html">Installation and first start</a></li><li><a  href="../chapters/mongodb-instances.html">Troubleshooting and isolated instances</a></li><li><a  href="../chapters/mongodb-administration.html">Objects, users and administration</a></li><li><a  href="../chapters/mongodb-performance.html">Auditing and performance</a></li><li><a  href="../chapters/mongodb-backup.html">Backup and recovery</a></li><li><a  href="../chapters/mongodb-replication.html">Replica sets and high availability</a></li><li><a  href="../chapters/mongodb-sharding.html">Sharding and resharding</a></li><li><a  href="../chapters/mongodb-security.html">Hardening, TLS and key rotation</a></li><li><a  href="../chapters/mongodb-upgrades.html">Upgrades and feature compatibility</a></li><li><a aria-current="page" href="../chapters/mongodb-migration.html">Relational-to-document migration</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mapping">Map behavior before moving bytes</a><a class="level-2" href="#import">Load one canonical Extended JSON order</a><a class="level-2" href="#reconciliation">Validate shape, types and business invariants</a><a class="level-2" href="#cutover">Capture changes and cut over once</a><a class="level-2" href="#rollback">Rollback is a data decision</a><a class="level-2" href="#mongodb-migration--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-hardening.html">TLS and encryption at rest</a><a href="mysql-upgrades.html">Upgrades and rollback planning</a><a href="mysql-migration.html">Migrating MySQL to Oracle</a><p class="product-label">PostgreSQL</p><a href="postgresql-hardening.html">Authentication, TLS and hardening</a><a href="postgresql-upgrades.html">Minor and major upgrades</a><a href="postgresql-migration.html">Migrating to PostgreSQL</a></nav></details></div>
+<article class="prose">
+<h2 id="mapping">Map behavior before moving bytes</h2>
+<p>A MongoDB migration is an application/data-model migration, not “restore a SQL dump.” Inventory source objects, joins, routines, constraints, collations, identifier generation, transactions and permission assumptions. For this worked model, customers remain referenced documents and bounded order lines embed under each order.<a id="mongodb-migration--cite-35-1" class="citation-ref" href="#mongodb-migration--source-35" aria-label="Source 35">[35]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Relational-to-document migration: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Source contract</th>
+<th>Target decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>orders</code> + <code>order_lines</code> join</td>
+<td>One bounded order aggregate, stable source ID</td>
+</tr>
+<tr>
+<td>Customer foreign key</td>
+<td><code>customerId</code> + tenant check; transaction/application policy and reconciliation</td>
+</tr>
+<tr>
+<td>DECIMAL totals</td>
+<td>Decimal128 plus explicit currency/rounding rules</td>
+</tr>
+<tr>
+<td>BIGINT keys</td>
+<td>String or BSON Long, consistent in references and filters</td>
+</tr>
+<tr>
+<td>Auto-increment</td>
+<td>Preserve source identity during migration; choose future globally unique strategy</td>
+</tr>
+<tr>
+<td>Case-insensitive uniqueness</td>
+<td>Deliberate collation/normalization/index policy, checked against duplicates</td>
+</tr>
+<tr>
+<td>Triggers/procedures</td>
+<td>Application/service workflow; no automatic SQL translation</td>
+</tr>
+<tr>
+<td>Relational permissions</td>
+<td>MongoDB roles on actual resources; no assumption of field/tenant row policy</td>
+</tr>
+<tr>
+<td>Timestamp without timezone</td>
+<td>Document original timezone/DST resolution before conversion</td>
+</tr>
+</tbody>
+</table></div>
+<p>Document each transformation, including NULL versus missing, empty strings, binary/UUID representation, decimal overflow and invalid dates. Reject/quarantine incompatible rows with source keys and reason; never silently coerce them merely to finish the import.<a id="mongodb-migration--cite-36-1" class="citation-ref" href="#mongodb-migration--source-36" aria-label="Source 36">[36]</a><a id="mongodb-migration--cite-45-1" class="citation-ref" href="#mongodb-migration--source-45" aria-label="Source 45">[45]</a></p>
+
+<h2 id="import">Load one canonical Extended JSON order</h2>
+<p><strong>Data mutation on a disposable staging database.</strong> The source extract must represent a consistent checkpoint across parent/child tables. The following file is authored fixture input, not exported production data. Canonical Extended JSON preserves Decimal128, BSON date and integer types; plain CSV/relaxed JSON can lose important distinctions.<a id="mongodb-migration--cite-45-2" class="citation-ref" href="#mongodb-migration--source-45" aria-label="Source 45">[45]</a><a id="mongodb-migration--cite-46-1" class="citation-ref" href="#mongodb-migration--source-46" aria-label="Source 46">[46]</a></p>
+<p>Create <code>orders.ejson</code> containing one JSON document per line (the single line below is one order):</p>
+<pre tabindex="0" role="region" aria-label="Relational-to-document migration: code 1, horizontally scrollable"><code class="language-json">{"_id":"o1001","tenantId":"t1","customerId":"c1","placedAt":{"$date":{"$numberLong":"1788253200000"}},"status":"new","total":{"$numberDecimal":"5.00"},"lines":[{"sku":"pencil","qty":{"$numberInt":"2"},"unitPrice":{"$numberDecimal":"2.50"}}]}
+</code></pre>
+<p>Prerequisite: the fixture <code>shop.orders</code> validator exists. As <code>useradmin</code>, grant the loader <code>operator</code> temporary <code>readWrite</code> and <code>dbAdmin</code> roles on <code>shop_migration</code>. Then, authenticated as <code>operator</code>, create a <strong>new</strong> empty target collection with the same validator and required index; inspect an existing target instead of overwriting it:[18]<a id="mongodb-migration--cite-37-1" class="citation-ref" href="#mongodb-migration--source-37" aria-label="Source 37">[37]</a><a id="mongodb-migration--cite-54-1" class="citation-ref" href="#mongodb-migration--source-54" aria-label="Source 54">[54]</a></p>
+<pre tabindex="0" role="region" aria-label="Relational-to-document migration: code 2, horizontally scrollable"><code class="language-javascript">const source = db.getSiblingDB("shop");
+const stage = db.getSiblingDB("shop_migration");
+const definition = source.getCollectionInfos({name: "orders"})[0];
+if (!definition) throw new Error("fixture validator missing");
+if (stage.getCollectionInfos({name: "orders"}).length) throw new Error("target already exists");
+stage.createCollection("orders", {
+  validator: definition.options.validator,
+  validationLevel: "strict", validationAction: "error"
+});
+stage.orders.createIndex({tenantId: 1, placedAt: -1}, {name: "tenant_recent"});
+</code></pre>
+<p>Run the separately verified <strong>RHEL 9 x86_64 Database Tools RPM 100.17.0-1</strong> from the OS shell on a trusted worker. It is not a mongod service: give the operator access to its input/output and CA files, not write access to dbPath. Preserve restrictive staging-file modes (<code>umask 077</code>) and review the worker’s actual SELinux domain; the vendor mongod policy does not cover Tools.<a id="mongodb-migration--cite-103-1" class="citation-ref" href="#mongodb-migration--source-103" aria-label="Source 103">[103]</a><a id="mongodb-migration--cite-106-1" class="citation-ref" href="#mongodb-migration--source-106" aria-label="Source 106">[106]</a> This loopback example matches the initial secured standalone; for the TLS replica/sharded deployment, use its TLS CA and topology URI instead. Keep the target database explicit.<a id="mongodb-migration--cite-45-3" class="citation-ref" href="#mongodb-migration--source-45" aria-label="Source 45">[45]</a></p>
+<pre tabindex="0" role="region" aria-label="Relational-to-document migration: code 3, horizontally scrollable"><code class="language-bash">mongoimport --host 127.0.0.1 --port 27017 --username operator \
+  --authenticationDatabase admin --db shop_migration --collection orders \
+  --type=json --file=orders.ejson --mode=insert --stopOnError --maintainInsertionOrder
+</code></pre>
+<p>Require successful exit and inspect the inserted ID/types. <code>--mode=insert</code> intentionally rejects duplicates on a rerun. A failed import can leave earlier documents inserted: inspect/quarantine the partial staging batch, then reload a clean target or use an explicitly designed idempotent upsert strategy. <code>--maintainInsertionOrder</code> makes error stopping immediate; without it a small number of concurrent inserts can still finish after the error. These flags are also checked against the official 100.17.0 tagged option definitions, because the live import manual now describes 100.18.0.<a id="mongodb-migration--cite-45-4" class="citation-ref" href="#mongodb-migration--source-45" aria-label="Source 45">[45]</a><a id="mongodb-migration--cite-67-1" class="citation-ref" href="#mongodb-migration--source-67" aria-label="Source 67">[67]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Relational-to-document migration: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Use / caution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--type=json</code></td>
+<td>Extended JSON stream; not a SQL dump</td>
+</tr>
+<tr>
+<td><code>--jsonArray</code></td>
+<td>Only if file is one JSON array; not needed for JSON-lines example</td>
+</tr>
+<tr>
+<td><code>--mode=insert</code></td>
+<td>New documents; duplicate IDs expose accidental replay</td>
+</tr>
+<tr>
+<td><code>--mode=upsert --upsertFields=...</code></td>
+<td>Replace matching document; omitted fields can disappear</td>
+</tr>
+<tr>
+<td><code>--mode=merge</code></td>
+<td>Merge imported fields; may retain unwanted obsolete fields</td>
+</tr>
+<tr>
+<td><code>--stopOnError</code></td>
+<td>Stop on error; no batch rollback</td>
+</tr>
+<tr>
+<td><code>--drop</code></td>
+<td>Destructive collection replacement; omitted here to preserve validator/index design</td>
+</tr>
+<tr>
+<td>CSV typed fields</td>
+<td>Requires explicit field-type policy; nested arrays/decimals are better represented by a driver/EJSON loader</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>mongoimport</code> does not recreate the entire source database’s indexes, users, roles, views and validation rules. Create/review those separately. Use <code>mongodump</code>/<code>mongorestore</code> for MongoDB logical backup rather than declaring import/export equivalent.<a id="mongodb-migration--cite-2-1" class="citation-ref" href="#mongodb-migration--source-2" aria-label="Source 2">[2]</a><a id="mongodb-migration--cite-45-5" class="citation-ref" href="#mongodb-migration--source-45" aria-label="Source 45">[45]</a><a id="mongodb-migration--cite-46-2" class="citation-ref" href="#mongodb-migration--source-46" aria-label="Source 46">[46]</a></p>
+
+<h2 id="reconciliation">Validate shape, types and business invariants</h2>
+<pre tabindex="0" role="region" aria-label="Relational-to-document migration: code 4, horizontally scrollable"><code class="language-javascript">const stage = db.getSiblingDB("shop_migration");
+stage.orders.find({_id: "o1001"}).toArray();
+stage.orders.aggregate([
+  {$project: {_id: 1, totalType: {$type: "$total"}, dateType: {$type: "$placedAt"},
+    quantities: {$map: {input: "$lines", as: "line", in: {$type: "$$line.qty"}}}}}
+]).toArray();
+stage.orders.aggregate([
+  {$group: {_id: "$tenantId", orders: {$sum: 1}, amount: {$sum: "$total"}}},
+  {$sort: {_id: 1}}
+]).toArray();
+stage.orders.aggregate([
+  {$project: {_id: 1, total: 1, lineTotal: {$sum: {$map: {
+    input: "$lines", as: "line",
+    in: {$multiply: ["$$line.qty", "$$line.unitPrice"]}
+  }}}}},
+  {$match: {$expr: {$ne: ["$total", "$lineTotal"]}}}
+]).toArray();
+</code></pre>
+<p>For this one-line fixture, acceptance is one <code>o1001</code>, decimal <code>total</code>, date <code>placedAt</code>, int quantities, correct tenant/customer IDs and no line-total mismatch. Real totals may include taxes/discounts/shipping: use the source’s actual business equation, not the simplified fixture equation. Compare count and exact decimal aggregates by tenant/currency/status to the <strong>same source checkpoint</strong>; retain exception reports.<a id="mongodb-migration--cite-35-2" class="citation-ref" href="#mongodb-migration--source-35" aria-label="Source 35">[35]</a><a id="mongodb-migration--cite-45-6" class="citation-ref" href="#mongodb-migration--source-45" aria-label="Source 45">[45]</a></p>
+<p>Also reconcile orphan references using <a href="mongodb-modeling.html#validation">the tenant-aware lookup</a>, duplicate business keys, date ranges, delete/tombstone behavior and index/validator definitions. The lookup is database-local: for this staging exercise, prepare <code>shop_migration.customers</code> from the <strong>same checkpoint</strong>, and run the pipeline with <code>db.getSiblingDB("shop_migration")</code>; querying <code>shop.orders</code> would accidentally validate the original fixture instead. For the one-order fixture, staging customer <code>{_id: "c1", tenantId: "t1", name: "Mira"}</code> is sufficient. Inspect existing staging customers before inserting; do not replace a real customer dataset with that example. Byte checksums of a SQL export and BSON file will differ; if using row/document checksums, define deterministic canonical field order, decimal/date/null encoding and the same logical projection on both sides.</p>
+<p>An inspection export can preserve BSON types in canonical EJSON, but remains data interchange, not a complete backup; <code>--jsonFormat=canonical</code> is present in the pinned 100.17.0 options:[46]<a id="mongodb-migration--cite-68-1" class="citation-ref" href="#mongodb-migration--source-68" aria-label="Source 68">[68]</a></p>
+<pre tabindex="0" role="region" aria-label="Relational-to-document migration: code 5, horizontally scrollable"><code class="language-bash">mongoexport --host 127.0.0.1 --port 27017 --username operator \
+  --authenticationDatabase admin --db shop_migration --collection orders \
+  --jsonFormat=canonical --out=orders-roundtrip.ejson
+</code></pre>
+<p>Reimport only into another isolated prepared target, then repeat type/business checks. Protect exports like the source database; they contain usable data.</p>
+
+<h2 id="cutover">Capture changes and cut over once</h2>
+<p>For a small migration, a source write outage through extract/load/reconciliation is the simplest complete consistency story. For a large one, use a source-specific CDC mechanism with a durable checkpoint, ordered transactions and delete handling. MongoDB change streams observe MongoDB changes, not a MySQL binlog; they do not solve source-side CDC automatically. Choose and validate the connector/application approach separately rather than inventing a universal command.<a id="mongodb-migration--cite-35-3" class="citation-ref" href="#mongodb-migration--source-35" aria-label="Source 35">[35]</a><a id="mongodb-migration--cite-40-1" class="citation-ref" href="#mongodb-migration--source-40" aria-label="Source 40">[40]</a></p>
+<p>A controlled CDC cutover has these gates:</p>
+<ol>
+<li>Take a consistent bulk snapshot with its exact source log/checkpoint position. Retain enough source history for the entire load and catch-up.</li>
+<li>Load deterministic document IDs; transform parent/child changes with a defined ordering and transaction policy. A late line deletion must not resurrect an old aggregate.</li>
+<li>Apply deltas idempotently and persist checkpoints only after acknowledged target effects. Track duplicates, dead letters, lag, schema changes and source-log expiration.</li>
+<li>Shadow-read and run application tests without letting the target become a second uncontrolled writer. Validate sort/collation, pagination, aggregates, authorization, transactions/retries and error behavior.</li>
+<li>Stop source writers and drain in-flight transactions. Record final source position; wait until target has applied it. Reconcile counts/totals/references at that stable boundary.</li>
+<li>Switch one controlled application configuration/traffic path to the target; verify reads and guarded writes with stable business request IDs. Fence old writers, retain old source read-only and monitor.</li>
+<li>Take a protected target backup and complete a restore drill before retiring source artifacts.</li>
+</ol>
+<p>No-loss dual writes are not achieved by <code>write(source); write(target);</code>: one side can succeed while the other fails. Use a proven transactional-outbox/CDC design with reconciliation, or accept a write outage. Track who owns the authoritative copy at every stage.</p>
+
+<h2 id="rollback">Rollback is a data decision</h2>
+<p>Before target writes, rollback is usually to keep/re-enable the source and discard the isolated failed target after preserving evidence. After target writes, switching back to a stale source loses accepted work. Predefine reverse replication or a reviewed reconciliation/export process, the maximum tolerated divergence and the authority to approve it.</p>
+<p>Do not overwrite source rows from an unverified MongoDB export or delete migration logs to make totals agree. Retain immutable source checkpoint extracts and transformation version/digests under retention policy. Revoke the loader’s elevated staging roles and remove temporary plaintext exports when acceptance and recovery retention permit. The application migration is done only when business behavior, recovery and access controls work—not when imported row counts look plausible.<a id="mongodb-migration--cite-18-1" class="citation-ref" href="#mongodb-migration--source-18" aria-label="Source 18">[18]</a><a id="mongodb-migration--cite-45-7" class="citation-ref" href="#mongodb-migration--source-45" aria-label="Source 45">[45]</a></p>
+
+<h2 id="mongodb-migration--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mongodb-migration--source-2">[2] <a href="https://www.mongodb.com/docs/database-tools/mongodump">https://www.mongodb.com/docs/database-tools/mongodump</a> — mongodump - Database Tools - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-2-1" aria-label="Return to citation 2, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-migration--source-18">[18] <a href="https://www.mongodb.com/docs/v8.0/tutorial/manage-users-and-roles">https://www.mongodb.com/docs/v8.0/tutorial/manage-users-and-roles</a> — Manage Users and Roles on Self-Managed Deployments - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-18-1" aria-label="Return to citation 18, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-migration--source-35">[35] <a href="https://www.mongodb.com/docs/v8.0/data-modeling">https://www.mongodb.com/docs/v8.0/data-modeling</a> — Data Modeling in MongoDB - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-35-1" aria-label="Return to citation 35, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-migration--cite-35-2" aria-label="Return to citation 35, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-migration--cite-35-3" aria-label="Return to citation 35, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-migration--source-36">[36] <a href="https://www.mongodb.com/docs/v8.0/reference/limits">https://www.mongodb.com/docs/v8.0/reference/limits</a> — MongoDB Limits and Thresholds - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-36-1" aria-label="Return to citation 36, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-migration--source-37">[37] <a href="https://www.mongodb.com/docs/v8.0/core/schema-validation">https://www.mongodb.com/docs/v8.0/core/schema-validation</a> — Schema Validation - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-37-1" aria-label="Return to citation 37, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-migration--source-40">[40] <a href="https://www.mongodb.com/docs/v8.0/core/transactions">https://www.mongodb.com/docs/v8.0/core/transactions</a> — Transactions - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-40-1" aria-label="Return to citation 40, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-migration--source-45">[45] <a href="https://www.mongodb.com/docs/database-tools/mongoimport">https://www.mongodb.com/docs/database-tools/mongoimport</a> — mongoimport - Database Tools - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-45-1" aria-label="Return to citation 45, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-migration--cite-45-2" aria-label="Return to citation 45, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-migration--cite-45-3" aria-label="Return to citation 45, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-migration--cite-45-4" aria-label="Return to citation 45, occurrence 4">↩4</a><a class="citation-return" href="#mongodb-migration--cite-45-5" aria-label="Return to citation 45, occurrence 5">↩5</a><a class="citation-return" href="#mongodb-migration--cite-45-6" aria-label="Return to citation 45, occurrence 6">↩6</a><a class="citation-return" href="#mongodb-migration--cite-45-7" aria-label="Return to citation 45, occurrence 7">↩7</a></span></div><div class="source-entry" id="mongodb-migration--source-46">[46] <a href="https://www.mongodb.com/docs/database-tools/mongoexport">https://www.mongodb.com/docs/database-tools/mongoexport</a> — mongoexport - Database Tools - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-46-1" aria-label="Return to citation 46, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-migration--cite-46-2" aria-label="Return to citation 46, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-migration--source-54">[54] <a href="https://www.mongodb.com/docs/v8.0/reference/method/db.createCollection">https://www.mongodb.com/docs/v8.0/reference/method/db.createCollection</a> — Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-54-1" aria-label="Return to citation 54, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-migration--source-67">[67] <a href="https://raw.githubusercontent.com/mongodb/mongo-tools/100.17.0/mongoimport/options.go">https://raw.githubusercontent.com/mongodb/mongo-tools/100.17.0/mongoimport/options.go</a> — MongoDB Database Tools 100.17.0 mongoimport options
+<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-67-1" aria-label="Return to citation 67, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-migration--source-68">[68] <a href="https://raw.githubusercontent.com/mongodb/mongo-tools/100.17.0/mongoexport/options.go">https://raw.githubusercontent.com/mongodb/mongo-tools/100.17.0/mongoexport/options.go</a> — MongoDB Database Tools 100.17.0 mongoexport options
+<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-68-1" aria-label="Return to citation 68, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-migration--source-103">[103] <a href="https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/README.md">https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/README.md</a> — Official MongoDB SELinux policy scope and assumptions
+<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-103-1" aria-label="Return to citation 103, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-migration--source-106">[106] <a href="https://repo.mongodb.org/yum/redhat/9/mongodb-org/8.0/x86_64/repodata/primary.xml.gz">https://repo.mongodb.org/yum/redhat/9/mongodb-org/8.0/x86_64/repodata/primary.xml.gz</a> — RHEL 9 x86_64 MongoDB vendor RPM repository metadata<span class="citation-returns"><a class="citation-return" href="#mongodb-migration--cite-106-1" aria-label="Return to citation 106, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mongodb-upgrades.html"><span>Previous · MongoDB</span><strong>Upgrades and feature compatibility</strong></a></div><div></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/change.html">Explore Protect it and change it safely ↗</a><div class="current-group"><h2>In MongoDB</h2><ol class="chapter-list"><li><a  href="../chapters/mongodb-security.html">Hardening, TLS and key rotation</a></li><li><a  href="../chapters/mongodb-upgrades.html">Upgrades and feature compatibility</a></li><li><a aria-current="page" href="../chapters/mongodb-migration.html">Relational-to-document migration</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-hardening.html">TLS and encryption at rest</a><a href="mysql-upgrades.html">Upgrades and rollback planning</a><a href="mysql-migration.html">Migrating MySQL to Oracle</a></div><div><span>PostgreSQL</span><a href="postgresql-hardening.html">Authentication, TLS and hardening</a><a href="postgresql-upgrades.html">Minor and major upgrades</a><a href="postgresql-migration.html">Migrating to PostgreSQL</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

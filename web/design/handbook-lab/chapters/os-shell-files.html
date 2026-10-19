@@ -1,0 +1,447 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Finding, editing and protecting files — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="os-shell-files"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../operating-systems.html">Operating systems</a><a href="../operating-systems.html">Work on the host</a></nav>
+<header class="reader-head"><p class="reader-context">OS <span aria-hidden="true">/</span> Work on the host</p><h1>Finding, editing and protecting files</h1></header>
+<div class="reader-controls"><a href="../operating-systems.html">← Work on the host</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="OS chapters"><ol class="chapter-list"><li><a  href="../chapters/os-processes.html">Processes and scheduling</a></li><li><a  href="../chapters/os-memory.html">Memory and virtual memory</a></li><li><a  href="../chapters/os-kernel-devices.html">Devices, kernel services and isolation</a></li><li><a  href="../chapters/os-boot.html">From power-on to login</a></li><li><a  href="../chapters/os-linux-foundations.html">Linux distributions, terminals and shells</a></li><li><a aria-current="page" href="../chapters/os-shell-files.html">Finding, editing and protecting files</a></li><li><a  href="../chapters/os-users-processes.html">Users, processes and resource monitoring</a></li><li><a  href="../chapters/os-services.html">Systemd service types</a></li><li><a  href="../chapters/os-storage.html">Filesystems, RAID, directories and partitions</a></li><li><a  href="../chapters/os-networking.html">Networking, SSH and file transfer</a></li><li><a  href="../chapters/os-access-security.html">Access control, passwords and recovery</a></li><li><a  href="../chapters/os-windows.html">Windows tools and licensing</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#os-shell-files--commands">Commands</a><a class="level-2" href="#os-shell-files--section-1">Help, discovery and system information</a><a class="level-2" href="#os-shell-files--section-2">File management and text processing</a><a class="level-2" href="#os-shell-files--section-3">Vim windows and editing</a><a class="level-2" href="#os-shell-files--section-4">Ownership, permissions and attributes</a><a class="level-2" href="#os-shell-files--section-5">Sources</a></nav></details></div>
+<article class="prose"><p><span id="os-b-0362" class="source-anchor"></span>
+<span id="os-b-0363" class="source-anchor"></span></p>
+
+<h2 id="os-shell-files--commands">Commands</h2>
+<p>Examples use <strong>Bash and GNU/Linux tools on RHEL 9</strong>. Command names, options and most file names are case-sensitive. In synopsis notation, brackets mean optional arguments, not literal characters to type; replace names such as <code>DIR</code>, <code>FILE</code>, <code>DEVICE</code> and <code>USER</code> with the verified target.<a id="os-shell-files--cite-18-1" class="citation-ref" href="#os-shell-files--source-18" aria-label="Source 18">[18]</a><a id="os-shell-files--cite-19-1" class="citation-ref" href="#os-shell-files--source-19" aria-label="Source 19">[19]</a></p>
+<pre tabindex="0" role="region" aria-label="Finding, editing and protecting files: code 1, horizontally scrollable"><code class="language-text">command [-f] [--flag] arguments
+</code></pre>
+<p>Inspect with unprivileged commands first. Administrative commands below require the appropriate authorization; do not add <code>sudo</code> to a command merely to hide a permission error.</p>
+<p><span id="os-b-0365" class="source-anchor"></span></p>
+
+<h2 id="os-shell-files--section-1">Help, discovery and system information</h2>
+<p>The command table distinguishes discovery from actions that change mounts, databases, host identity or time.<a id="os-shell-files--cite-20-1" class="citation-ref" href="#os-shell-files--source-20" aria-label="Source 20">[20]</a><a id="os-shell-files--cite-19-2" class="citation-ref" href="#os-shell-files--source-19" aria-label="Source 19">[19]</a><a id="os-shell-files--cite-54-1" class="citation-ref" href="#os-shell-files--source-54" aria-label="Source 54">[54]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Finding, editing and protecting files: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>command -v CMD</code></td>
+<td>Bash-aware command lookup; may report a builtin, function, alias or path</td>
+</tr>
+<tr>
+<td><code>which CMD</code></td>
+<td>External PATH lookup where installed; does not reliably describe every shell construct.<a id="os-shell-files--cite-125-1" class="citation-ref" href="#os-shell-files--source-125" aria-label="Source 125">[125]</a></td>
+</tr>
+<tr>
+<td><code>find DIR -name '*.conf'</code></td>
+<td>Search below <code>DIR</code> by basename; quote patterns so the shell does not expand them first</td>
+</tr>
+<tr>
+<td><code>find DIR -wholename '*/config/*'</code></td>
+<td>GNU find full-path match; <code>-path</code> is the more portable spelling</td>
+</tr>
+<tr>
+<td><code>locate PATTERN</code></td>
+<td>Search a prebuilt filename database if a locate implementation is installed; results may be stale or exclude paths.<a id="os-shell-files--cite-131-1" class="citation-ref" href="#os-shell-files--source-131" aria-label="Source 131">[131]</a></td>
+</tr>
+<tr>
+<td><code>updatedb</code></td>
+<td>Rebuild that locate database with the implementation’s configuration, often <code>/etc/updatedb.conf</code>; an authorized maintenance action that can traverse many files</td>
+</tr>
+<tr>
+<td><code>whatis CMD</code></td>
+<td>Short manual-page description from the manual index.<a id="os-shell-files--cite-127-1" class="citation-ref" href="#os-shell-files--source-127" aria-label="Source 127">[127]</a></td>
+</tr>
+<tr>
+<td><code>man CMD</code></td>
+<td>Manual page; specify a section such as <code>man 5 passwd</code> when needed.<a id="os-shell-files--cite-112-1" class="citation-ref" href="#os-shell-files--source-112" aria-label="Source 112">[112]</a></td>
+</tr>
+<tr>
+<td><code>CMD --help</code></td>
+<td>Built-in help for commands supporting this convention</td>
+</tr>
+<tr>
+<td><code>df -h FILE</code></td>
+<td>Filesystem space usage for the filesystem containing <code>FILE</code>; omit <code>FILE</code> to list filesystems</td>
+</tr>
+<tr>
+<td><code>du -h -d 1 DIR</code></td>
+<td>Storage usage for <code>DIR</code> and one level of subdirectories; allocated blocks need not equal apparent file size</td>
+</tr>
+<tr>
+<td><code>lsblk</code> / <code>lsblk -f</code></td>
+<td>Block-device topology / filesystem information.<a id="os-shell-files--cite-100-1" class="citation-ref" href="#os-shell-files--source-100" aria-label="Source 100">[100]</a></td>
+</tr>
+<tr>
+<td><code>findmnt</code></td>
+<td>Current mount information.<a id="os-shell-files--cite-101-1" class="citation-ref" href="#os-shell-files--source-101" aria-label="Source 101">[101]</a></td>
+</tr>
+<tr>
+<td><code>mount DEVICE MOUNTPOINT</code></td>
+<td>Mount a verified filesystem; requires appropriate privileges/policy</td>
+</tr>
+<tr>
+<td><code>umount MOUNTPOINT</code></td>
+<td>Unmount; it may fail while files or working directories are in use</td>
+</tr>
+<tr>
+<td><code>Ctrl+r</code> / <code>history</code></td>
+<td>Search / list Bash command history; never place passwords in commands to begin with</td>
+</tr>
+<tr>
+<td><code>w</code></td>
+<td>Logged-in sessions and activity, including TTY, login/idle and CPU information.<a id="os-shell-files--cite-110-1" class="citation-ref" href="#os-shell-files--source-110" aria-label="Source 110">[110]</a></td>
+</tr>
+<tr>
+<td><code>who</code></td>
+<td>Logged-in sessions and terminals</td>
+</tr>
+<tr>
+<td><code>last</code></td>
+<td>Login history where records exist; not proof that every access path was audited.<a id="os-shell-files--cite-111-1" class="citation-ref" href="#os-shell-files--source-111" aria-label="Source 111">[111]</a></td>
+</tr>
+<tr>
+<td><code>whoami</code></td>
+<td>Effective user name; not necessarily the original login identity</td>
+</tr>
+<tr>
+<td><code>who am i</code></td>
+<td>Login record for the current terminal, if one exists</td>
+</tr>
+<tr>
+<td><code>users</code></td>
+<td>Names associated with current login records</td>
+</tr>
+<tr>
+<td><code>finger</code></td>
+<td>Optional user-information utility; frequently absent or restricted; not required for administration</td>
+</tr>
+<tr>
+<td><code>stat FILE</code></td>
+<td>Metadata including access, modification and status-change times. <code>ctime</code> is not creation time</td>
+</tr>
+<tr>
+<td><code>date</code></td>
+<td>Print date/time. Setting time is a separate privileged action and can disrupt logs/authentication</td>
+</tr>
+<tr>
+<td><code>hostnamectl status</code></td>
+<td>Systemd host/OS/kernel information; <code>/etc/os-release</code> describes the OS</td>
+</tr>
+<tr>
+<td><code>hostnamectl set-hostname NAME</code></td>
+<td>Set hostname when authorized; coordinate DNS, monitoring and application identities first</td>
+</tr>
+<tr>
+<td><code>uname -a</code></td>
+<td>Kernel/system information; not the full distribution/package inventory</td>
+</tr>
+</tbody>
+</table></div>
+<p>Before mounting, verify the source device and destination with <code>lsblk -f</code> and <code>findmnt</code>; mounting over a nonempty directory hides its existing contents until unmount.<a id="os-shell-files--cite-102-1" class="citation-ref" href="#os-shell-files--source-102" aria-label="Source 102">[102]</a> Do not unmount a filesystem with active database/application work or force-detach it as a routine fix.<a id="os-shell-files--cite-103-1" class="citation-ref" href="#os-shell-files--source-103" aria-label="Source 103">[103]</a> For new filesystems and destructive operations, use the <a href="os-storage.html#os-b-0511">partition procedure</a>.</p>
+<p><span id="os-b-0395" class="source-anchor"></span></p>
+
+<h2 id="os-shell-files--section-2">File management and text processing</h2>
+<p>Use these operations inside a known working directory. <code>cp</code>, <code>mv</code>, redirection and archive extraction can overwrite existing data. <code>rm</code> has no general undo: inspect expanded names and protect backups before removal. Do not experiment on system, database or shared directories.<a id="os-shell-files--cite-19-3" class="citation-ref" href="#os-shell-files--source-19" aria-label="Source 19">[19]</a><a id="os-shell-files--cite-21-1" class="citation-ref" href="#os-shell-files--source-21" aria-label="Source 21">[21]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Finding, editing and protecting files: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cd PATH</code> / <code>cd -</code></td>
+<td>Change directory / return to the previous directory</td>
+</tr>
+<tr>
+<td><code>ls</code></td>
+<td>List directory entries</td>
+</tr>
+<tr>
+<td><code>ls -l</code></td>
+<td>Long format. <code>ll</code> works only if your environment defines that alias/function</td>
+</tr>
+<tr>
+<td><code>ls -a</code></td>
+<td>Include dot entries and hidden names</td>
+</tr>
+<tr>
+<td><code>ls -lh</code></td>
+<td>Human-readable sizes with long format</td>
+</tr>
+<tr>
+<td><code>ls -lu</code></td>
+<td>Display access time instead of modification time in long format; <code>-u</code> also interacts with sorting</td>
+</tr>
+<tr>
+<td><code>lsof</code></td>
+<td>List open files; visibility depends on privileges and process namespace.<a id="os-shell-files--cite-113-1" class="citation-ref" href="#os-shell-files--source-113" aria-label="Source 113">[113]</a></td>
+</tr>
+<tr>
+<td><code>cp SOURCE DEST</code></td>
+<td>Copy; existing destination data can be overwritten</td>
+</tr>
+<tr>
+<td><code>cp -r DIR DEST</code></td>
+<td>Recursive copy; choose <code>-a</code> when the intended semantics are metadata-preserving archive copy</td>
+</tr>
+<tr>
+<td><code>mv SOURCE DEST</code></td>
+<td>Move/rename; can replace a destination</td>
+</tr>
+<tr>
+<td><code>mkdir DIR</code> / <code>mkdir -p parent/child</code></td>
+<td>Create a directory / create required parents</td>
+</tr>
+<tr>
+<td><code>rm FILE</code></td>
+<td>Remove a file name; irreversible without another copy</td>
+</tr>
+<tr>
+<td><code>rm -r DIR</code></td>
+<td>Recursively remove a directory tree; verify every selected path first</td>
+</tr>
+<tr>
+<td><code>rm -f FILE</code></td>
+<td>Suppress prompts and ignore nonexistent operands; does not make removal safer</td>
+</tr>
+<tr>
+<td><code>rmdir DIR</code></td>
+<td>Remove an empty directory</td>
+</tr>
+<tr>
+<td><code>touch FILE</code></td>
+<td>Update timestamps; create an empty file if it does not exist</td>
+</tr>
+<tr>
+<td><code>echo 'text'</code></td>
+<td>Write text to standard output; use <code>printf</code> when portable escape/option behavior matters</td>
+</tr>
+<tr>
+<td><code>cat FILE1 FILE2</code></td>
+<td>Concatenate content to standard output</td>
+</tr>
+<tr>
+<td><code>CMD &gt; FILE</code> / <code>CMD 1&gt; FILE</code></td>
+<td>Redirect stdout, truncating <code>FILE</code></td>
+</tr>
+<tr>
+<td><code>CMD 2&gt; FILE</code></td>
+<td>Redirect stderr, truncating <code>FILE</code></td>
+</tr>
+<tr>
+<td><code>CMD &amp;&gt; FILE</code></td>
+<td>Bash: redirect stdout and stderr to one file</td>
+</tr>
+<tr>
+<td><code>CMD &gt;&gt; FILE</code></td>
+<td>Append stdout; use <code>2&gt;&gt;</code> for stderr or Bash <code>&amp;&gt;&gt;</code> for both</td>
+</tr>
+<tr>
+<td><code>grep -v 'word' FILE</code></td>
+<td>Exclude lines matching the expression</td>
+</tr>
+<tr>
+<td><code>grep -w 'word' FILE</code></td>
+<td>Match the expression as a whole word</td>
+</tr>
+<tr>
+<td><code>awk '{print $1, $2}' FILE</code></td>
+<td>Print the first two whitespace-separated fields</td>
+</tr>
+<tr>
+<td><code>cut -c1 FILE</code></td>
+<td>Select the first character position of each line</td>
+</tr>
+<tr>
+<td><code>sed -n '5p' FILE</code></td>
+<td>Print only line 5</td>
+</tr>
+<tr>
+<td><code>CMD | less</code></td>
+<td>Page through command stdout; there is no <code>stout</code> command</td>
+</tr>
+<tr>
+<td><code>head FILE</code> / <code>tail FILE</code></td>
+<td>Show the beginning/end of a file</td>
+</tr>
+<tr>
+<td><code>tar -cvf archive.tar FILES</code></td>
+<td>Create an uncompressed tar archive</td>
+</tr>
+<tr>
+<td><code>tar -Avf a1.tar a2.tar</code></td>
+<td>Concatenate the members of uncompressed <code>a2.tar</code> onto <code>a1.tar</code>; does not merge compressed archives</td>
+</tr>
+<tr>
+<td><code>tar -rvf a1.tar FILES</code></td>
+<td>Append files to an uncompressed archive</td>
+</tr>
+<tr>
+<td><code>tar -czvf archive.tar.gz DIR</code></td>
+<td>Create a gzip-compressed tar archive</td>
+</tr>
+<tr>
+<td><code>tar -tf archive.tar.gz</code></td>
+<td>List archive members; GNU tar recognizes compression when reading a file</td>
+</tr>
+<tr>
+<td><code>tar -xvf archive.tar.gz</code></td>
+<td>Extract into the current directory; use only after listing and selecting a safe destination</td>
+</tr>
+<tr>
+<td><code>gzip FILE</code></td>
+<td>Compress, normally replacing the input with <code>FILE.gz</code>; <code>gzip -k FILE</code> retains it</td>
+</tr>
+</tbody>
+</table></div>
+<p>For the filter examples, grep matches text, sed selects a line here, and Awk selects fields; these are distinct languages with their own quoting rules.<a id="os-shell-files--cite-73-1" class="citation-ref" href="#os-shell-files--source-73" aria-label="Source 73">[73]</a><a id="os-shell-files--cite-74-1" class="citation-ref" href="#os-shell-files--source-74" aria-label="Source 74">[74]</a><a id="os-shell-files--cite-75-1" class="citation-ref" href="#os-shell-files--source-75" aria-label="Source 75">[75]</a></p>
+<p><code>gzip</code> normally replaces its input; use its keep option when retaining the original is required.<a id="os-shell-files--cite-76-1" class="citation-ref" href="#os-shell-files--source-76" aria-label="Source 76">[76]</a></p>
+<p><strong>Expansion happens before the command runs.</strong> The source-style expression <code>file00{4,5,6}</code> expands to three names; <code>f3*</code> can match many more than intended. Inspect instead of deleting while learning:</p>
+<pre tabindex="0" role="region" aria-label="Finding, editing and protecting files: code 2, horizontally scrollable"><code class="language-bash">printf '%s\n' file1 file2 f3* file00{4,5,6}
+</code></pre>
+<p>For an archive, first list its contents, then extract as an unprivileged user into a <strong>new, empty, dedicated directory</strong>, not over a live tree. Treat untrusted archives as untrusted files even when tar rejects common traversal paths. Appending to a tar file or creating an archive with an existing output name changes that file; preserve the prior archive if it is a backup.<a id="os-shell-files--cite-21-2" class="citation-ref" href="#os-shell-files--source-21" aria-label="Source 21">[21]</a><a id="os-shell-files--cite-18-2" class="citation-ref" href="#os-shell-files--source-18" aria-label="Source 18">[18]</a></p>
+<p><span id="os-b-0433" class="source-anchor"></span></p>
+
+<h2 id="os-shell-files--section-3">Vim windows and editing</h2>
+<p>The split orientation names refer to the separating boundary: horizontal splits are stacked, vertical splits are side by side.<a id="os-shell-files--cite-22-1" class="citation-ref" href="#os-shell-files--source-22" aria-label="Source 22">[22]</a></p>
+<p>The editing and formatting commands below follow Vim’s editing and option manuals.<a id="os-shell-files--cite-77-1" class="citation-ref" href="#os-shell-files--source-77" aria-label="Source 77">[77]</a><a id="os-shell-files--cite-78-1" class="citation-ref" href="#os-shell-files--source-78" aria-label="Source 78">[78]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Finding, editing and protecting files: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vim -o file1 file2</code></td>
+<td>Open stacked horizontal splits</td>
+</tr>
+<tr>
+<td><code>vim -O file1 file2</code></td>
+<td>Open side-by-side vertical splits</td>
+</tr>
+<tr>
+<td><code>:r FILE</code></td>
+<td>Insert a file’s content below the current line</td>
+</tr>
+<tr>
+<td><code>:set textwidth=80</code></td>
+<td>Set an automatic formatting width; behavior depends on formatting options and insertion/reformatting, not display-only wrapping of all existing lines</td>
+</tr>
+<tr>
+<td><code>:split FILE</code> / <code>:vsplit FILE</code></td>
+<td>Horizontal / vertical split</td>
+</tr>
+<tr>
+<td><code>:qa</code></td>
+<td>Quit all windows; refuses when unsaved changes require attention</td>
+</tr>
+<tr>
+<td><code>:only</code></td>
+<td>Close other windows, subject to modified-buffer checks</td>
+</tr>
+<tr>
+<td><code>:wq</code> / <code>ZZ</code></td>
+<td>Write and quit; <code>ZZ</code> writes only if the buffer changed</td>
+</tr>
+<tr>
+<td><code>Ctrl+w</code> then an arrow</td>
+<td>Move to the adjacent window</td>
+</tr>
+</tbody>
+</table></div>
+<p><span id="os-b-0445" class="source-anchor"></span></p>
+
+<h2 id="os-shell-files--section-4">Ownership, permissions and attributes</h2>
+<p>Change permissions only on files you are authorized to administer. Broad recursive ownership/permission changes can expose secrets or break services; inspect the exact path and current settings first.<a id="os-shell-files--cite-19-4" class="citation-ref" href="#os-shell-files--source-19" aria-label="Source 19">[19]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Finding, editing and protecting files: table 4, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command or notation</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>chown USER:GROUP PATH</code></td>
+<td>Change owner and group (requires suitable privilege); <code>chown USER PATH</code> changes the owner</td>
+</tr>
+<tr>
+<td><code>chgrp GROUP PATH</code></td>
+<td>Change group ownership subject to permissions</td>
+</tr>
+<tr>
+<td><code>chmod u=rw,g=r,o= FILE</code></td>
+<td>Explicit symbolic mode example; <code>u</code>, <code>g</code>, <code>o</code> mean owner, group and other; <code>+</code>, <code>-</code>, <code>=</code> add/remove/set selected bits</td>
+</tr>
+<tr>
+<td><code>chmod 640 FILE</code></td>
+<td>Numeric mode: <strong>read = 4, write = 2, execute/search = 1</strong> for each owner/group/other digit</td>
+</tr>
+<tr>
+<td><code>chmod +t DIR</code> / <code>chmod -t DIR</code></td>
+<td>Set/remove sticky bit. In a writable directory it restricts removal/rename to authorized owners or privileged processes; it does not prevent modification of writable file contents</td>
+</tr>
+<tr>
+<td><code>t</code> versus <code>T</code> in <code>ls -l</code></td>
+<td>Sticky bit with / without the other-execute bit</td>
+</tr>
+<tr>
+<td><code>chattr +a FILE</code></td>
+<td>Append-only attribute on supporting filesystems; writes must append. Setting/clearing protected attributes requires appropriate privilege</td>
+</tr>
+<tr>
+<td><code>chattr +i FILE</code></td>
+<td>Immutable attribute on supporting filesystems; a suitably privileged administrator can clear it, so it is not protection from all root actions</td>
+</tr>
+<tr>
+<td><code>lsattr FILE</code></td>
+<td>Inspect supported file attributes</td>
+</tr>
+<tr>
+<td><code>umask</code></td>
+<td>Display the current creation mask</td>
+</tr>
+<tr>
+<td><code>umask 022</code></td>
+<td>Mask group/other write on future creations in this shell and descendants, subject to the requested mode and default ACLs</td>
+</tr>
+</tbody>
+</table></div>
+<p>Without a default ACL, creation permissions are <strong>requested mode AND the complement of umask</strong>. For the usual requested modes, mask <code>022</code> gives files <code>0644</code> from <code>0666</code> and directories <code>0755</code> from <code>0777</code>; mask <code>002</code> gives files <code>0664</code>. This is bit clearing, not a universally valid subtraction formula, and does not alter existing files. Default ACL inheritance can change the calculation.<a id="os-shell-files--cite-88-1" class="citation-ref" href="#os-shell-files--source-88" aria-label="Source 88">[88]</a><a id="os-shell-files--cite-19-5" class="citation-ref" href="#os-shell-files--source-19" aria-label="Source 19">[19]</a></p>
+<p>Append-only and immutable attributes are filesystem-specific controls, separate from mode bits.<a id="os-shell-files--cite-53-1" class="citation-ref" href="#os-shell-files--source-53" aria-label="Source 53">[53]</a></p>
+
+<h2 id="os-shell-files--section-5">Sources</h2>
+<div class="source-list"><div class="source-entry" id="os-shell-files--source-18">[18] <a href="https://www.gnu.org/software/bash/manual/bash.html">https://www.gnu.org/software/bash/manual/bash.html</a> — GNU Bash reference; common Bash 5.x features only
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-18-1" aria-label="Return to citation 18, occurrence 1">↩1</a><a class="citation-return" href="#os-shell-files--cite-18-2" aria-label="Return to citation 18, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-shell-files--source-19">[19] <a href="https://www.gnu.org/software/coreutils/manual/coreutils.html">https://www.gnu.org/software/coreutils/manual/coreutils.html</a> — GNU coreutils; common RHEL 9 commands
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-19-1" aria-label="Return to citation 19, occurrence 1">↩1</a><a class="citation-return" href="#os-shell-files--cite-19-2" aria-label="Return to citation 19, occurrence 2">↩2</a><a class="citation-return" href="#os-shell-files--cite-19-3" aria-label="Return to citation 19, occurrence 3">↩3</a><a class="citation-return" href="#os-shell-files--cite-19-4" aria-label="Return to citation 19, occurrence 4">↩4</a><a class="citation-return" href="#os-shell-files--cite-19-5" aria-label="Return to citation 19, occurrence 5">↩5</a></span></div><div class="source-entry" id="os-shell-files--source-20">[20] <a href="https://man7.org/linux/man-pages/man1/find.1.html">https://man7.org/linux/man-pages/man1/find.1.html</a> — GNU findutils upstream manual distributed by man7
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-20-1" aria-label="Return to citation 20, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-21">[21] <a href="https://www.gnu.org/software/tar/manual/tar.html">https://www.gnu.org/software/tar/manual/tar.html</a> — GNU tar
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-21-1" aria-label="Return to citation 21, occurrence 1">↩1</a><a class="citation-return" href="#os-shell-files--cite-21-2" aria-label="Return to citation 21, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-shell-files--source-22">[22] <a href="https://vimhelp.org/windows.txt.html">https://vimhelp.org/windows.txt.html</a> — Vim window help
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-22-1" aria-label="Return to citation 22, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-53">[53] <a href="https://man7.org/linux/man-pages/man1/chattr.1.html">https://man7.org/linux/man-pages/man1/chattr.1.html</a> — e2fsprogs attributes
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-53-1" aria-label="Return to citation 53, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-54">[54] <a href="https://raw.githubusercontent.com/systemd/systemd/v252/man/hostnamectl.xml">https://raw.githubusercontent.com/systemd/systemd/v252/man/hostnamectl.xml</a> — systemd v252 hostnamectl
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-54-1" aria-label="Return to citation 54, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-73">[73] <a href="https://www.gnu.org/software/grep/manual/grep.html">https://www.gnu.org/software/grep/manual/grep.html</a> — GNU grep
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-73-1" aria-label="Return to citation 73, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-74">[74] <a href="https://www.gnu.org/software/sed/manual/sed.html">https://www.gnu.org/software/sed/manual/sed.html</a> — GNU sed
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-74-1" aria-label="Return to citation 74, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-75">[75] <a href="https://www.gnu.org/software/gawk/manual/gawk.html">https://www.gnu.org/software/gawk/manual/gawk.html</a> — GNU Awk
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-75-1" aria-label="Return to citation 75, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-76">[76] <a href="https://www.gnu.org/software/gzip/manual/gzip.html">https://www.gnu.org/software/gzip/manual/gzip.html</a> — GNU gzip
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-76-1" aria-label="Return to citation 76, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-77">[77] <a href="https://vimhelp.org/editing.txt.html">https://vimhelp.org/editing.txt.html</a> — Vim editing commands
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-77-1" aria-label="Return to citation 77, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-78">[78] <a href="https://vimhelp.org/options.txt.html">https://vimhelp.org/options.txt.html</a> — Vim options
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-78-1" aria-label="Return to citation 78, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-88">[88] <a href="https://man7.org/linux/man-pages/man5/acl.5.html">https://man7.org/linux/man-pages/man5/acl.5.html</a> — Linux POSIX ACLs and creation masks
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-88-1" aria-label="Return to citation 88, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-100">[100] <a href="https://man7.org/linux/man-pages/man8/lsblk.8.html">https://man7.org/linux/man-pages/man8/lsblk.8.html</a> — util-linux lsblk
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-101">[101] <a href="https://man7.org/linux/man-pages/man8/findmnt.8.html">https://man7.org/linux/man-pages/man8/findmnt.8.html</a> — util-linux findmnt
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-101-1" aria-label="Return to citation 101, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-102">[102] <a href="https://man7.org/linux/man-pages/man8/mount.8.html">https://man7.org/linux/man-pages/man8/mount.8.html</a> — util-linux mount
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-102-1" aria-label="Return to citation 102, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-103">[103] <a href="https://man7.org/linux/man-pages/man8/umount.8.html">https://man7.org/linux/man-pages/man8/umount.8.html</a> — util-linux umount
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-103-1" aria-label="Return to citation 103, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-110">[110] <a href="https://man7.org/linux/man-pages/man1/w.1.html">https://man7.org/linux/man-pages/man1/w.1.html</a> — procps-ng w
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-110-1" aria-label="Return to citation 110, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-111">[111] <a href="https://man7.org/linux/man-pages/man1/last.1.html">https://man7.org/linux/man-pages/man1/last.1.html</a> — util-linux last
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-111-1" aria-label="Return to citation 111, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-112">[112] <a href="https://man7.org/linux/man-pages/man1/man.1.html">https://man7.org/linux/man-pages/man1/man.1.html</a> — man-db manual lookup
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-112-1" aria-label="Return to citation 112, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-113">[113] <a href="https://man7.org/linux/man-pages/man8/lsof.8.html">https://man7.org/linux/man-pages/man8/lsof.8.html</a> — lsof open-file listing
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-113-1" aria-label="Return to citation 113, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-125">[125] <a href="https://carlowood.github.io/which">https://carlowood.github.io/which</a> — GNU which upstream manual
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-125-1" aria-label="Return to citation 125, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-127">[127] <a href="https://man7.org/linux/man-pages/man1/whatis.1.html">https://man7.org/linux/man-pages/man1/whatis.1.html</a> — man-db whatis
+<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-127-1" aria-label="Return to citation 127, occurrence 1">↩</a></span></div><div class="source-entry" id="os-shell-files--source-131">[131] <a href="https://www.gnu.org/software/findutils">https://www.gnu.org/software/findutils</a> — GNU findutils locate/updatedb overview<span class="citation-returns"><a class="citation-return" href="#os-shell-files--cite-131-1" aria-label="Return to citation 131, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="os-linux-foundations.html"><span>Previous · OS</span><strong>Linux distributions, terminals and shells</strong></a></div><div><a rel="next" href="os-users-processes.html"><span>Next · OS</span><strong>Users, processes and resource monitoring</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../operating-systems.html">Explore Work on the host ↗</a><div class="current-group"><h2>In this group</h2><ol class="chapter-list"><li><a  href="../chapters/os-linux-foundations.html">Linux distributions, terminals and shells</a></li><li><a aria-current="page" href="../chapters/os-shell-files.html">Finding, editing and protecting files</a></li><li><a  href="../chapters/os-users-processes.html">Users, processes and resource monitoring</a></li><li><a  href="../chapters/os-services.html">Systemd service types</a></li><li><a  href="../chapters/os-storage.html">Filesystems, RAID, directories and partitions</a></li><li><a  href="../chapters/os-networking.html">Networking, SSH and file transfer</a></li><li><a  href="../chapters/os-access-security.html">Access control, passwords and recovery</a></li></ol></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

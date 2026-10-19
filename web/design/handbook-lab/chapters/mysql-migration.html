@@ -1,0 +1,185 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Migrating MySQL to Oracle — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-migration"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/change.html">Protect it and change it safely</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Protect it and change it safely</p><h1>Migrating MySQL to Oracle</h1></header>
+<div class="reader-controls"><a href="../tasks/change.html">← Protect it and change it safely</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a aria-current="page" href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-1401">Scope and compatibility gate</a><a class="level-2" href="#mysql-migration--section-1">Prepare and connect</a><a class="level-2" href="#mysql-migration--section-2">Migration repository and least privilege</a><a class="level-2" href="#mysql-migration--section-3">Capture, convert, review, load</a><a class="level-2" href="#mysql-migration--section-4">Conversion details to test</a><a class="level-2" href="#mysql-migration--section-5">Validate, cut over and roll back</a><a class="level-3" href="#mysql-migration--section-6">Offline alternative</a><a class="level-2" href="#mysql-migration--section-7">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-hardening.html">Authentication, TLS and hardening</a><a href="postgresql-upgrades.html">Minor and major upgrades</a><a href="postgresql-migration.html">Migrating to PostgreSQL</a><p class="product-label">MongoDB</p><a href="mongodb-security.html">Hardening, TLS and key rotation</a><a href="mongodb-upgrades.html">Upgrades and feature compatibility</a><a href="mongodb-migration.html">Relational-to-document migration</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-migration; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-migration--cite-1-1" class="citation-ref" href="#mysql-migration--source-1" aria-label="Source 1">[1]</a><a id="mysql-migration--cite-72-1" class="citation-ref" href="#mysql-migration--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-migration--migration" class="source-anchor"></span>
+<span id="mysql-migration--mysql-to-oracle-migration" class="source-anchor"></span>
+<span id="mysql-migration--1-prep" class="source-anchor"></span>
+<span id="mysql-migration--2-oracle-sql-developer-setup" class="source-anchor"></span>
+<span id="mysql-migration--3-connections" class="source-anchor"></span>
+<span id="mysql-migration--4-optional-oracle-migration-repository" class="source-anchor"></span>
+<span id="mysql-migration--5-migration-wizard" class="source-anchor"></span>
+<span id="mysql-migration--6-post-migration" class="source-anchor"></span>
+<span id="mysql-migration--key-notes" class="source-anchor"></span>
+<span id="mysql-b-1344" class="source-anchor"></span>
+<span id="mysql-b-1346" class="source-anchor"></span>
+<span id="mysql-b-1348" class="source-anchor"></span>
+<span id="mysql-b-1349" class="source-anchor"></span>
+<span id="mysql-b-1353" class="source-anchor"></span>
+<span id="mysql-b-1354" class="source-anchor"></span>
+<span id="mysql-b-1359" class="source-anchor"></span>
+<span id="mysql-b-1360" class="source-anchor"></span>
+<span id="mysql-b-1365" class="source-anchor"></span>
+<span id="mysql-b-1366" class="source-anchor"></span>
+<span id="mysql-b-1367" class="source-anchor"></span>
+<span id="mysql-b-1371" class="source-anchor"></span>
+<span id="mysql-b-1374" class="source-anchor"></span>
+<span id="mysql-b-1375" class="source-anchor"></span>
+<span id="mysql-b-1393" class="source-anchor"></span>
+<span id="mysql-b-1394" class="source-anchor"></span>
+<span id="mysql-b-1398" class="source-anchor"></span>
+<span id="mysql-b-1400" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-1401">Scope and compatibility gate</h2>
+<p>Source target: <strong>MySQL 8.4 LTS</strong>. Migration-workflow reference: <strong>Oracle SQL Developer 24.3</strong>, targeting an independently patched/supported <strong>Oracle Database 19c</strong> installation with the chosen PDB/service, character set and licensing approved by its DBA. This is a migration to Oracle, not PostgreSQL or MongoDB.</p>
+<p>The 24.3 migration guide still names old Connector/J releases in its MySQL preparation section. That is <strong>not evidence that those drivers support MySQL 8.4 authentication/TLS</strong>, nor proof of a certified end-to-end 8.4 migration path. Before using the wizard, validate the exact SQL Developer/JDK/Connector-J/server tuple against vendor compatibility guidance and a representative disposable rehearsal. If that tuple is not supported/working, choose a supported export/transform/load path with equivalent validation; do not downgrade authentication or install an obsolete driver just to match an old screenshot.</p>
+
+<h2 id="mysql-migration--section-1">Prepare and connect</h2>
+<ol>
+<li>Back up both systems and rehearse recovery. Inventory schemas, row counts, keys, types/collations, routines/triggers/events, views, definers, privileges, dependencies and application SQL. Establish outage/CDC requirements and an agreed reconciliation plan.</li>
+<li>Obtain a Connector/J release compatible with the actual MySQL 8.4/JDK/security requirements from Oracle’s official Connector/J distribution. Check its license and support terms. In SQL Developer, add its JAR through <strong>Tools → Preferences → Database → Third Party JDBC Drivers</strong> and restart if required. Do not mix unrelated drivers in the same classpath.</li>
+<li>Create/test the MySQL source connection with metadata/data access needed for capture, not a root account. Verify TLS identity and character/timezone handling. An account that cannot see routine definitions cannot migrate them merely because it can execute the routine.</li>
+<li>Create/test the Oracle connection to the intended <strong>PDB/service</strong>, not accidentally the root container or SYSTEM schema. Keep repository, deployment operator and application-owner responsibilities separate.</li>
+</ol>
+
+<h2 id="mysql-migration--section-2">Migration repository and least privilege</h2>
+<p>The repository is an Oracle schema storing <strong>captured and converted models</strong>. The wizard repository connection must be Oracle, not the MySQL source. SQL Developer manages repository association; if no repository exists, create/provision and associate one before the wizard. Right-click the Oracle repository connection → <strong>Migration Repository → Associate Migration Repository</strong>.</p>
+<p>Do not reuse the old <code>GRANT ... IDENTIFIED BY</code> account-creation syntax or grant unlimited quota on SYSTEM. Oracle 19c creates an account with <code>CREATE USER</code>, then grants authorized privileges separately. Use a <strong>dedicated approved non-SYSTEM permanent tablespace</strong>, appropriate temporary tablespace and bounded quota sized for the captured metadata/data needs. A DBA supplies the credential securely; no literal password is included here.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Migrating MySQL to Oracle: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Identity</th>
+<th>Minimum-scope decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MySQL capture account</td>
+<td>Read only the chosen schemas/metadata, including routine/view definitions as needed; no blanket replication/admin privileges merely for capture.</td>
+</tr>
+<tr>
+<td>Oracle repository owner</td>
+<td>The SQL Developer guide specifies RESOURCE plus CREATE SESSION, CREATE VIEW and CREATE MATERIALIZED VIEW for its repository, with extra admin privileges for multischema workflows. Review what RESOURCE grants on the actual 19c installation; do not infer a universally minimal custom grant list from its name. Grant only the documented features used, with bounded tablespace quota.</td>
+</tr>
+<tr>
+<td>Oracle DDL deployment operator</td>
+<td>Generated cross-schema DDL can require powerful ANY/admin privileges listed by SQL Developer. Do <strong>not</strong> grant this entire set to the persistent repository/application account by default. Have a DBA review/split the generated script and deploy under controlled temporary authority or schema-owner sessions where possible; audit and revoke temporary grants afterward.</td>
+</tr>
+<tr>
+<td>Oracle application owner/runtime</td>
+<td>Own only intended target objects; runtime account receives only needed object privileges, not RESOURCE/DBA or ANY privileges as a shortcut.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The official migration guide’s broad deployment privilege list is a tooling requirement for certain automated cross-schema operations, <strong>not a least-privilege production role</strong>. If unattended wizard deployment cannot fit the site’s authorization model, export the generated DDL and use the reviewed deployment path instead. Never migrate as SYS. Keep the repository after cutover only as long as needed and protect it as sensitive metadata.</p>
+
+<h2 id="mysql-migration--section-3">Capture, convert, review, load</h2>
+<p>Open <strong>Tools → Migration → Migrate</strong> after compatibility and accounts are validated.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Migrating MySQL to Oracle: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Wizard stage</th>
+<th>What to supply/check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Repository</td>
+<td>The Oracle repository connection. Do not select MySQL here; review any truncate/clear-existing-project choice because it deletes repository history.</td>
+</tr>
+<tr>
+<td>Project</td>
+<td>Explicit project name/output directory; protect generated scripts and avoid overwriting another migration.</td>
+</tr>
+<tr>
+<td>Source database</td>
+<td>Online MySQL connection, or a supported offline capture path. Capture privileges determine what is visible.</td>
+</tr>
+<tr>
+<td>Capture</td>
+<td>Select the exact databases/objects; compare captured inventory to the source. Missing definitions are not successful exclusions.</td>
+</tr>
+<tr>
+<td>Convert</td>
+<td>Review every mapping and conversion warning. Do not accept defaults without evaluating semantics.</td>
+</tr>
+<tr>
+<td>Target database</td>
+<td>Intended Oracle PDB/service/schema and reviewed DDL deployment identity. Inspect generated CREATE/ALTER/DROP statements before execution.</td>
+</tr>
+<tr>
+<td>Move data</td>
+<td>Choose online transfer for an appropriate bounded workload or supported offline unload/load. Ensure source consistency and define the cutover/delta boundary.</td>
+</tr>
+<tr>
+<td>Summary</td>
+<td>Review logs, rejected records, object failures and incomplete conversions; “Finish” is not acceptance.</td>
+</tr>
+</tbody>
+</table></div>
+
+<h2 id="mysql-migration--section-4">Conversion details to test</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Migrating MySQL to Oracle: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>MySQL feature/data</th>
+<th>Oracle review</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TINYINT</code>, <code>INT</code>, unsigned ranges</td>
+<td>Often map to <code>NUMBER</code> with chosen precision/scale; preserve full signed/unsigned range and application boolean conventions, not just the type name.</td>
+</tr>
+<tr>
+<td>AUTO_INCREMENT</td>
+<td>Review identity/sequence generation and next-value synchronization, including explicit existing IDs and concurrent writers.</td>
+</tr>
+<tr>
+<td>Character data/collation</td>
+<td>Character sets, case/accent comparison, length semantics and index limits can change query/uniqueness behavior.</td>
+</tr>
+<tr>
+<td>Empty strings and NULL</td>
+<td>Oracle character semantics differ; test sentinel values and constraints explicitly.</td>
+</tr>
+<tr>
+<td>Dates/timestamps</td>
+<td>Check zero/invalid dates, range, fractional seconds, timezone conversion and defaults.</td>
+</tr>
+<tr>
+<td>JSON, ENUM/SET, binary/LOBs</td>
+<td>Choose a supported 19c representation and transformations; do not assume a textual CAST preserves semantics or indexes.</td>
+</tr>
+<tr>
+<td>Routines, triggers, events</td>
+<td>MySQL procedural SQL is not PL/SQL; manually review transactional behavior, exceptions, delimiters, definers and scheduling equivalents.</td>
+</tr>
+<tr>
+<td>Indexes/defaults/constraints</td>
+<td>Names and syntax can change; preserve meaning and dependencies. Test foreign keys, unique constraints and generated/default expressions.</td>
+</tr>
+</tbody>
+</table></div>
+
+<h2 id="mysql-migration--section-5">Validate, cut over and roll back</h2>
+<p>Compare object inventories and normalized definitions; compare row counts plus keyed checksums/samples and business invariants; investigate rejected/truncated rows. Test application SQL, transactions, locking, error handling, performance and all background jobs. Rename indexes or set defaults only through reviewed DDL, not ad hoc cleanup hiding conversion errors.</p>
+<p>Freeze or capture final source writes under the approved migration strategy; validate the final delta boundary, switch applications and monitor. Keep the old source recoverable/read-only for the planned rollback window. Once Oracle accepts writes, a reverse cutover needs reconciliation or a defined loss window; pointing applications back to the old MySQL copy is not automatically safe.</p>
+
+<h3 id="mysql-migration--section-6">Offline alternative</h3>
+<p><code>mysqldump</code> emits MySQL SQL, <strong>not Oracle SQL or SQL*Loader control files</strong>. Do not pipe it into SQL<em>Plus/SQL</em>Loader. Use the supported SQL Developer unload/load scripts or a reviewed data export format with explicit encoding, escaping, NULL representation, date/LOB handling, Oracle DDL and SQL*Loader/external-table configuration. Test each transformation and account for rejects. Third-party/CDC tools and Oracle features have separate compatibility/licensing requirements; no universal “dump → convert → import” executable recipe is claimed.</p>
+<p><a id="mysql-migration--cite-82-1" class="citation-ref" href="#mysql-migration--source-82" aria-label="Source 82">[82]</a><a id="mysql-migration--cite-83-1" class="citation-ref" href="#mysql-migration--source-83" aria-label="Source 83">[83]</a></p>
+
+<h2 id="mysql-migration--section-7">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-migration--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-migration--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-migration--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-migration--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-migration--source-82">[82] <a href="https://docs.oracle.com/en/database/oracle/sql-developer/24.3/rptug/migrating-third-party-databases.html">https://docs.oracle.com/en/database/oracle/sql-developer/24.3/rptug/migrating-third-party-databases.html</a> — SQL Developer: Migrating Third-Party Databases
+<span class="citation-returns"><a class="citation-return" href="#mysql-migration--cite-82-1" aria-label="Return to citation 82, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-migration--source-83">[83] <a href="https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-USER.html">https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/CREATE-USER.html</a> — CREATE USER<span class="citation-returns"><a class="citation-return" href="#mysql-migration--cite-83-1" aria-label="Return to citation 83, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-upgrades.html"><span>Previous · MySQL</span><strong>Upgrades and rollback planning</strong></a></div><div></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/change.html">Explore Protect it and change it safely ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a aria-current="page" href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-hardening.html">Authentication, TLS and hardening</a><a href="postgresql-upgrades.html">Minor and major upgrades</a><a href="postgresql-migration.html">Migrating to PostgreSQL</a></div><div><span>MongoDB</span><a href="mongodb-security.html">Hardening, TLS and key rotation</a><a href="mongodb-upgrades.html">Upgrades and feature compatibility</a><a href="mongodb-migration.html">Relational-to-document migration</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

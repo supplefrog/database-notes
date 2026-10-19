@@ -1,0 +1,239 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Physical backups, tablespace transfer and log rotation — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-backup-physical"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/recover.html">Back up, then restore</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Back up, then restore</p><h1>Physical backups, tablespace transfer and log rotation</h1></header>
+<div class="reader-controls"><a href="../tasks/recover.html">← Back up, then restore</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a aria-current="page" href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-1012">Choose a physical backup product first</a><a class="level-3" href="#mysql-backup-physical--section-1">Percona XtraBackup 8.4</a><a class="level-3" href="#mysql-backup-physical--section-2">MySQL Enterprise Backup 8.4</a><a class="level-3" href="#mysql-backup-physical--section-3">Accept a restored RHEL instance, not just copied files</a><a class="level-3" href="#mysql-backup-physical--section-4">Transport an InnoDB file-per-table tablespace</a><a class="level-3" href="#mysql-backup-physical--section-5">Rotate text logs, not database recovery files</a><a class="level-2" href="#mysql-backup-physical--section-6">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-backup-recovery.html">Backup and point-in-time recovery</a><p class="product-label">MongoDB</p><a href="mongodb-backup.html">Backup and recovery</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-backup-physical; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-backup-physical--cite-1-1" class="citation-ref" href="#mysql-backup-physical--source-1" aria-label="Source 1">[1]</a><a id="mysql-backup-physical--cite-72-1" class="citation-ref" href="#mysql-backup-physical--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-backup-physical--physical-2" class="source-anchor"></span>
+<span id="mysql-backup-physical--backup" class="source-anchor"></span>
+<span id="mysql-backup-physical--restore" class="source-anchor"></span>
+<span id="mysql-b-0997" class="source-anchor"></span>
+<span id="mysql-b-0999" class="source-anchor"></span>
+<span id="mysql-b-1001" class="source-anchor"></span>
+<span id="mysql-b-1003" class="source-anchor"></span>
+<span id="mysql-b-1010" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-1012">Choose a physical backup product first</h2>
+<p>Physical backups are server-format dependent. <strong>Percona XtraBackup 8.4</strong> and <strong>MySQL Enterprise Backup 8.4 (<code>mysqlbackup</code>)</strong> are separate products with separate compatibility/support matrices, licensing and command dialects. Select an exact backup-tool build supported for the exact MySQL 8.4 server patch/edition and encryption/compression features. Do not bypass server-version checks or feed one tool’s backup into the other.</p>
+
+<h3 id="mysql-backup-physical--section-1">Percona XtraBackup 8.4</h3>
+<p>After provisioning the documented backup account/OS read access, use a new or empty private backup destination. Provision authentication in a restricted option file outside the backup, using the selected build’s documented option groups. Confirm its handling with that exact release; do not assume MySQL client password-prompt behavior applies to every backup tool. These Linux patterns show a full <strong>uncompressed, unencrypted-by-tool</strong> backup; tablespace encryption still needs supported keyring handling:</p>
+<pre tabindex="0" role="region" aria-label="Physical backups, tablespace transfer and log rotation: code 1, horizontally scrollable"><code class="language-bash">xtrabackup --defaults-file=/secure/xtrabackup.cnf --backup --target-dir=/backups/full
+xtrabackup --prepare --target-dir=/backups/full
+</code></pre>
+<p><code>--defaults-file</code> is first and names a pre-provisioned protected file containing the intended instance options and backup identity; <code>/secure/xtrabackup.cnf</code> is a site input, not a supplied credential file. Preparation modifies the backup; retain an immutable original if it must be reused in another recovery chain. Restore only with the target server stopped, the chosen datadir empty, compatible binaries/configuration/keyring available and a retained pre-restore backup:</p>
+<pre tabindex="0" role="region" aria-label="Physical backups, tablespace transfer and log rotation: code 2, horizontally scrollable"><code class="language-bash">xtrabackup --copy-back --target-dir=/backups/full --datadir=/srv/mysql-restore
+</code></pre>
+<p>Correct OS ownership, labels and access before starting. <code>--datadir</code>, not <code>--data-dir</code>, selects the target here; <code>--incremental-dir</code> does not belong on <code>--copy-back</code>.</p>
+<p>For incrementals, take a base, then each <code>--backup --incremental-basedir=/backups/previous --target-dir=/backups/next</code>, with the same reviewed instance/authentication configuration. Verify LSN continuity. Prepare the base with <code>--apply-log-only</code>, then apply intermediate incrementals <strong>in order</strong> to that base with <code>--prepare --target-dir=/backups/full --incremental-dir=/backups/next --apply-log-only</code>. Apply the <strong>final</strong> incremental without <code>--apply-log-only</code> so that final rollback/preparation completes before copying the prepared base back. Follow the exact 8.4 guide’s sequence and never reuse an already merged incremental directory as if untouched.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Physical backups, tablespace transfer and log rotation: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Source option/task</th>
+<th>XtraBackup qualification</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--tables</code>, <code>--databases</code>, <code>--databases-exclude</code></td>
+<td>Partial selection is not a whole-instance restore; transport/import constraints apply. Regex/list semantics are tool-specific.</td>
+</tr>
+<tr>
+<td><code>--target-dir</code></td>
+<td>Backup directory, not SQL database or live datadir.</td>
+</tr>
+<tr>
+<td><code>--incremental-basedir</code>, <code>--incremental-dir</code></td>
+<td>Base for taking the next backup versus incremental input during prepare; not interchangeable.</td>
+</tr>
+<tr>
+<td><code>--encrypt</code>, <code>--compress</code></td>
+<td>Have required method/key/options and corresponding decrypt/decompress steps. Do not assume boolean flags work for every release. Secure keys outside backup files and rehearse recovery.</td>
+</tr>
+<tr>
+<td><code>--parallel</code>, <code>--throttle</code></td>
+<td>Work/IO controls; tune with measured production impact.</td>
+</tr>
+<tr>
+<td><code>--use-memory</code></td>
+<td>Preparation memory budget; the source’s single-dash spelling was wrong.</td>
+</tr>
+<tr>
+<td><code>--no-timestamp</code></td>
+<td>Do not transplant this legacy wrapper-style option into a current <code>xtrabackup</code> command. Use explicit unique target directories supported by the chosen release.</td>
+</tr>
+</tbody>
+</table></div>
+
+<h3 id="mysql-backup-physical--section-2">MySQL Enterprise Backup 8.4</h3>
+<p>Requires a licensed compatible Enterprise Backup build; the program is <code>mysqlbackup</code>, not <code>mysqld</code>. Full directory backup and prepare use <strong>action words</strong>, not XtraBackup’s flags:</p>
+<pre tabindex="0" role="region" aria-label="Physical backups, tablespace transfer and log rotation: code 3, horizontally scrollable"><code class="language-bash">mysqlbackup --user=backup --password --backup-dir=/backups/meb-full backup
+mysqlbackup --backup-dir=/backups/meb-full apply-log
+</code></pre>
+<p>For a prepared directory restore to a stopped, empty target with reviewed target option files:</p>
+<pre tabindex="0" role="region" aria-label="Physical backups, tablespace transfer and log rotation: code 4, horizontally scrollable"><code class="language-bash">mysqlbackup --defaults-file=/etc/mysql-restore.cnf --backup-dir=/backups/meb-full copy-back
+</code></pre>
+<p><code>--defaults-file</code> must be first among options and must describe the intended restore instance. <code>copy-back-and-apply-log</code> combines preparation/restoration where the product supports it; it is not an XtraBackup command.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Physical backups, tablespace transfer and log rotation: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Source option/task</th>
+<th>Enterprise Backup qualification</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--backup-image</code> with <code>backup-to-image</code></td>
+<td>Single-file image backup plus a separate working <code>--backup-dir</code>; image restore/validation follows the image workflow, not an assumed directory copy.</td>
+</tr>
+<tr>
+<td><code>--incremental</code>, <code>--incremental-base</code></td>
+<td>Select incremental backup and its base (<code>dir:</code> or supported history reference); preserve the entire ordered base/incremental chain. Use MEB incremental application commands, not XtraBackup <code>--incremental-dir</code>.</td>
+</tr>
+<tr>
+<td><code>--include-tables</code>, <code>--exclude-tables</code></td>
+<td>Partial backup selection; review regex and restore restrictions.</td>
+</tr>
+<tr>
+<td>GTID-related flags</td>
+<td>Do not copy the source’s <code>--include-purge-gtids=off</code> blindly. Decide GTID preservation from the exact MEB command/reference and intended replica/recovery workflow. A physical restore inherits server state.</td>
+</tr>
+<tr>
+<td><code>--no-locking</code></td>
+<td>Not a default speed switch; can compromise consistency for mixed engines/DDL. Use only with documented external consistency guarantees.</td>
+</tr>
+<tr>
+<td><code>--skip-binlog</code></td>
+<td>Affects captured logs, not the requirement for an archived PITR chain.</td>
+</tr>
+<tr>
+<td><code>--encrypt</code>, <code>--compress</code></td>
+<td>Require the documented algorithms/key custody and restore handling for this product. Do not attach generic decrypt/uncompress flags borrowed from another tool.</td>
+</tr>
+<tr>
+<td><code>--with-timestamp</code></td>
+<td>Optional directory organization; ensure the actual resulting directory is used for prepare/restore.</td>
+</tr>
+<tr>
+<td><code>--process-threads</code>, <code>--read-threads</code>, <code>--write-threads</code></td>
+<td>Distinct processing/I/O parallelism controls; not XtraBackup’s <code>--parallel</code>.</td>
+</tr>
+<tr>
+<td><code>validate</code></td>
+<td>Physical-backup validation, e.g. <code>mysqlbackup --backup-dir=/backups/meb-full validate</code>; it does not detect missing <code>.ibd</code>/<code>.sdi</code> files or every truncation, and directory validation is limited to InnoDB data files. Independently verify the backup inventory and start a restored server to verify data/application behavior.</td>
+</tr>
+</tbody>
+</table></div>
+<p>For compressed/encrypted images or incrementals, choose the corresponding MEB 8.4 restore procedure from the manual <strong>before</strong> taking the backup. The simple full-directory examples above intentionally do not pretend to cover these mutually different formats. Test key access, complete application replay/PITR, accounts/replication state, RPO and RTO in an isolated restored instance.</p>
+
+<h3 id="mysql-backup-physical--section-3">Accept a restored RHEL instance, not just copied files</h3>
+<p>Use the configured target unit and its actual <code>datadir</code> for restore: a tool’s <code>--datadir=/srv/mysql-restore</code> alone does not change <code>/etc/my.cnf</code>, sockets, unit mount ordering, SELinux or application routing. Follow the relocation path/security checks for the restore directory, keep <code>NO_INIT</code> protection appropriate to an already restored datadir, and retain a recoverable pre-restore copy. Do not silently start an empty default directory instead of the restored tree.</p>
+<p>Before first restored startup, isolate network access/outbound jobs, configure <code>event_scheduler=OFF</code>, and prevent automatic replication start (<code>skip_replica_start=ON</code> for asynchronous channels; Group Replication has its separate <code>group_replication_start_on_boot=OFF</code>). A physical copy can contain live accounts, channel credentials and the original <code>auto.cnf</code>; it must not accidentally join production under a duplicate server identity. Same-instance disaster recovery preserves its identity only after the lost host is fenced. A new replica/clone has its own documented UUID provisioning path; do not delete <code>auto.cnf</code> from the production source.</p>
+<p>Acceptance records include backup inventory/checksums and tool exit status; successful prepare and intended unit startup; readable encrypted tables with recovered keys; complete objects/definers/accounts; independent keyed data reconciliation and business queries; exact binlog/GTID recovery boundary; and measured RPO/RTO. Confirm intended SELinux process/file contexts, a new verified-TLS session and rejected unapproved network access. A checksum, green service, zero lag, or backup utility’s <code>validate</code> output proves only its own limited property, not the entire recovery claim.</p>
+<p><a id="mysql-backup-physical--cite-76-1" class="citation-ref" href="#mysql-backup-physical--source-76" aria-label="Source 76">[76]</a><a id="mysql-backup-physical--cite-77-1" class="citation-ref" href="#mysql-backup-physical--source-77" aria-label="Source 77">[77]</a><a id="mysql-backup-physical--cite-78-1" class="citation-ref" href="#mysql-backup-physical--source-78" aria-label="Source 78">[78]</a><a id="mysql-backup-physical--cite-79-1" class="citation-ref" href="#mysql-backup-physical--source-79" aria-label="Source 79">[79]</a><a id="mysql-backup-physical--cite-80-1" class="citation-ref" href="#mysql-backup-physical--source-80" aria-label="Source 80">[80]</a><a id="mysql-backup-physical--cite-81-1" class="citation-ref" href="#mysql-backup-physical--source-81" aria-label="Source 81">[81]</a><a id="mysql-backup-physical--cite-98-1" class="citation-ref" href="#mysql-backup-physical--source-98" aria-label="Source 98">[98]</a><a id="mysql-backup-physical--cite-99-1" class="citation-ref" href="#mysql-backup-physical--source-99" aria-label="Source 99">[99]</a><a id="mysql-backup-physical--cite-100-1" class="citation-ref" href="#mysql-backup-physical--source-100" aria-label="Source 100">[100]</a><a id="mysql-backup-physical--cite-110-1" class="citation-ref" href="#mysql-backup-physical--source-110" aria-label="Source 110">[110]</a><a id="mysql-backup-physical--cite-111-1" class="citation-ref" href="#mysql-backup-physical--source-111" aria-label="Source 111">[111]</a><a id="mysql-backup-physical--cite-112-1" class="citation-ref" href="#mysql-backup-physical--source-112" aria-label="Source 112">[112]</a><a id="mysql-backup-physical--cite-113-1" class="citation-ref" href="#mysql-backup-physical--source-113" aria-label="Source 113">[113]</a><a id="mysql-backup-physical--cite-114-1" class="citation-ref" href="#mysql-backup-physical--source-114" aria-label="Source 114">[114]</a><a id="mysql-backup-physical--cite-147-1" class="citation-ref" href="#mysql-backup-physical--source-147" aria-label="Source 147">[147]</a><a id="mysql-backup-physical--cite-151-1" class="citation-ref" href="#mysql-backup-physical--source-151" aria-label="Source 151">[151]</a><a id="mysql-backup-physical--cite-19-1" class="citation-ref" href="#mysql-backup-physical--source-19" aria-label="Source 19">[19]</a><a id="mysql-backup-physical--cite-106-1" class="citation-ref" href="#mysql-backup-physical--source-106" aria-label="Source 106">[106]</a><a id="mysql-backup-physical--cite-56-1" class="citation-ref" href="#mysql-backup-physical--source-56" aria-label="Source 56">[56]</a><a id="mysql-backup-physical--cite-58-1" class="citation-ref" href="#mysql-backup-physical--source-58" aria-label="Source 58">[58]</a></p>
+<p><span id="mysql-b-1021" class="source-anchor"></span>
+<span id="mysql-b-1023" class="source-anchor"></span>
+<span id="mysql-b-1028" class="source-anchor"></span>
+<span id="mysql-b-1029" class="source-anchor"></span>
+</p>
+<h3 id="mysql-backup-physical--section-4">Transport an InnoDB file-per-table tablespace</h3>
+<p>This is a restricted table-transfer workflow, not a general full backup. Verify the documented source/target version, page size, row format, partition, encryption and foreign-key restrictions. Create the exact matching definition on the destination first and ensure its existing data is disposable/backed up. General/system tablespace tables cannot be treated as arbitrary standalone <code>.ibd</code> files.</p>
+<ol>
+<li>On the source, keep one session open with <code>FLUSH TABLES app.table_name FOR EXPORT;</code>. This is a SQL lock held by that session; do not disconnect before copying.</li>
+<li>While the lock is held, use an <strong>OS file-copy tool</strong> to copy the matching <code>.ibd</code> and export <code>.cfg</code> files to protected staging. For encrypted tables, follow the documented <code>.cfp</code>/key transfer requirements too. Verify the copy and only then <code>UNLOCK TABLES;</code> in the source session. <code>cp</code> is not SQL.</li>
+<li>On the destination, create the exact table definition, then <code>ALTER TABLE app.table_name DISCARD TABLESPACE;</code> <strong>only for the intended empty/disposable table</strong>. This discards its current tablespace; do not apply it to a populated production table.</li>
+<li>Copy the staged table files into the <strong>destination table’s actual schema path</strong>, apply correct MySQL ownership/permissions/SELinux context, and verify compatibility before <code>ALTER TABLE app.table_name IMPORT TABLESPACE;</code>.</li>
+<li>Read import warnings/errors, compare definition/row counts/data and relevant foreign-key relationships, then test application queries. Keep the source/export until validation is complete; do not delete production source data because import returned success.</li>
+</ol>
+<p>The source’s missing destination file-copy step is essential. Quiesce related tables together when consistency spans relationships; independent exports are not an atomic multi-table backup.</p>
+<p><a id="mysql-backup-physical--cite-48-1" class="citation-ref" href="#mysql-backup-physical--source-48" aria-label="Source 48">[48]</a></p>
+<p><span id="mysql-b-1035" class="source-anchor"></span>
+<span id="mysql-b-1037" class="source-anchor"></span>
+<span id="mysql-b-1039" class="source-anchor"></span>
+<span id="mysql-b-1040" class="source-anchor"></span>
+</p>
+<h3 id="mysql-backup-physical--section-5">Rotate text logs, not database recovery files</h3>
+<p>On EL9 use the package’s existing logrotate configuration as the starting point. Confirm whether the error log goes to a file, journald or a configured log component. <code>FLUSH ERROR LOGS</code> and <code>FLUSH SLOW LOGS</code> require suitable privileges and apply only to the matching file logging setup; <code>logrotate</code> does not restart arbitrary logging components.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Physical backups, tablespace transfer and log rotation: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Original directive</th>
+<th>Meaning and deployment check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/var/log/mysql/mysql_error.log /var/log/mysql/slow_query.log</code></td>
+<td>Example paths only; use actual configured paths. EL9 RPM error-log defaults often differ. Avoid duplicate stanzas managed by the package.</td>
+</tr>
+<tr>
+<td><code>compress</code></td>
+<td>Compress rotated text files; consider <code>delaycompress</code> until the server has reopened the new file successfully.</td>
+</tr>
+<tr>
+<td><code>create 660 mysql mysql</code></td>
+<td>Mode/owner/group of the new file. Prefer only the readers required by policy; 0640 may suffice. Verify service access and SELinux labels.</td>
+</tr>
+<tr>
+<td><code>size 1G</code></td>
+<td>Rotate when size exceeds this threshold at a scheduled logrotate run; not a hard maximum enforced continuously.</td>
+</tr>
+<tr>
+<td><code>dateext</code></td>
+<td>Date-based archive naming; frequent rotations may need adequate date granularity.</td>
+</tr>
+<tr>
+<td><code>missingok</code>, <code>notifempty</code></td>
+<td>Tolerate absent/empty files; do not use these to hide missing required audit data.</td>
+</tr>
+<tr>
+<td><code>sharedscripts</code></td>
+<td>Run the reopen action once for the grouped files.</td>
+</tr>
+<tr>
+<td><code>postrotate</code> / <code>endscript</code></td>
+<td>Reopen logs via an authorized local MySQL connection; ensure the scheduled OS identity can access the intended restricted login path/socket. An operator’s personal login path is not automatically root’s or the service user’s.</td>
+</tr>
+<tr>
+<td><code>rotate 30</code></td>
+<td>Keep up to 30 rotated files, not necessarily 30 days; align with retention/security requirements.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Inspect logrotate’s dry-run/debug output with the real local configuration, then perform a controlled test: server must write to the new file and archives must remain readable by authorized operators. Do not place credentials in the stanza. Do not send binlogs, relay logs, redo, undo, <code>.ibd</code> or Enterprise Audit files through this generic text-log recipe; they have their own managed retention/rotation interfaces.</p>
+<p><a id="mysql-backup-physical--cite-19-2" class="citation-ref" href="#mysql-backup-physical--source-19" aria-label="Source 19">[19]</a><a id="mysql-backup-physical--cite-29-1" class="citation-ref" href="#mysql-backup-physical--source-29" aria-label="Source 29">[29]</a><a id="mysql-backup-physical--cite-42-1" class="citation-ref" href="#mysql-backup-physical--source-42" aria-label="Source 42">[42]</a><a id="mysql-backup-physical--cite-47-1" class="citation-ref" href="#mysql-backup-physical--source-47" aria-label="Source 47">[47]</a><a id="mysql-backup-physical--cite-143-1" class="citation-ref" href="#mysql-backup-physical--source-143" aria-label="Source 143">[143]</a></p>
+
+<h2 id="mysql-backup-physical--section-6">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-backup-physical--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-19">[19] <a href="https://dev.mysql.com/doc/refman/8.4/en/using-systemd.html">https://dev.mysql.com/doc/refman/8.4/en/using-systemd.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.5.9 Managing MySQL Server with systemd
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-19-1" aria-label="Return to citation 19, occurrence 1">↩1</a><a class="citation-return" href="#mysql-backup-physical--cite-19-2" aria-label="Return to citation 19, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-backup-physical--source-29">[29] <a href="https://dev.mysql.com/doc/refman/8.4/en/audit-log-reference.html">https://dev.mysql.com/doc/refman/8.4/en/audit-log-reference.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.5.11 Audit Log Reference
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-29-1" aria-label="Return to citation 29, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-42">[42] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-commands.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-commands.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.5.1.2 mysql Client Commands
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-42-1" aria-label="Return to citation 42, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-47">[47] <a href="https://dev.mysql.com/doc/refman/8.4/en/purge-binary-logs.html">https://dev.mysql.com/doc/refman/8.4/en/purge-binary-logs.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.4.1.1 PURGE BINARY LOGS Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-47-1" aria-label="Return to citation 47, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-48">[48] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-table-import.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-table-import.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.6.1.3 Importing InnoDB Tables
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-48-1" aria-label="Return to citation 48, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-56">[56] <a href="https://dev.mysql.com/doc/refman/8.4/en/replication-options-replica.html">https://dev.mysql.com/doc/refman/8.4/en/replication-options-replica.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 19.1.6.3 Replica Server Options and Variables
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-56-1" aria-label="Return to citation 56, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-58">[58] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-requirements.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-requirements.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 20.3.1 Group Replication Requirements
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-58-1" aria-label="Return to citation 58, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-76">[76] <a href="https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-commands.html">https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-commands.html</a> — MySQL :: MySQL Enterprise Backup 8.4 User’s Guide :: 18 mysqlbackup commands
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-76-1" aria-label="Return to citation 76, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-77">[77] <a href="https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/mysqlbackup.html">https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/mysqlbackup.html</a> — MySQL :: MySQL Enterprise Backup 8.4 User’s Guide :: 17 mysqlbackup
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-77-1" aria-label="Return to citation 77, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-78">[78] <a href="https://docs.percona.com/percona-xtrabackup/8.4/create-full-backup.html">https://docs.percona.com/percona-xtrabackup/8.4/create-full-backup.html</a> — Create a full backup - Percona XtraBackup
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-78-1" aria-label="Return to citation 78, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-79">[79] <a href="https://docs.percona.com/percona-xtrabackup/8.4/prepare-full-backup.html">https://docs.percona.com/percona-xtrabackup/8.4/prepare-full-backup.html</a> — Prepare a full backup - Percona XtraBackup
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-79-1" aria-label="Return to citation 79, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-80">[80] <a href="https://docs.percona.com/percona-xtrabackup/8.4/restore-a-backup.html">https://docs.percona.com/percona-xtrabackup/8.4/restore-a-backup.html</a> — Restore full, incremental, compressed backups - Percona XtraBackup
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-80-1" aria-label="Return to citation 80, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-81">[81] <a href="https://docs.percona.com/percona-xtrabackup/8.4/create-incremental-backup.html">https://docs.percona.com/percona-xtrabackup/8.4/create-incremental-backup.html</a> — Create an incremental backup - Percona XtraBackup
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-81-1" aria-label="Return to citation 81, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-98">[98] <a href="https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-apply-log.html">https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-apply-log.html</a> — MySQL :: MySQL Enterprise Backup 8.4 User’s Guide :: 5.1.7 Advanced: Preparing and Restoring a Directory Backup
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-98-1" aria-label="Return to citation 98, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-99">[99] <a href="https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-incremental-options.html">https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-incremental-options.html</a> — MySQL :: MySQL Enterprise Backup 8.4 User’s Guide :: 19.7 Incremental Backup Options
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-99-1" aria-label="Return to citation 99, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-100">[100] <a href="https://docs.percona.com/percona-xtrabackup/8.4/prepare-incremental-backup.html">https://docs.percona.com/percona-xtrabackup/8.4/prepare-incremental-backup.html</a> — Prepare an incremental backup - Percona XtraBackup
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-106">[106] <a href="https://dev.mysql.com/doc/refman/8.4/en/selinux-file-context.html">https://dev.mysql.com/doc/refman/8.4/en/selinux-file-context.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.7.4 SELinux File Context
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-106-1" aria-label="Return to citation 106, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-110">[110] <a href="https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-commands-backup.html">https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-commands-backup.html</a> — MySQL :: MySQL Enterprise Backup 8.4 User’s Guide :: 18.1 Backup Operations
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-110-1" aria-label="Return to citation 110, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-111">[111] <a href="https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-commands-update.html">https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-commands-update.html</a> — MySQL :: MySQL Enterprise Backup 8.4 User’s Guide :: 18.2 Update Operations
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-111-1" aria-label="Return to citation 111, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-112">[112] <a href="https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-commands-restore.html">https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-commands-restore.html</a> — MySQL :: MySQL Enterprise Backup 8.4 User’s Guide :: 18.3 Restore Operations
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-112-1" aria-label="Return to citation 112, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-113">[113] <a href="https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-commands-validate.html">https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/backup-commands-validate.html</a> — MySQL :: MySQL Enterprise Backup 8.4 User’s Guide :: 18.4 Validation Operations
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-113-1" aria-label="Return to citation 113, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-114">[114] <a href="https://docs.percona.com/percona-xtrabackup/8.4/server-backup-version-comparison.html">https://docs.percona.com/percona-xtrabackup/8.4/server-backup-version-comparison.html</a> — Server version and backup version comparison - Percona XtraBackup
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-114-1" aria-label="Return to citation 114, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-143">[143] <a href="https://dev.mysql.com/doc/refman/8.4/en/flush.html">https://dev.mysql.com/doc/refman/8.4/en/flush.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.7.8.3 FLUSH Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-143-1" aria-label="Return to citation 143, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-147">[147] <a href="https://docs.percona.com/percona-xtrabackup/8.4/xtrabackup-option-reference.html">https://docs.percona.com/percona-xtrabackup/8.4/xtrabackup-option-reference.html</a> — The xtrabackup command-line options - Percona XtraBackup
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-147-1" aria-label="Return to citation 147, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-physical--source-151">[151] <a href="https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/mysqlbackup.usage.html">https://dev.mysql.com/doc/mysql-enterprise-backup/8.4/en/mysqlbackup.usage.html</a> — MySQL :: MySQL Enterprise Backup 8.4 User’s Guide :: 19 mysqlbackup Command-Line Options<span class="citation-returns"><a class="citation-return" href="#mysql-backup-physical--cite-151-1" aria-label="Return to citation 151, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-backup-logical.html"><span>Previous · MySQL</span><strong>Logical backups, restore tests and point-in-time recovery</strong></a></div><div><a rel="next" href="mysql-replication.html"><span>Next · MySQL</span><strong>Source-replica replication and recovery</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/recover.html">Explore Back up, then restore ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a aria-current="page" href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-backup-recovery.html">Backup and point-in-time recovery</a></div><div><span>MongoDB</span><a href="mongodb-backup.html">Backup and recovery</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

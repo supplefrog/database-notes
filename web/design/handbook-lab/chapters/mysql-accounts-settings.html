@@ -1,0 +1,171 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Settings, accounts, roles and privileges — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-accounts-settings"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/use.html">Work with objects and access</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Work with objects and access</p><h1>Settings, accounts, roles and privileges</h1></header>
+<div class="reader-controls"><a href="../tasks/use.html">← Work with objects and access</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a aria-current="page" href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-0753">System variables</a><a class="level-2" href="#mysql-accounts-settings--section-1">Accounts and authentication</a><a class="level-3" href="#mysql-accounts-settings--section-2">Roles and grants</a><a class="level-3" href="#mysql-accounts-settings--section-3">Login paths</a><a class="level-3" href="#mysql-accounts-settings--section-4">Authorized root-password recovery</a><a class="level-2" href="#mysql-accounts-settings--section-5">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-administration.html">Objects, roles and administration</a><a href="postgresql-joins.html">Joins: keep the rows you mean</a><p class="product-label">MongoDB</p><a href="mongodb-administration.html">Objects, users and administration</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-accounts-settings; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-accounts-settings--cite-1-1" class="citation-ref" href="#mysql-accounts-settings--source-1" aria-label="Source 1">[1]</a><a id="mysql-accounts-settings--cite-72-1" class="citation-ref" href="#mysql-accounts-settings--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-accounts-settings--change-system-variables" class="source-anchor"></span>
+<span id="mysql-accounts-settings--user-management" class="source-anchor"></span>
+<span id="mysql-accounts-settings--lock-user-prevent-login" class="source-anchor"></span>
+<span id="mysql-accounts-settings--roles" class="source-anchor"></span>
+<span id="mysql-accounts-settings--display-privileges" class="source-anchor"></span>
+<span id="mysql-accounts-settings--grant-privileges" class="source-anchor"></span>
+<span id="mysql-accounts-settings--create-drop-user" class="source-anchor"></span>
+<span id="mysql-accounts-settings--reset-root-password" class="source-anchor"></span>
+<span id="mysql-b-0685" class="source-anchor"></span>
+<span id="mysql-b-0686" class="source-anchor"></span>
+<span id="mysql-b-0692" class="source-anchor"></span>
+<span id="mysql-b-0694" class="source-anchor"></span>
+<span id="mysql-b-0696" class="source-anchor"></span>
+<span id="mysql-b-0697" class="source-anchor"></span>
+<span id="mysql-b-0701" class="source-anchor"></span>
+<span id="mysql-b-0702" class="source-anchor"></span>
+<span id="mysql-b-0705" class="source-anchor"></span>
+<span id="mysql-b-0713" class="source-anchor"></span>
+<span id="mysql-b-0714" class="source-anchor"></span>
+<span id="mysql-b-0718" class="source-anchor"></span>
+<span id="mysql-b-0719" class="source-anchor"></span>
+<span id="mysql-b-0727" class="source-anchor"></span>
+<span id="mysql-b-0728" class="source-anchor"></span>
+<span id="mysql-b-0734" class="source-anchor"></span>
+<span id="mysql-b-0741" class="source-anchor"></span>
+<span id="mysql-b-0743" class="source-anchor"></span>
+<span id="mysql-b-0745" class="source-anchor"></span>
+<span id="mysql-b-0747" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0753">System variables</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Settings, accounts, roles and privileges: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command pattern</th>
+<th>Scope and limits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SHOW GLOBAL VARIABLES LIKE 'max_connections';</code></td>
+<td>Global value. <code>SHOW SESSION VARIABLES</code> reports the current session where supported.</td>
+</tr>
+<tr>
+<td><code>SET SESSION variable_name=value;</code></td>
+<td>Changes this connection if the variable is session-scoped/dynamic. <code>LOCAL</code> means SESSION, not GLOBAL.</td>
+</tr>
+<tr>
+<td><code>SET GLOBAL variable_name=value;</code></td>
+<td>Requires variable-administration privilege; global changes to dual-scope variables usually affect newly created sessions, not existing session copies.</td>
+</tr>
+<tr>
+<td><code>SET PERSIST variable_name=value;</code></td>
+<td>Changes the runtime global value and persists it in server-managed <code>mysqld-auto.cnf</code> if supported.</td>
+</tr>
+<tr>
+<td><code>SET PERSIST_ONLY variable_name=value;</code></td>
+<td>Persists without changing the runtime value; useful for allowed startup-only settings, with appropriate privilege.</td>
+</tr>
+<tr>
+<td><code>RESET PERSIST variable_name;</code></td>
+<td>Removes a persisted entry; does not revert its current runtime value. Restore runtime separately or restart with intended configuration.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Read the variable’s scope, dynamic status, units and privilege requirements before setting it. Do not hand-edit <code>mysqld-auto.cnf</code> as a routine config workflow. Save prior values, change one thing, and verify both runtime and intended restart behavior.</p>
+
+<h2 id="mysql-accounts-settings--section-1">Accounts and authentication</h2>
+<p>An account is <code>'user'@'host'</code>; use quoted explicit host identities. <code>mysql.user</code> includes User, Host, plugin, authentication data and static global privileges, but is not the complete representation of roles/dynamic privileges. Do not directly update grant tables or expose authentication strings.</p>
+<p>A bounded example uses a random server-generated password instead of embedding a secret. The returned credential must be delivered through a secure channel, not copied into logs or this document:</p>
+<pre tabindex="0" role="region" aria-label="Settings, accounts, roles and privileges: code 1, horizontally scrollable"><code class="language-sql">CREATE USER 'app_reader'@'192.0.2.10' IDENTIFIED BY RANDOM PASSWORD REQUIRE SSL;
+ALTER USER 'app_reader'@'192.0.2.10' ACCOUNT LOCK;
+ALTER USER 'app_reader'@'192.0.2.10' ACCOUNT UNLOCK;
+</code></pre>
+<p><code>192.0.2.10</code> is an example address to replace with the actual trusted application host. Locking prevents new authentication; separately review existing sessions if revoking access urgently.</p>
+
+<h3 id="mysql-accounts-settings--section-2">Roles and grants</h3>
+<pre tabindex="0" role="region" aria-label="Settings, accounts, roles and privileges: code 2, horizontally scrollable"><code class="language-sql">CREATE ROLE 'app_read';
+GRANT SELECT ON app.* TO 'app_read';
+GRANT 'app_read' TO 'app_reader'@'192.0.2.10';
+SET DEFAULT ROLE 'app_read' TO 'app_reader'@'192.0.2.10';
+SHOW GRANTS FOR 'app_reader'@'192.0.2.10';
+</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Settings, accounts, roles and privileges: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GRANT 'role1', 'role2' TO 'user_name'@'host';</code></td>
+<td>Grants previously created roles to an account.</td>
+</tr>
+<tr>
+<td><code>SET DEFAULT ROLE ... TO ...</code></td>
+<td>Sets default activation, subject to authority over the target account; not the same as granting the role.</td>
+</tr>
+<tr>
+<td><code>SET ROLE NONE;</code> / <code>SET ROLE DEFAULT;</code></td>
+<td>Changes active roles in the current session.</td>
+</tr>
+<tr>
+<td><code>SELECT CURRENT_ROLE();</code></td>
+<td>Reports current active roles.</td>
+</tr>
+<tr>
+<td><code>SHOW GRANTS;</code> / <code>SHOW GRANTS FOR CURRENT_USER;</code></td>
+<td>Displays grants for the current account. <code>USING</code> can include named granted roles in the displayed effective privileges.</td>
+</tr>
+<tr>
+<td><code>GRANT SELECT(column1, column2), INSERT, UPDATE, DELETE, CREATE, DROP ON app.table_name TO 'user'@'host';</code></td>
+<td>Schematic mixed column/table grant: only SELECT is column-scoped here. Grant only privileges actually required, not this entire list by habit.</td>
+</tr>
+<tr>
+<td><code>GRANT ALL ON app.* TO 'user'@'host' WITH GRANT OPTION;</code></td>
+<td>Schema-wide privileges plus delegation; not global administrator authority. High impact: reserve for an approved schema owner, not an app reader.</td>
+</tr>
+<tr>
+<td><code>REVOKE SELECT ON app.table_name FROM 'user'@'host';</code></td>
+<td>Removes that explicit grant; role/schema/global paths can still give access.</td>
+</tr>
+<tr>
+<td><code>DROP USER 'user1'@'host', 'user2'@'host';</code></td>
+<td>Removes accounts; first inventory definers, jobs and connections. Does not drop their application tables.</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>CREATE USER</code> and <code>GRANT</code> are separate operations in 8.4. They take effect without <code>FLUSH PRIVILEGES</code>.</p>
+
+<h3 id="mysql-accounts-settings--section-3">Login paths</h3>
+<pre tabindex="0" role="region" aria-label="Settings, accounts, roles and privileges: code 3, horizontally scrollable"><code class="language-bash">mysql_config_editor set --login-path=maintenance --host=localhost --user=operator --password
+mysql_config_editor print --all
+mysql --login-path=maintenance
+mysql_config_editor remove --login-path=maintenance
+</code></pre>
+<p>The set command prompts for the password. <code>print</code> masks passwords, not a plaintext credentials listing. Login paths are <strong>obfuscation</strong>, not strong encryption; someone with sufficient local access can recover them. Protect the file/account and prefer a managed secret mechanism where policy requires one. Named <code>--login-path=maintenance</code> is not redundant. Client option precedence and <code>[client]</code> behavior differ from merely saving arbitrary path names.</p>
+
+<h3 id="mysql-accounts-settings--section-4">Authorized root-password recovery</h3>
+<p>Use the documented Unix <strong>init-file</strong> method in a scheduled outage with local OS administrator access, console access, backups and an identified account host. Do not use <code>pkill mysql</code> or start another daemon on a live datadir.</p>
+<ol>
+<li>Determine the actual unit, executable, option files, datadir and service OS identity. Stop the one intended instance normally and verify it is stopped.</li>
+<li>Prepare a temporary file containing the authorized account-change SQL using a securely supplied new secret; only the administrator and required service identity may read it. Keep it out of shell history, backups, generic <code>/tmp</code>, and source control. The file is a secret, not a downloadable example.</li>
+<li>Start that instance under its normal OS user/configuration with the documented <code>--init-file</code> override. Under systemd, choose a temporary unit override appropriate to the installed unit rather than bypassing it blindly. Read the error log and confirm the intended account change.</li>
+<li>Remove the secret file and temporary startup override, perform a normal controlled restart and verify normal authenticated access. Check that no recovery options remain.</li>
+</ol>
+<p>The alternative <code>--skip-grant-tables</code> method disables authorization and normally disables networking. Even then local users are a threat: isolate the host/socket and use the official recovery sequence (<code>FLUSH PRIVILEGES</code> before account-management SQL). Never leave this mode running or treat it as routine account administration. If normal startup fails, preserve the original datadir/configuration and investigate; do not reinitialize.</p>
+<p><a id="mysql-accounts-settings--cite-5-1" class="citation-ref" href="#mysql-accounts-settings--source-5" aria-label="Source 5">[5]</a><a id="mysql-accounts-settings--cite-21-1" class="citation-ref" href="#mysql-accounts-settings--source-21" aria-label="Source 21">[21]</a><a id="mysql-accounts-settings--cite-37-1" class="citation-ref" href="#mysql-accounts-settings--source-37" aria-label="Source 37">[37]</a><a id="mysql-accounts-settings--cite-38-1" class="citation-ref" href="#mysql-accounts-settings--source-38" aria-label="Source 38">[38]</a><a id="mysql-accounts-settings--cite-39-1" class="citation-ref" href="#mysql-accounts-settings--source-39" aria-label="Source 39">[39]</a><a id="mysql-accounts-settings--cite-40-1" class="citation-ref" href="#mysql-accounts-settings--source-40" aria-label="Source 40">[40]</a><a id="mysql-accounts-settings--cite-41-1" class="citation-ref" href="#mysql-accounts-settings--source-41" aria-label="Source 41">[41]</a></p>
+
+<h2 id="mysql-accounts-settings--section-5">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-accounts-settings--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-accounts-settings--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-accounts-settings--source-5">[5] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-config-editor.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-config-editor.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.6.7 mysql_config_editor — MySQL Configuration Utility
+<span class="citation-returns"><a class="citation-return" href="#mysql-accounts-settings--cite-5-1" aria-label="Return to citation 5, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-accounts-settings--source-21">[21] <a href="https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html">https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 7.1.8 Server System Variables
+<span class="citation-returns"><a class="citation-return" href="#mysql-accounts-settings--cite-21-1" aria-label="Return to citation 21, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-accounts-settings--source-37">[37] <a href="https://dev.mysql.com/doc/refman/8.4/en/set-variable.html">https://dev.mysql.com/doc/refman/8.4/en/set-variable.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.7.6.1 SET Syntax for Variable Assignment
+<span class="citation-returns"><a class="citation-return" href="#mysql-accounts-settings--cite-37-1" aria-label="Return to citation 37, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-accounts-settings--source-38">[38] <a href="https://dev.mysql.com/doc/refman/8.4/en/create-user.html">https://dev.mysql.com/doc/refman/8.4/en/create-user.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.7.1.3 CREATE USER Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-accounts-settings--cite-38-1" aria-label="Return to citation 38, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-accounts-settings--source-39">[39] <a href="https://dev.mysql.com/doc/refman/8.4/en/grant.html">https://dev.mysql.com/doc/refman/8.4/en/grant.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.7.1.6 GRANT Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-accounts-settings--cite-39-1" aria-label="Return to citation 39, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-accounts-settings--source-40">[40] <a href="https://dev.mysql.com/doc/refman/8.4/en/roles.html">https://dev.mysql.com/doc/refman/8.4/en/roles.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.2.10 Using Roles
+<span class="citation-returns"><a class="citation-return" href="#mysql-accounts-settings--cite-40-1" aria-label="Return to citation 40, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-accounts-settings--source-41">[41] <a href="https://dev.mysql.com/doc/refman/8.4/en/resetting-permissions.html">https://dev.mysql.com/doc/refman/8.4/en/resetting-permissions.html</a> — MySQL :: MySQL 8.4 Reference Manual :: B.3.3.2 How to Reset the Root Password
+<span class="citation-returns"><a class="citation-return" href="#mysql-accounts-settings--cite-41-1" aria-label="Return to citation 41, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-accounts-settings--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database<span class="citation-returns"><a class="citation-return" href="#mysql-accounts-settings--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-client-storage.html"><span>Previous · MySQL</span><strong>Client workflow and moving the data directory</strong></a></div><div><a rel="next" href="mysql-audit.html"><span>Next · MySQL</span><strong>Auditing activity</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/use.html">Explore Work with objects and access ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-administration.html">Objects, roles and administration</a><a href="postgresql-joins.html">Joins: keep the rows you mean</a></div><div><span>MongoDB</span><a href="mongodb-administration.html">Objects, users and administration</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

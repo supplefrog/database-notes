@@ -1,0 +1,140 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Connections and query execution — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-connections"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/understand.html">Understand the moving parts</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Understand the moving parts</p><h1>Connections and query execution</h1></header>
+<div class="reader-controls"><a href="../tasks/understand.html">← Understand the moving parts</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a aria-current="page" href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-0033">MySQL Architecture</a><a class="level-3" href="#mysql-b-0035">Logical</a><a class="level-3" href="#mysql-connections--section-1">Client</a><a class="level-2" href="#mysql-connections--section-2">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-foundations.html">PostgreSQL foundations and tools</a><p class="product-label">MongoDB</p><a href="mongodb-architecture.html">Architecture, editions and tools</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-connections; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-connections--cite-1-1" class="citation-ref" href="#mysql-connections--source-1" aria-label="Source 1">[1]</a><a id="mysql-connections--cite-72-1" class="citation-ref" href="#mysql-connections--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-connections--mysql-architecture" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0033">MySQL Architecture</h2>
+<p><span id="mysql-connections--logical" class="source-anchor"></span>
+</p>
+<h3 id="mysql-b-0035">Logical</h3>
+<p><span id="mysql-connections--client" class="source-anchor"></span>
+<span id="mysql-b-0037" class="source-anchor"></span>
+<span id="mysql-b-0039" class="source-anchor"></span>
+<span id="mysql-b-0040" class="source-anchor"></span>
+<a href="https://minervadb.xyz/wp-content/uploads/2024/01/MySQL-Thread-Diagram-768x366.jpg">Logical architecture diagram — external reference</a>. Reuse rights are unresolved; the explanation below does not depend on the image.</p><figure class="teaching-figure" id="tf-mysql-connections" data-after-heading="mysql-b-0035" aria-labelledby="tf-mysql-connections-title" aria-describedby="tf-mysql-connections-caption"><div class="tf-heading"><span class="tf-label">MySQL 8.4 · connection / request</span><strong id="tf-mysql-connections-title">One connection, many requests</strong></div><div class="tf-columns"><div class="tf-lane"><p class="tf-lane-title">Establish the session</p><ol class="tf-flow"><li><strong>Client ↔ server</strong><span>An application connector, mysql CLI or Workbench speaks the MySQL protocol. TCP and local transports are alternatives.</span></li><li><strong>Negotiate &amp; authenticate</strong><span>Classic TCP with TLS: server greeting → client SSLRequest → TLS handshake → authentication exchange. Verify the server identity; encryption alone is not identity verification.</span></li><li><strong>Connected session</strong><span>The default model uses a server thread per connection, possibly reusing a cached thread. It is not a separate mysqld process.</span></li></ol></div><div class="tf-lane"><p class="tf-lane-title">For a SQL request</p><ol class="tf-flow"><li><strong>Parse &amp; resolve</strong><span>Check SQL grammar and resolve referenced objects. Privilege checks apply to the requested operations, not just to login.</span></li><li><strong>Choose a plan</strong><span>The optimizer uses statistics and cost estimates to compare the plans it explores. An estimate is not measured runtime.</span></li><li><strong>Execute ↔ storage engine</strong><span>The executor requests rows through the engine interface. InnoDB uses cached pages or storage; results or errors return to the client.</span></li></ol></div></div><p class="tf-note"><strong>Not a literal call stack.</strong> Authentication exchanges vary by plugin. Authorization is not a single pre-parse gate. Enterprise Thread Pool changes scheduling; MySQL 8.4 has no server query cache.</p><figcaption id="tf-mysql-connections-caption">Teaching simplification of the classic-protocol connection and SQL request paths, not an exact engine schematic. A session can issue many statements; successful login does not authorize every operation.<p class="tf-sources"><strong>Read the sources</strong> <a href="#mysql-connections--source-103" id="tf-mysql-connections-ref-1" class="figure-source-ref">Connection protocol [103]</a> · <a href="#mysql-connections--source-70" id="tf-mysql-connections-ref-2" class="figure-source-ref">TLS identity [70]</a> · <a href="#mysql-connections--source-148" id="tf-mysql-connections-ref-3" class="figure-source-ref">Request privileges [148]</a> · <a href="#mysql-connections--source-139" id="tf-mysql-connections-ref-4" class="figure-source-ref">Optimizer limits [139]</a> · <a href="#mysql-connections--source-7" id="tf-mysql-connections-ref-5" class="figure-source-ref">Buffer pool [7]</a> · <a href="#mysql-connections--source-84" id="tf-mysql-connections-ref-6" class="figure-source-ref">Enterprise features [84]</a> · <a href="#mysql-connections--source-86" id="tf-mysql-connections-ref-7" class="figure-source-ref">Removed features [86]</a></p><p class="tf-external">External reference, not republished: <a href="https://minervadb.xyz/wp-content/uploads/2024/01/MySQL-Thread-Diagram-768x366.jpg">Earlier logical-architecture image</a></p></figcaption></figure>
+
+<h3 id="mysql-connections--section-1">Client</h3>
+<p>Connectors implement the MySQL protocol for applications. <code>mysql</code> is a command-line client; Workbench is a separate GUI and does not require the <code>mysql</code> CLI to establish every connection.</p>
+<p><a id="mysql-connections--cite-2-1" class="citation-ref" href="#mysql-connections--source-2" aria-label="Source 2">[2]</a><a id="mysql-connections--cite-103-1" class="citation-ref" href="#mysql-connections--source-103" aria-label="Source 103">[103]</a></p>
+<p><span id="mysql-connections--server" class="source-anchor"></span>
+</p>
+<h4 id="mysql-b-0043">Server</h4>
+<p><span id="mysql-b-0045" class="source-anchor"></span>
+<span id="mysql-b-0053" class="source-anchor"></span>
+<span id="mysql-b-0064" class="source-anchor"></span></p>
+<ol>
+<li><strong>Startup:</strong> initialize the server and load privilege information; startup is not a user-issued <code>FLUSH PRIVILEGES</code> operation.</li>
+<li><strong>Connection:</strong> clients can use TCP or a local transport such as a Unix socket. For classic-protocol TCP, the server greeting advertises capabilities and authentication information. A TLS-capable client sends SSLRequest, negotiates TLS, then sends authentication data inside that transport.</li>
+</ol>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Connections and query execution: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>TLS stage</th>
+<th>What to check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ClientHello</td>
+<td>Client advertises supported protocol versions and cryptographic parameters.</td>
+</tr>
+<tr>
+<td>Server negotiation</td>
+<td>Server selects compatible parameters and proves its identity with its certificate and handshake authentication. Exact message ordering differs between TLS 1.2 and 1.3.</td>
+</tr>
+<tr>
+<td>Certificate validation</td>
+<td><code>VERIFY_CA</code> checks the trusted issuer; <code>VERIFY_IDENTITY</code> also checks the requested hostname against the certificate. Merely encrypting a connection does not verify the server.</td>
+</tr>
+<tr>
+<td>Key agreement</td>
+<td>Modern TLS uses negotiated key agreement; do not teach RSA-encrypted premaster-secret exchange as the universal handshake. TLS 1.3 does not use that legacy RSA key exchange.</td>
+</tr>
+<tr>
+<td>Finished messages</td>
+<td>Authenticate the handshake and establish traffic keys; application data is encrypted and integrity protected.</td>
+</tr>
+<tr>
+<td>Client certificate</td>
+<td>Optional unless the account/policy requires it; distinct from password authentication.</td>
+</tr>
+</tbody>
+</table></div>
+<ol start="3">
+<li><strong>Authentication:</strong> the handshake response identifies the user and client capabilities. The server matches an account including its Host portion, chooses the account’s authentication plugin, and may continue or switch the plugin exchange. The response is plugin-dependent, not universally a password hash. Success yields OK; failure yields ERR. <code>caching_sha2_password</code> is the normal 8.4 choice; update old clients rather than re-enabling legacy authentication by default.</li>
+</ol>
+<p><a id="mysql-connections--cite-2-2" class="citation-ref" href="#mysql-connections--source-2" aria-label="Source 2">[2]</a><a id="mysql-connections--cite-3-1" class="citation-ref" href="#mysql-connections--source-3" aria-label="Source 3">[3]</a><a id="mysql-connections--cite-70-1" class="citation-ref" href="#mysql-connections--source-70" aria-label="Source 70">[70]</a><a id="mysql-connections--cite-103-2" class="citation-ref" href="#mysql-connections--source-103" aria-label="Source 103">[103]</a></p>
+<p><span id="mysql-b-0071" class="source-anchor"></span>
+4. <strong>Connection manager:</strong> the default one-thread-per-connection model can reuse a cached thread or create one. Enterprise Thread Pool changes scheduling; neither model makes a client connection a separate <code>mysqld</code> process.</p>
+<p><a id="mysql-connections--cite-84-1" class="citation-ref" href="#mysql-connections--source-84" aria-label="Source 84">[84]</a></p>
+<p><span id="mysql-b-0076" class="source-anchor"></span>
+<span id="mysql-b-0078" class="source-anchor"></span>
+<span id="mysql-b-0080" class="source-anchor"></span>
+5. <strong>Authorization:</strong> the server checks the account’s privileges for requested operations; a successful login does not authorize every query.
+6. <strong>Parsing:</strong> SQL text is tokenized and checked against the grammar, producing internal query structures. This is a conceptual pipeline, not a claim that every AST node is itself a SQL operation or that privilege checking occurs only once before parsing.</p>
+<p><a id="mysql-connections--cite-148-1" class="citation-ref" href="#mysql-connections--source-148" aria-label="Source 148">[148]</a><a id="mysql-connections--cite-32-1" class="citation-ref" href="#mysql-connections--source-32" aria-label="Source 32">[32]</a></p>
+<p><span id="mysql-b-0089" class="source-anchor"></span>
+7. <strong>Optimization:</strong> the optimizer considers applicable access paths and transformations, index use, join ordering and supported join methods such as nested-loop/hash joins. Statistics and cardinality estimates feed cost estimates; they are not measured runtime. It chooses among the plans it explores, not an exhaustive guaranteed global optimum.</p>
+<p>The InnoDB adaptive hash index is an internal engine optimization, not a named SQL index hint. Use EXPLAIN and, for a safe bounded query, EXPLAIN ANALYZE to compare estimates with execution; the latter executes the query.</p>
+<p><a id="mysql-connections--cite-32-2" class="citation-ref" href="#mysql-connections--source-32" aria-label="Source 32">[32]</a><a id="mysql-connections--cite-34-1" class="citation-ref" href="#mysql-connections--source-34" aria-label="Source 34">[34]</a><a id="mysql-connections--cite-9-1" class="citation-ref" href="#mysql-connections--source-9" aria-label="Source 9">[9]</a><a id="mysql-connections--cite-139-1" class="citation-ref" href="#mysql-connections--source-139" aria-label="Source 139">[139]</a></p>
+<p><span id="mysql-b-0103" class="source-anchor"></span>
+<span id="mysql-b-0107" class="source-anchor"></span>
+8. <strong>Execution and storage engines:</strong> the executor requests rows through the engine interface. InnoDB reads cached pages or fetches them from storage. Changes dirty buffer-pool pages and generate redo; commit durability and later page flushing are different events.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Connections and query execution: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Cache</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Table open cache</td>
+<td>Reuses open table objects; file-descriptor consumption depends on engine and configuration.</td>
+</tr>
+<tr>
+<td>Data dictionary object cache</td>
+<td>Reuses metadata; distinguish it from InnoDB’s buffer pool.</td>
+</tr>
+<tr>
+<td>Historical query cache</td>
+<td>Deprecated in 5.7.20 and removed in 8.0. No MySQL 8.4 server query cache setting exists. Application caching requires explicit invalidation and consistency decisions.</td>
+</tr>
+<tr>
+<td>Key cache</td>
+<td>Caches MyISAM index blocks, not InnoDB rows.</td>
+</tr>
+<tr>
+<td>InnoDB buffer pool</td>
+<td>Caches index and data pages, including clean and dirty pages.</td>
+</tr>
+</tbody>
+</table></div>
+<p><a id="mysql-connections--cite-4-1" class="citation-ref" href="#mysql-connections--source-4" aria-label="Source 4">[4]</a><a id="mysql-connections--cite-7-1" class="citation-ref" href="#mysql-connections--source-7" aria-label="Source 7">[7]</a><a id="mysql-connections--cite-86-1" class="citation-ref" href="#mysql-connections--source-86" aria-label="Source 86">[86]</a></p>
+
+<h2 id="mysql-connections--section-2">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-connections--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-connections--source-2">[2] <a href="https://dev.mysql.com/doc/refman/8.4/en/connecting.html">https://dev.mysql.com/doc/refman/8.4/en/connecting.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.2.4 Connecting to the MySQL Server Using Command Options
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-2-1" aria-label="Return to citation 2, occurrence 1">↩1</a><a class="citation-return" href="#mysql-connections--cite-2-2" aria-label="Return to citation 2, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-connections--source-3">[3] <a href="https://dev.mysql.com/doc/refman/8.4/en/encrypted-connections.html">https://dev.mysql.com/doc/refman/8.4/en/encrypted-connections.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.3 Using Encrypted Connections
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-3-1" aria-label="Return to citation 3, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-connections--source-4">[4] <a href="https://dev.mysql.com/doc/refman/8.4/en/data-dictionary.html">https://dev.mysql.com/doc/refman/8.4/en/data-dictionary.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 16 MySQL Data Dictionary
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-4-1" aria-label="Return to citation 4, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-connections--source-7">[7] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-buffer-pool.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-buffer-pool.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.5.1 Buffer Pool
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-7-1" aria-label="Return to citation 7, occurrence 1">↩</a><a class="citation-return" href="#tf-mysql-connections-ref-5" aria-label="Return to figure: One connection, many requests">↩ Figure</a></span></div><div class="source-entry" id="mysql-connections--source-9">[9] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-adaptive-hash.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-adaptive-hash.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.5.3 Adaptive Hash Index
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-9-1" aria-label="Return to citation 9, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-connections--source-32">[32] <a href="https://dev.mysql.com/doc/refman/8.4/en/explain.html">https://dev.mysql.com/doc/refman/8.4/en/explain.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.8.2 EXPLAIN Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-32-1" aria-label="Return to citation 32, occurrence 1">↩1</a><a class="citation-return" href="#mysql-connections--cite-32-2" aria-label="Return to citation 32, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-connections--source-34">[34] <a href="https://dev.mysql.com/doc/refman/8.4/en/index-hints.html">https://dev.mysql.com/doc/refman/8.4/en/index-hints.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 10.9.4 Index Hints
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-34-1" aria-label="Return to citation 34, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-connections--source-70">[70] <a href="https://dev.mysql.com/doc/refman/8.4/en/using-encrypted-connections.html">https://dev.mysql.com/doc/refman/8.4/en/using-encrypted-connections.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.3.1 Configuring MySQL to Use Encrypted Connections
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-70-1" aria-label="Return to citation 70, occurrence 1">↩</a><a class="citation-return" href="#tf-mysql-connections-ref-2" aria-label="Return to figure: One connection, many requests">↩ Figure</a></span></div><div class="source-entry" id="mysql-connections--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-connections--source-84">[84] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-enterprise.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-enterprise.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 32 MySQL Enterprise Edition
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-84-1" aria-label="Return to citation 84, occurrence 1">↩</a><a class="citation-return" href="#tf-mysql-connections-ref-6" aria-label="Return to figure: One connection, many requests">↩ Figure</a></span></div><div class="source-entry" id="mysql-connections--source-86">[86] <a href="https://dev.mysql.com/doc/refman/8.4/en/added-deprecated-removed.html">https://dev.mysql.com/doc/refman/8.4/en/added-deprecated-removed.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.5 Server and Status Variables and Options Added, Deprecated, or Removed in
+MySQL 8.4 since 8.0
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-86-1" aria-label="Return to citation 86, occurrence 1">↩</a><a class="citation-return" href="#tf-mysql-connections-ref-7" aria-label="Return to figure: One connection, many requests">↩ Figure</a></span></div><div class="source-entry" id="mysql-connections--source-103">[103] <a href="https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html">https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase.html</a> — MySQL: Connection Phase
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-103-1" aria-label="Return to citation 103, occurrence 1">↩1</a><a class="citation-return" href="#mysql-connections--cite-103-2" aria-label="Return to citation 103, occurrence 2">↩2</a><a class="citation-return" href="#tf-mysql-connections-ref-1" aria-label="Return to figure: One connection, many requests">↩ Figure</a></span></div><div class="source-entry" id="mysql-connections--source-139">[139] <a href="https://dev.mysql.com/doc/refman/8.4/en/optimizer-issues.html">https://dev.mysql.com/doc/refman/8.4/en/optimizer-issues.html</a> — MySQL :: MySQL 8.4 Reference Manual :: B.3.5 Optimizer-Related Issues
+<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-139-1" aria-label="Return to citation 139, occurrence 1">↩</a><a class="citation-return" href="#tf-mysql-connections-ref-4" aria-label="Return to figure: One connection, many requests">↩ Figure</a></span></div><div class="source-entry" id="mysql-connections--source-148">[148] <a href="https://dev.mysql.com/doc/refman/8.4/en/request-access.html">https://dev.mysql.com/doc/refman/8.4/en/request-access.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.2.7 Access Control, Stage 2: Request Verification<span class="citation-returns"><a class="citation-return" href="#mysql-connections--cite-148-1" aria-label="Return to citation 148, occurrence 1">↩</a><a class="citation-return" href="#tf-mysql-connections-ref-3" aria-label="Return to figure: One connection, many requests">↩ Figure</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-overview.html"><span>Previous · MySQL</span><strong>Database vocabulary, editions and tools</strong></a></div><div><a rel="next" href="mysql-layout.html"><span>Next · MySQL</span><strong>Executables, schemas and server files</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/understand.html">Explore Understand the moving parts ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a aria-current="page" href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-foundations.html">PostgreSQL foundations and tools</a></div><div><span>MongoDB</span><a href="mongodb-architecture.html">Architecture, editions and tools</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

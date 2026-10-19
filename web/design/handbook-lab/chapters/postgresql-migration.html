@@ -1,0 +1,272 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Migrating to PostgreSQL — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="postgresql-migration"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/change.html">Protect it and change it safely</a></nav>
+<header class="reader-head"><p class="reader-context">PostgreSQL <span aria-hidden="true">/</span> Protect it and change it safely</p><h1>Migrating to PostgreSQL</h1></header>
+<div class="reader-controls"><a href="../tasks/change.html">← Protect it and change it safely</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="PostgreSQL chapters"><ol class="chapter-list"><li><a  href="../chapters/postgresql-foundations.html">PostgreSQL foundations and tools</a></li><li><a  href="../chapters/postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></li><li><a  href="../chapters/postgresql-install-instances.html">Installation, services and instances</a></li><li><a  href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a  href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li><li><a  href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a  href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li><li><a  href="../chapters/postgresql-backup-recovery.html">Backup and point-in-time recovery</a></li><li><a  href="../chapters/postgresql-replication-ha.html">Replication and high availability</a></li><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a  href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a aria-current="page" href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#assessment">Inventory semantics before moving rows</a><a class="level-2" href="#schema">Convert schema, routines and access paths</a><a class="level-2" href="#load">Load through a text staging table</a><a class="level-2" href="#validation">Validate at a common boundary</a><a class="level-2" href="#cutover">Cut over once, with a rollback boundary</a><a class="level-2" href="#postgresql-migration--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-hardening.html">TLS and encryption at rest</a><a href="mysql-upgrades.html">Upgrades and rollback planning</a><a href="mysql-migration.html">Migrating MySQL to Oracle</a><p class="product-label">MongoDB</p><a href="mongodb-security.html">Hardening, TLS and key rotation</a><a href="mongodb-upgrades.html">Upgrades and feature compatibility</a><a href="mongodb-migration.html">Relational-to-document migration</a></nav></details></div>
+<article class="prose">
+<h2 id="assessment">Inventory semantics before moving rows</h2>
+<p>A MySQL SQL dump is not a PostgreSQL restore script. Convert the model, SQL behavior and application contract before the outage, then move data under a documented snapshot/change boundary. PostgreSQL logical replication cannot consume MySQL’s binary log directly; cross-engine CDC needs a separately selected connector whose source version, privileges, initial snapshot and offset semantics are verified.</p>
+<p>Record source server/tool versions, storage engines, SQL modes, charsets/collations, time zones, table sizes, PK/FK/unique constraints, views, triggers, routines, generated columns, events and application queries. Include nontransactional source tables and external side effects when deciding whether a consistent export is possible. The target remains <a href="postgresql-foundations.html#scope">community PostgreSQL 18 on RHEL/PGDG</a>; no migration tool or managed service is silently assumed. Provision that RPM/service/TLS/firewalld/SELinux baseline before loading. Use <code>/usr/pgsql-18/bin/psql</code> with the explicit <code>/run/postgresql</code> socket/5432 for local peer administration; target extensions need their RHEL-major-specific RPMs on all recovery/HA hosts. Client <code>\copy</code> below reads the client filesystem, so grant that client account access rather than relabeling exports as server-writable data.<a id="postgresql-migration--cite-100-1" class="citation-ref" href="#postgresql-migration--source-100" aria-label="Source 100">[100]</a><a id="postgresql-migration--cite-105-1" class="citation-ref" href="#postgresql-migration--source-105" aria-label="Source 105">[105]</a><a id="postgresql-migration--cite-13-1" class="citation-ref" href="#postgresql-migration--source-13" aria-label="Source 13">[13]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Migrating to PostgreSQL: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Source concept</th>
+<th>PostgreSQL target / conversion decision</th>
+<th>Validate before loading</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MySQL database used as namespace</td>
+<td>PostgreSQL database plus named schema</td>
+<td>Cross-database SQL must be redesigned; schema is inside one database.<a id="postgresql-migration--cite-21-1" class="citation-ref" href="#postgresql-migration--source-21" aria-label="Source 21">[21]</a></td>
+</tr>
+<tr>
+<td>Backtick/mixed-case identifiers</td>
+<td>Prefer lowercase unquoted names; double quotes preserve exact case</td>
+<td>Rewrite application SQL and collisions; do not just replace quoting characters in arbitrary SQL.<a id="postgresql-migration--cite-78-1" class="citation-ref" href="#postgresql-migration--source-78" aria-label="Source 78">[78]</a></td>
+</tr>
+<tr>
+<td>Signed integer types</td>
+<td><code>smallint</code>, <code>integer</code>, <code>bigint</code> by actual range</td>
+<td>Overflow and negative-value constraints.</td>
+</tr>
+<tr>
+<td>Unsigned integer / unsigned bigint</td>
+<td>Wider signed type, or <code>numeric(20,0)</code> where bigint cannot hold the range</td>
+<td>Add nonnegative/range checks; do not silently wrap or truncate.<a id="postgresql-migration--cite-79-1" class="citation-ref" href="#postgresql-migration--source-79" aria-label="Source 79">[79]</a></td>
+</tr>
+<tr>
+<td>Auto-increment</td>
+<td><code>GENERATED ... AS IDENTITY</code> plus explicit PK/unique constraint</td>
+<td>Imported IDs, sequence next value, application generated-key API.<a id="postgresql-migration--cite-48-1" class="citation-ref" href="#postgresql-migration--source-48" aria-label="Source 48">[48]</a></td>
+</tr>
+<tr>
+<td>Decimal currency</td>
+<td><code>numeric(precision, scale)</code></td>
+<td>Rounding, scale and maximum aggregate values; not floating point.<a id="postgresql-migration--cite-79-2" class="citation-ref" href="#postgresql-migration--source-79" aria-label="Source 79">[79]</a></td>
+</tr>
+<tr>
+<td>Tiny integer used as boolean</td>
+<td><code>boolean</code> only after proving the actual value domain</td>
+<td>Values other than intended true/false/null need explicit mapping.</td>
+</tr>
+<tr>
+<td>Datetime / timestamp</td>
+<td><code>timestamp</code> for wall-clock facts; <code>timestamptz</code> for instants</td>
+<td>Source session zone, DST ambiguity, invalid/zero dates and precision.<a id="postgresql-migration--cite-80-1" class="citation-ref" href="#postgresql-migration--source-80" aria-label="Source 80">[80]</a></td>
+</tr>
+<tr>
+<td>Text/charset/collation</td>
+<td>Usually UTF-8 plus chosen libc/ICU/builtin collation</td>
+<td>Case/accent comparisons, trailing-space behavior, ordering and unique collisions.<a id="postgresql-migration--cite-49-1" class="citation-ref" href="#postgresql-migration--source-49" aria-label="Source 49">[49]</a></td>
+</tr>
+<tr>
+<td>JSON</td>
+<td><code>json</code> or <code>jsonb</code> by required semantics/operators</td>
+<td>Formatting/key-order/duplicate-key expectations; index design.<a id="postgresql-migration--cite-81-1" class="citation-ref" href="#postgresql-migration--source-81" aria-label="Source 81">[81]</a></td>
+</tr>
+<tr>
+<td>Binary/blob</td>
+<td><code>bytea</code>, or an explicitly designed large-object/external store</td>
+<td>Byte-for-byte comparison, encoding and backup lifecycle.<a id="postgresql-migration--cite-47-1" class="citation-ref" href="#postgresql-migration--source-47" aria-label="Source 47">[47]</a></td>
+</tr>
+<tr>
+<td>Enum/set</td>
+<td>Enum, check-constrained text or normalized relation</td>
+<td>Allowed values, ordering and future schema evolution.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The table is a conversion checklist, not a universal mechanical mapping. Inspect actual values and source-version semantics; target data types and operators are defined by the PostgreSQL 18 manual.<a id="postgresql-migration--cite-47-2" class="citation-ref" href="#postgresql-migration--source-47" aria-label="Source 47">[47]</a></p>
+
+<h2 id="schema">Convert schema, routines and access paths</h2>
+<p>Use a no-login owner and separate runtime roles as in <a href="postgresql-administration.html#roles">administration</a>. Keep a checked-in conversion manifest mapping each source object to its target name, type, default, constraint and application change. Avoid importing source administrators or broad grants.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Migrating to PostgreSQL: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Object/behavior</th>
+<th>Conversion work</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Defaults/generated columns</td>
+<td>Rewrite expressions and volatile/time-zone behavior; PostgreSQL 18 defaults generated columns to virtual, so specify <code>STORED</code> when required by the design.<a id="postgresql-migration--cite-4-1" class="citation-ref" href="#postgresql-migration--source-4" aria-label="Source 4">[4]</a><a id="postgresql-migration--cite-70-1" class="citation-ref" href="#postgresql-migration--source-70" aria-label="Source 70">[70]</a></td>
+</tr>
+<tr>
+<td>Views/procedures/functions</td>
+<td>Rewrite SQL dialect and security semantics; PL/pgSQL is not source-compatible stored-routine syntax.</td>
+</tr>
+<tr>
+<td>Triggers</td>
+<td>PostgreSQL uses trigger functions; preserve timing, row/statement scope and privileges explicitly.<a id="postgresql-migration--cite-50-1" class="citation-ref" href="#postgresql-migration--source-50" aria-label="Source 50">[50]</a></td>
+</tr>
+<tr>
+<td>Scheduled events</td>
+<td>Choose an external scheduler or separately reviewed extension; not an automatic core event-scheduler import.</td>
+</tr>
+<tr>
+<td>Upsert / duplicate handling</td>
+<td>Rewrite to <code>INSERT ... ON CONFLICT</code> with a deliberate arbiter: <code>DO UPDATE</code> requires a supported unique constraint/index, not an exclusion constraint. Do not assume identical affected-row semantics.<a id="postgresql-migration--cite-82-1" class="citation-ref" href="#postgresql-migration--source-82" aria-label="Source 82">[82]</a></td>
+</tr>
+<tr>
+<td>Indexes</td>
+<td>Recreate constraints first; redesign useful B-tree/expression/partial/GIN indexes for actual PostgreSQL predicates.<a id="postgresql-migration--cite-28-1" class="citation-ref" href="#postgresql-migration--source-28" aria-label="Source 28">[28]</a></td>
+</tr>
+<tr>
+<td>Prefix/collation-sensitive unique index</td>
+<td>Model the intended uniqueness explicitly and detect collisions before enforcement.</td>
+</tr>
+<tr>
+<td>Sequences</td>
+<td>They are not gapless and not rolled back; test generated-key handling and post-import alignment.<a id="postgresql-migration--cite-60-1" class="citation-ref" href="#postgresql-migration--source-60" aria-label="Source 60">[60]</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>Changing collation can change equality and sort behavior, not just display order. Run duplicate checks under the <strong>target</strong> comparison before creating a unique index. Do not merely refresh a recorded collation version after an OS/library upgrade; rebuild affected indexes first.<a id="postgresql-migration--cite-49-2" class="citation-ref" href="#postgresql-migration--source-49" aria-label="Source 49">[49]</a><a id="postgresql-migration--cite-87-1" class="citation-ref" href="#postgresql-migration--source-87" aria-label="Source 87">[87]</a></p>
+<p>Test application transaction boundaries, error SQLSTATE handling/retries, pagination stability, boolean/date serialization, parameter placeholders, identifier quoting, connection pooling and permissions. A schema that loads successfully can still implement different business rules.</p>
+
+<h2 id="load">Load through a text staging table</h2>
+<p>This bounded example assumes a <strong>quiesced, consistent CSV export</strong> of one source <code>orders</code> table has already been produced and validated by the source owner. It is not a MySQL export or CDC tool recipe. The file contract is UTF-8 RFC-style CSV with header, comma delimiter, double-quote escaping, <code>\N</code> for null, dot decimal, and timestamps already normalized to explicit UTC offsets. If the export uses different escaping/null conventions, convert it explicitly rather than guessing.<a id="postgresql-migration--cite-46-1" class="citation-ref" href="#postgresql-migration--source-46" aria-label="Source 46">[46]</a></p>
+<p>Example file shape (illustrative input, not captured production output):</p>
+<pre tabindex="0" role="region" aria-label="Migrating to PostgreSQL: code 1, horizontally scrollable"><code class="language-csv">id,customer_id,total,status,created_at
+1,42,12.50,new,2026-01-01T10:00:00+00:00
+2,17,8.00,paid,2026-01-02T09:30:00+00:00
+3,42,0.00,cancelled,2026-01-03T12:00:00+00:00
+</code></pre>
+<p>Create a new <strong>migrationlab</strong> database and <code>migration_owner</code> no-login owner using controlled local peer administration. Stop on name collisions; do not reuse a database containing application data. As <code>postgres</code> in psql, outside a transaction for <code>CREATE DATABASE</code>:[13]<a id="postgresql-migration--cite-59-1" class="citation-ref" href="#postgresql-migration--source-59" aria-label="Source 59">[59]</a></p>
+<pre tabindex="0" role="region" aria-label="Migrating to PostgreSQL: code 2, horizontally scrollable"><code class="language-sql">\set ON_ERROR_STOP on
+CREATE ROLE migration_owner NOLOGIN;
+CREATE DATABASE migrationlab OWNER migration_owner;
+REVOKE ALL ON DATABASE migrationlab FROM PUBLIC;
+\connect migrationlab
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+SET ROLE migration_owner;
+</code></pre>
+<p>Continue in that same owner session. The client OS account must be allowed to read <code>/secure/orders.csv</code>. No application login receives access until mapping and validation are accepted.</p>
+<pre tabindex="0" role="region" aria-label="Migrating to PostgreSQL: code 3, horizontally scrollable"><code class="language-sql">\set ON_ERROR_STOP on
+CREATE SCHEMA staging;
+CREATE SCHEMA sales;
+CREATE TABLE staging.orders_raw (
+  id text, customer_id text, total text, status text, created_at text
+);
+\copy staging.orders_raw FROM '/secure/orders.csv' WITH (FORMAT csv, HEADER true, NULL '\N', ENCODING 'UTF8')
+
+-- Inspect rejects; resolve them, do not discard them silently.
+SELECT * FROM staging.orders_raw
+WHERE id IS NULL OR id !~ '^[0-9]+$'
+   OR customer_id IS NULL OR customer_id !~ '^[0-9]+$'
+   OR total IS NULL OR total !~ '^[0-9]+([.][0-9]{1,2})?$'
+   OR status IS NULL OR status NOT IN ('new','paid','cancelled')
+   OR created_at IS NULL OR created_at LIKE '0000-%'
+   OR created_at !~ '[+]00:00$';
+SELECT id, count(*) FROM staging.orders_raw GROUP BY id HAVING count(*) &gt; 1;
+</code></pre>
+<p>The reject query is a preliminary screen, <strong>not</strong> a complete date/range validator. Casts and constraints below are the decisive fail-fast gate. Text duplicates such as <code>1</code> versus <code>01</code> can still collide numerically; the primary key catches them. If actual source IDs can exceed signed bigint, change the target design before importing, not after an overflow.</p>
+<pre tabindex="0" role="region" aria-label="Migrating to PostgreSQL: code 4, horizontally scrollable"><code class="language-sql">BEGIN;
+CREATE TABLE sales.orders (
+  order_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY CHECK (order_id &gt; 0),
+  customer_id integer NOT NULL CHECK (customer_id &gt; 0),
+  amount numeric(12,2) NOT NULL CHECK (amount &gt;= 0),
+  status text NOT NULL CHECK (status IN ('new','paid','cancelled')),
+  created_at timestamptz NOT NULL
+);
+INSERT INTO sales.orders (order_id, customer_id, amount, status, created_at)
+OVERRIDING SYSTEM VALUE
+SELECT id::bigint, customer_id::integer, total::numeric(12,2),
+       status, created_at::timestamptz
+FROM staging.orders_raw;
+COMMIT;
+
+-- No writers may connect until this and the validation pass.
+SELECT setval(pg_get_serial_sequence('sales.orders','order_id'),
+              COALESCE((SELECT max(order_id) FROM sales.orders), 1),
+              EXISTS (SELECT 1 FROM sales.orders));
+ANALYZE sales.orders;
+</code></pre>
+<p>Resolve every reject <strong>before</strong> the insert, including scale violations: casting to a constrained numeric type can round, so a successful cast is not proof of no source precision loss.<a id="postgresql-migration--cite-79-3" class="citation-ref" href="#postgresql-migration--source-79" aria-label="Source 79">[79]</a> <code>OVERRIDING SYSTEM VALUE</code> permits the reviewed source IDs in an always-generated identity column.<a id="postgresql-migration--cite-82-2" class="citation-ref" href="#postgresql-migration--source-82" aria-label="Source 82">[82]</a> If the transaction fails, inspect the failing row/error and correct the mapping; do not turn constraints off to make it pass. <code>setval</code>’s final boolean distinguishes empty-table next value from a used maximum; sequence state is not transactionally rolled back, so run it while writers are fenced and repeat validation afterward.<a id="postgresql-migration--cite-48-2" class="citation-ref" href="#postgresql-migration--source-48" aria-label="Source 48">[48]</a><a id="postgresql-migration--cite-60-2" class="citation-ref" href="#postgresql-migration--source-60" aria-label="Source 60">[60]</a></p>
+<p>For a larger load, choose parallelism and deferred index construction deliberately; retain primary-key/business validation and enough disk/WAL/archive headroom. Client <code>\copy</code> avoids granting server filesystem access. Server <code>COPY</code> uses server paths/privileges. Do not leave staging exports or reject files readable after the migration.<a id="postgresql-migration--cite-13-2" class="citation-ref" href="#postgresql-migration--source-13" aria-label="Source 13">[13]</a><a id="postgresql-migration--cite-46-2" class="citation-ref" href="#postgresql-migration--source-46" aria-label="Source 46">[46]</a></p>
+
+<h2 id="validation">Validate at a common boundary</h2>
+<pre tabindex="0" role="region" aria-label="Migrating to PostgreSQL: code 5, horizontally scrollable"><code class="language-sql">SELECT count(*) AS rows, min(order_id), max(order_id), sum(amount)
+FROM sales.orders;
+SELECT status, count(*), sum(amount) FROM sales.orders GROUP BY status ORDER BY status;
+SELECT count(*) FROM sales.orders WHERE customer_id &lt;= 0 OR amount &lt; 0;
+SELECT conname, convalidated FROM pg_constraint
+WHERE conrelid = 'sales.orders'::regclass;
+</code></pre>
+<p>Compare these with the source <strong>at the exported snapshot or final CDC watermark</strong>. Equal counts do not prove equal rows: compare ordered primary-key ranges and canonical per-row/per-batch digests or exports. Define identical null, decimal, Unicode, time-zone and binary serialization on both engines before hashing; database-native hash functions over different string formats are not comparable.</p>
+<p>Include orphan/FK checks, duplicate detection under target collation, bounds/null distributions, money totals, time-zone edge cases and representative joins. Test target grants and expected denials, routine/trigger side effects, generated IDs and application read/write workflows in an isolated environment. Inspect plans after <code>ANALYZE</code>; do not require identical MySQL and PostgreSQL plans, only equivalent results and the agreed performance objective.<a id="postgresql-migration--cite-27-1" class="citation-ref" href="#postgresql-migration--source-27" aria-label="Source 27">[27]</a><a id="postgresql-migration--cite-46-3" class="citation-ref" href="#postgresql-migration--source-46" aria-label="Source 46">[46]</a><a id="postgresql-migration--cite-49-3" class="citation-ref" href="#postgresql-migration--source-49" aria-label="Source 49">[49]</a></p>
+<p>Keep a per-table reconciliation report: source snapshot/watermark, target count, comparison definition, rejected rows, owner decision and final acceptance. No rows are “close enough” without an explicit business decision. Masked rehearsals must preserve the data distributions relevant to uniqueness and plan tests.</p>
+
+<h2 id="cutover">Cut over once, with a rollback boundary</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Migrating to PostgreSQL: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Required proof before continuing</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rehearsal</td>
+<td>Complete conversion, restore/reload timings, application/permission tests and repeatable reconciliation.</td>
+</tr>
+<tr>
+<td>Initial copy</td>
+<td>Consistent source snapshot and its CDC start position, or a documented full write outage.</td>
+</tr>
+<tr>
+<td>Catch-up</td>
+<td>Connector reports durable applied position, no unresolved conflicts/rejects, DDL changes coordinated.</td>
+</tr>
+<tr>
+<td>Write fence</td>
+<td>Source application writers/jobs disabled; remaining transactions completed; final source position recorded.</td>
+</tr>
+<tr>
+<td>Final sync</td>
+<td>All changes through the fence applied; sequence state/routines/privileges validated; totals/checks pass.</td>
+</tr>
+<tr>
+<td>Switch</td>
+<td>One write authority, endpoint/driver/pool updated, controlled smoke write/readback succeeds.</td>
+</tr>
+<tr>
+<td>Observe</td>
+<td>Error/latency/business checks pass, backups and recovery monitoring active, old source kept read-only.</td>
+</tr>
+</tbody>
+</table></div>
+<p>For a small system, a full outage plus consistent export/import may be safer than an unproven CDC stack. For low downtime, choose a connector with documented MySQL-version/binlog/snapshot requirements and PostgreSQL delivery semantics; test duplicates, restart/replay, deletes, schema changes and offset retention. This is a product-selection boundary, not a missing command to fake with PostgreSQL’s native subscription syntax.</p>
+<p>Before target writes are accepted, rollback can leave the source authoritative and discard/rebuild the target. <strong>After target writes, the old MySQL source is stale.</strong> Returning traffic requires tested reverse movement/reconciliation or an explicitly accepted loss window. Dual-writing both databases is not a free rollback mechanism: ordering, retries, partial success and conflict handling require application design.</p>
+<p>Retain source backups, normalized export definitions, conversion scripts, source/CDC positions and validation reports through the agreed rollback period. After acceptance, remove migration-only privileges/connector secrets, securely retire staging data and prove a <a href="postgresql-backup-recovery.html#validation">PostgreSQL restore</a>. The migration is not finished merely because the final row loaded.</p>
+
+<h2 id="postgresql-migration--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="postgresql-migration--source-4">[4] <a href="https://www.postgresql.org/docs/18/release-18.html">PostgreSQL: Documentation: 18: E.6.&nbsp;Release 18</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-4-1" aria-label="Return to citation 4, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-migration--source-13">[13] <a href="https://www.postgresql.org/docs/18/app-psql.html">PostgreSQL: Documentation: 18: psql</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-13-1" aria-label="Return to citation 13, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-migration--cite-13-2" aria-label="Return to citation 13, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-migration--source-21">[21] <a href="https://www.postgresql.org/docs/18/ddl-schemas.html">PostgreSQL: Documentation: 18: 5.10.&nbsp;Schemas</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-21-1" aria-label="Return to citation 21, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-migration--source-27">[27] <a href="https://www.postgresql.org/docs/18/using-explain.html">PostgreSQL: Documentation: 18: 14.1.&nbsp;Using EXPLAIN</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-27-1" aria-label="Return to citation 27, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-migration--source-28">[28] <a href="https://www.postgresql.org/docs/18/sql-createindex.html">PostgreSQL: Documentation: 18: CREATE INDEX</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-28-1" aria-label="Return to citation 28, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-migration--source-46">[46] <a href="https://www.postgresql.org/docs/18/sql-copy.html">PostgreSQL: Documentation: 18: COPY</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-46-1" aria-label="Return to citation 46, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-migration--cite-46-2" aria-label="Return to citation 46, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-migration--cite-46-3" aria-label="Return to citation 46, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-migration--source-47">[47] <a href="https://www.postgresql.org/docs/18/datatype.html">PostgreSQL: Documentation: 18: Chapter&nbsp;8.&nbsp;Data Types</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-47-1" aria-label="Return to citation 47, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-migration--cite-47-2" aria-label="Return to citation 47, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-migration--source-48">[48] <a href="https://www.postgresql.org/docs/18/ddl-identity-columns.html">PostgreSQL: Documentation: 18: 5.3.&nbsp;Identity Columns</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-48-1" aria-label="Return to citation 48, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-migration--cite-48-2" aria-label="Return to citation 48, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-migration--source-49">[49] <a href="https://www.postgresql.org/docs/18/collation.html">PostgreSQL: Documentation: 18: 23.2.&nbsp;Collation Support</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-49-1" aria-label="Return to citation 49, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-migration--cite-49-2" aria-label="Return to citation 49, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-migration--cite-49-3" aria-label="Return to citation 49, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-migration--source-50">[50] <a href="https://www.postgresql.org/docs/18/plpgsql-trigger.html">PostgreSQL: Documentation: 18: 41.10.&nbsp;Trigger Functions</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-50-1" aria-label="Return to citation 50, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-migration--source-59">[59] <a href="https://www.postgresql.org/docs/18/sql-createrole.html">PostgreSQL: Documentation: 18: CREATE ROLE</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-59-1" aria-label="Return to citation 59, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-migration--source-60">[60] <a href="https://www.postgresql.org/docs/18/functions-sequence.html">PostgreSQL: Documentation: 18: 9.17.&nbsp;Sequence Manipulation Functions</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-60-1" aria-label="Return to citation 60, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-migration--cite-60-2" aria-label="Return to citation 60, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-migration--source-70">[70] <a href="https://www.postgresql.org/docs/18/sql-createtable.html">PostgreSQL: Documentation: 18: CREATE TABLE</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-70-1" aria-label="Return to citation 70, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-migration--source-78">[78] <a href="https://www.postgresql.org/docs/18/sql-syntax-lexical.html">PostgreSQL: Documentation: 18: 4.1.&nbsp;Lexical Structure</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-78-1" aria-label="Return to citation 78, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-migration--source-79">[79] <a href="https://www.postgresql.org/docs/18/datatype-numeric.html">PostgreSQL: Documentation: 18: 8.1.&nbsp;Numeric Types</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-79-1" aria-label="Return to citation 79, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-migration--cite-79-2" aria-label="Return to citation 79, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-migration--cite-79-3" aria-label="Return to citation 79, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-migration--source-80">[80] <a href="https://www.postgresql.org/docs/18/datatype-datetime.html">PostgreSQL: Documentation: 18: 8.5.&nbsp;Date/Time Types</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-80-1" aria-label="Return to citation 80, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-migration--source-81">[81] <a href="https://www.postgresql.org/docs/18/datatype-json.html">PostgreSQL: Documentation: 18: 8.14.&nbsp;JSON Types</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-81-1" aria-label="Return to citation 81, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-migration--source-82">[82] <a href="https://www.postgresql.org/docs/18/sql-insert.html">PostgreSQL: Documentation: 18: INSERT</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-82-1" aria-label="Return to citation 82, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-migration--cite-82-2" aria-label="Return to citation 82, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-migration--source-87">[87] <a href="https://www.postgresql.org/docs/18/sql-altercollation.html">PostgreSQL: Documentation: 18: ALTER COLLATION</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-87-1" aria-label="Return to citation 87, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-migration--source-100">[100] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-server-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18-server 18.6-1PGDG.rhel9.7</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-migration--source-105">[105] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18 18.6-1PGDG.rhel9.7</a><span class="citation-returns"><a class="citation-return" href="#postgresql-migration--cite-105-1" aria-label="Return to citation 105, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="postgresql-upgrades.html"><span>Previous · PostgreSQL</span><strong>Minor and major upgrades</strong></a></div><div></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/change.html">Explore Protect it and change it safely ↗</a><div class="current-group"><h2>In PostgreSQL</h2><ol class="chapter-list"><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a  href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a aria-current="page" href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-hardening.html">TLS and encryption at rest</a><a href="mysql-upgrades.html">Upgrades and rollback planning</a><a href="mysql-migration.html">Migrating MySQL to Oracle</a></div><div><span>MongoDB</span><a href="mongodb-security.html">Hardening, TLS and key rotation</a><a href="mongodb-upgrades.html">Upgrades and feature compatibility</a><a href="mongodb-migration.html">Relational-to-document migration</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

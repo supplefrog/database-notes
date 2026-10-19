@@ -1,0 +1,253 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Replication and high availability — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="postgresql-replication-ha"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/replicate.html">Keep more than one copy</a></nav>
+<header class="reader-head"><p class="reader-context">PostgreSQL <span aria-hidden="true">/</span> Keep more than one copy</p><h1>Replication and high availability</h1></header>
+<div class="reader-controls"><a href="../tasks/replicate.html">← Keep more than one copy</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="PostgreSQL chapters"><ol class="chapter-list"><li><a  href="../chapters/postgresql-foundations.html">PostgreSQL foundations and tools</a></li><li><a  href="../chapters/postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></li><li><a  href="../chapters/postgresql-install-instances.html">Installation, services and instances</a></li><li><a  href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a  href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li><li><a  href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a  href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li><li><a  href="../chapters/postgresql-backup-recovery.html">Backup and point-in-time recovery</a></li><li><a aria-current="page" href="../chapters/postgresql-replication-ha.html">Replication and high availability</a></li><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a  href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a  href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#topology">Replicate the right unit</a><a class="level-2" href="#physical">Build an asynchronous physical standby</a><a class="level-2" href="#lag-slots">Monitor lag, slots and durability</a><a class="level-3" href="#synchronous">Synchronous is a commit policy, not automatic HA</a><a class="level-2" href="#logical">Publish a bounded set of tables</a><a class="level-2" href="#failover">Promote only after fencing</a><a class="level-3" href="#rejoin">Rejoin without creating a second primary</a><a class="level-2" href="#postgresql-replication-ha--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-replication.html">Source-replica replication and recovery</a><a href="mysql-group-replication.html">Group replication and failover</a><p class="product-label">MongoDB</p><a href="mongodb-replication.html">Replica sets and high availability</a><a href="mongodb-sharding.html">Sharding and resharding</a></nav></details></div>
+<article class="prose">
+<h2 id="topology">Replicate the right unit</h2>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 1, horizontally scrollable"><code class="language-text">                       physical WAL (whole cluster)
+applications -&gt; primary ----------------------------&gt; standby
+                    |                                      |
+                    | WAL archive + base backups           | read-only queries
+                    v                                      v
+             independent recovery storage             promotion only after fencing
+
+publisher database -- publication/table changes --&gt; subscriber database
+                  logical replication; separate schema/sequence policy
+</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Replication and high availability: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Mechanism</th>
+<th>Replicates</th>
+<th>Does not supply</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Physical streaming</td>
+<td>WAL for the entire cluster, same major and compatible platform</td>
+<td>Selective table filtering, cross-major upgrade or automatic leader election.</td>
+</tr>
+<tr>
+<td>Logical publication/subscription</td>
+<td>Selected tables’ data changes plus optional initial copy</td>
+<td>DDL, sequences, large objects, all extension state or a transparent HA copy.</td>
+</tr>
+<tr>
+<td>WAL archive</td>
+<td>Durable retained segments for recovery/standby catch-up</td>
+<td>Live failure detection/routing.</td>
+</tr>
+<tr>
+<td>External HA controller</td>
+<td>Failure decision, fencing, routing and rejoin policy</td>
+<td>A replacement for PostgreSQL backups or tested consistency settings.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Core PostgreSQL provides replication and promotion primitives, not the software that decides a primary has failed and fences it. A heartbeat alone cannot distinguish failure from network partition.<a id="postgresql-replication-ha--cite-38-1" class="citation-ref" href="#postgresql-replication-ha--source-38" aria-label="Source 38">[38]</a><a id="postgresql-replication-ha--cite-41-1" class="citation-ref" href="#postgresql-replication-ha--source-41" aria-label="Source 41">[41]</a><a id="postgresql-replication-ha--cite-64-1" class="citation-ref" href="#postgresql-replication-ha--source-64" aria-label="Source 64">[64]</a></p>
+
+<h2 id="physical">Build an asynchronous physical standby</h2>
+<p>Two separate RHEL/PGDG hosts, both major 18 with compatible extensions, checksums/platform and maintained minor versions. Primary <code>postgresql-18</code> is already running; standby has <strong>no running cluster at its target path</strong>. This bounded setup uses no external tablespaces. With tablespaces, stop and plan all target mappings. Require <a href="postgresql-hardening.html#tls">verified TLS</a>, time/DNS, private routing and a restore-tested backup first.<a id="postgresql-replication-ha--cite-32-1" class="citation-ref" href="#postgresql-replication-ha--source-32" aria-label="Source 32">[32]</a><a id="postgresql-replication-ha--cite-38-2" class="citation-ref" href="#postgresql-replication-ha--source-38" aria-label="Source 38">[38]</a></p>
+<p>Example names/addresses are reserved documentation values: primary <code>primary.example.test</code> at <code>192.0.2.10</code>, standby at <code>192.0.2.20</code>. Replace them with actual private addresses and certificate identities. On the primary as administrator:</p>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 2, horizontally scrollable"><code class="language-sql">CREATE ROLE notes_repl LOGIN REPLICATION NOSUPERUSER NOCREATEDB NOCREATEROLE;
+\password notes_repl
+</code></pre>
+<p>Set the password through the prompt with SCRAM selected, not in SQL history. Allow only the standby’s address, and only replication connections, before any broad reject rules:</p>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 3, horizontally scrollable"><code class="language-text">hostssl replication notes_repl 192.0.2.20/32 scram-sha-256
+</code></pre>
+<p>Review settings on the primary. The following capacities are <strong>examples</strong>, not a formula for every topology:</p>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 4, horizontally scrollable"><code class="language-ini">wal_level = replica
+max_wal_senders = 10
+max_replication_slots = 10
+max_slot_wal_keep_size = '10GB'
+</code></pre>
+<p>Changing <code>wal_level</code>, senders or slot capacity needs a restart; HBA and retention changes are reloadable according to <code>pg_settings.context</code>. Keep at least two sender connections free for a streaming base backup. The retention cap limits slot-induced growth at checkpoints but can invalidate a lagging consumer; it is not a guarantee of uninterrupted catch-up.<a id="postgresql-replication-ha--cite-32-2" class="citation-ref" href="#postgresql-replication-ha--source-32" aria-label="Source 32">[32]</a><a id="postgresql-replication-ha--cite-39-1" class="citation-ref" href="#postgresql-replication-ha--source-39" aria-label="Source 39">[39]</a></p>
+<p>On the separate RHEL 9.7 standby host install the same approved PGDG major-18 server/client/contrib and extension RPMs as the primary. <strong>Do not initialize</strong> its target: RPM installation alone does not create a writable database. Leave <code>postgresql-18.service</code> stopped/disabled and verify <code>/var/lib/pgsql/18/data</code> is empty, owned by <code>postgres</code>, mode 0700, with no process using it. If it contains data, stop and preserve/inventory it; do not delete it to make this recipe fit.<a id="postgresql-replication-ha--cite-100-1" class="citation-ref" href="#postgresql-replication-ha--source-100" aria-label="Source 100">[100]</a></p>
+<p>Provision the primary CA at <code>/var/lib/pgsql/tls/ca.crt</code> and a passfile <code>/var/lib/pgsql/.pgpass</code> owned by <code>postgres</code> mode 0600 through secret management. Its matching database field is <code>replication</code>, with primary hostname/port and <code>notes_repl</code>. Use the <a href="postgresql-hardening.html#tls">TLS file-label checks</a>; do not store credentials in <code>primary_conninfo</code>. Check primary firewalld allows only this standby source; the receiving standby needs outbound primary access, not a broadly opened inbound database port.<a id="postgresql-replication-ha--cite-55-1" class="citation-ref" href="#postgresql-replication-ha--source-55" aria-label="Source 55">[55]</a><a id="postgresql-replication-ha--cite-102-1" class="citation-ref" href="#postgresql-replication-ha--source-102" aria-label="Source 102">[102]</a><a id="postgresql-replication-ha--cite-103-1" class="citation-ref" href="#postgresql-replication-ha--source-103" aria-label="Source 103">[103]</a></p>
+<p>As OS <code>postgres</code> <strong>on the standby</strong>:</p>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 5, horizontally scrollable"><code class="language-bash">/usr/pgsql-18/bin/pg_basebackup \
+  --dbname='host=primary.example.test port=5432 user=notes_repl sslmode=verify-full sslrootcert=/var/lib/pgsql/tls/ca.crt gssencmode=disable passfile=/var/lib/pgsql/.pgpass application_name=standby1' \
+  --pgdata=/var/lib/pgsql/18/data --format=plain --wal-method=stream \
+  --write-recovery-conf --create-slot --slot=standby1 --progress
+/usr/pgsql-18/bin/pg_verifybackup /var/lib/pgsql/18/data
+</code></pre>
+<p><code>-R</code> creates <code>standby.signal</code> and connection/slot settings in <code>postgresql.auto.conf</code>; do not remove them. <code>--create-slot</code> fails if the named slot exists; inspect and determine ownership rather than dropping an unknown slot. If backup fails after creating a slot, review/remove the unused slot or it can keep retaining WAL.<a id="postgresql-replication-ha--cite-32-3" class="citation-ref" href="#postgresql-replication-ha--source-32" aria-label="Source 32">[32]</a></p>
+<p>PGDG primary configuration lives <strong>inside PGDATA</strong> and is copied by this base backup. Save and replace/review it with <strong>standby-local</strong> <code>postgresql.conf</code> and <code>pg_hba.conf</code>; do not inherit the primary’s listener, TLS server identity, external includes, archive destination or local paths.<a id="postgresql-replication-ha--cite-100-2" class="citation-ref" href="#postgresql-replication-ha--source-100" aria-label="Source 100">[100]</a> Review inherited <code>postgresql.auto.conf</code> for unrelated source overrides, retaining the intended <code>primary_conninfo</code> and <code>primary_slot_name</code>; never inherit a source <code>data_directory</code>, port or archive destination unchecked.</p>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 6, horizontally scrollable"><code class="language-ini">data_directory = '/var/lib/pgsql/18/data'
+hba_file = '/var/lib/pgsql/18/data/pg_hba.conf'
+listen_addresses = 'localhost'
+port = 5432
+unix_socket_directories = '/run/postgresql'
+hot_standby = on
+archive_mode = off
+</code></pre>
+<p>Set standby <code>max_connections</code>, <code>max_worker_processes</code>, <code>max_wal_senders</code>, <code>max_prepared_transactions</code> and <code>max_locks_per_transaction</code> no lower than required source values; install required libraries. For this admin-only standby, HBA can contain just <code>local all postgres peer</code>; enable any reporting TCP access separately with TLS/least privilege. On this second host 5432 must be free.<a id="postgresql-replication-ha--cite-74-1" class="citation-ref" href="#postgresql-replication-ha--source-74" aria-label="Source 74">[74]</a> Before streaming or a logical subscription starts, inspect <code>getsebool -a</code>, the installed <code>postgresql_selinux(8)</code> policy documentation and AVC denials for server-originated outbound connections. If policy requires a PostgreSQL database-network boolean, enable only the verified installed boolean after a security review and record its prior value; do not enable all network booleans or generate broad allow rules. A successful unconfined <code>pg_basebackup</code> client is not proof that the confined WAL receiver/subscription worker can connect.<a id="postgresql-replication-ha--cite-102-2" class="citation-ref" href="#postgresql-replication-ha--source-102" aria-label="Source 102">[102]</a></p>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 7, horizontally scrollable"><code class="language-bash">sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/postgresql-18.conf
+sudo restorecon -Rv /var/lib/pgsql/18/data /run/postgresql
+sudo systemctl start postgresql-18.service
+sudo -u postgres /usr/pgsql-18/bin/psql -X -h /run/postgresql -p 5432 -d postgres \
+  -c 'SELECT pg_is_in_recovery();'
+</code></pre>
+<p>This is the default PGDG service on the <strong>second host</strong>, not a second controller for the primary. Configure its own <code>PGDATA/log</code>, check <code>ps -eZ</code>/AVCs and journal/collector output, then verify <code>SHOW data_directory</code>, system identifier, <code>pg_is_in_recovery()</code>, primary streaming state and a new fixture commit becoming visible. Rehearse clean stop/start and boot recovery before <code>sudo systemctl enable postgresql-18.service</code>; keep applications away until read-only state and security policy are proved. For nondefault paths use the <a href="postgresql-install-instances.html#relocation">PGDATA/drop-in/SELinux/mount relocation procedure</a>, not a detached pg_ctl daemon.<a id="postgresql-replication-ha--cite-100-3" class="citation-ref" href="#postgresql-replication-ha--source-100" aria-label="Source 100">[100]</a><a id="postgresql-replication-ha--cite-102-3" class="citation-ref" href="#postgresql-replication-ha--source-102" aria-label="Source 102">[102]</a></p>
+
+<h2 id="lag-slots">Monitor lag, slots and durability</h2>
+<p>On the primary, using an authorized monitoring role; slot <code>restart_lsn</code> is a retention boundary, not proof that the subscriber has applied every transaction:[25]<a id="postgresql-replication-ha--cite-90-1" class="citation-ref" href="#postgresql-replication-ha--source-90" aria-label="Source 90">[90]</a></p>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 8, horizontally scrollable"><code class="language-sql">SELECT application_name, client_addr, state, sync_state,
+       sent_lsn, write_lsn, flush_lsn, replay_lsn,
+       write_lag, flush_lag, replay_lag
+FROM pg_stat_replication;
+SELECT slot_name, slot_type, active, restart_lsn, wal_status,
+       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained
+FROM pg_replication_slots;
+</code></pre>
+<p>On a physical standby:</p>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 9, horizontally scrollable"><code class="language-sql">SELECT status, sender_host, sender_port, slot_name FROM pg_stat_wal_receiver;
+SELECT pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(),
+       pg_last_xact_replay_timestamp();
+</code></pre>
+<p>Lag intervals are not guaranteed forecasts of catch-up time; an idle source can have an old replay timestamp without a backlog. Compare LSN positions, generation rate, receiver/apply state and storage throughput. A disconnected slot can fill primary disk; a cap can instead force a new base backup. Never delete <code>pg_wal</code> files or drop a consumer’s active slot to hide an alarm.<a id="postgresql-replication-ha--cite-25-1" class="citation-ref" href="#postgresql-replication-ha--source-25" aria-label="Source 25">[25]</a><a id="postgresql-replication-ha--cite-39-2" class="citation-ref" href="#postgresql-replication-ha--source-39" aria-label="Source 39">[39]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Replication and high availability: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>Response</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TLS/authentication failure</td>
+<td>Inspect certificate hostname/CA, passfile ownership, HBA and SCRAM role; do not relax to trust.</td>
+</tr>
+<tr>
+<td>Required WAL removed</td>
+<td>Retrieve from a valid archive if configured/available, otherwise rebuild from a new base.</td>
+</tr>
+<tr>
+<td>Receive advances but replay stalls</td>
+<td>Check replay pause, conflicts with standby queries, resource settings and I/O.</td>
+</tr>
+<tr>
+<td>Long standby queries conflict with recovery</td>
+<td>Choose delay versus cancellation consciously; <code>hot_standby_feedback</code> can reduce cleanup conflicts but retain bloat on primary.</td>
+</tr>
+<tr>
+<td>Abandoned slot</td>
+<td>Confirm consumer retirement and rebuild consequence, then <code>pg_drop_replication_slot</code> for that exact inactive slot.</td>
+</tr>
+</tbody>
+</table></div>
+<p>A production standby can add an authenticated <code>restore_command</code> for archive catch-up; access must be read-only and point to the same cluster/timeline history. Streaming alone cannot fetch WAL the primary has already recycled.<a id="postgresql-replication-ha--cite-38-3" class="citation-ref" href="#postgresql-replication-ha--source-38" aria-label="Source 38">[38]</a></p>
+
+<h3 id="synchronous">Synchronous is a commit policy, not automatic HA</h3>
+<p>Asynchronous replication can lose acknowledged transactions if the primary fails before the standby durably receives them. To wait for this particular standby, set <code>synchronous_standby_names = 'FIRST 1 (standby1)'</code>, where the name matches its <code>application_name</code>; reload and verify <code>sync_state</code> on the primary.<a id="postgresql-replication-ha--cite-38-4" class="citation-ref" href="#postgresql-replication-ha--source-38" aria-label="Source 38">[38]</a><a id="postgresql-replication-ha--cite-39-3" class="citation-ref" href="#postgresql-replication-ha--source-39" aria-label="Source 39">[39]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Replication and high availability: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th><code>synchronous_commit</code></th>
+<th>Wait condition (with a selected synchronous standby)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>on</code></td>
+<td>Local durable WAL plus synchronous standby durable WAL.</td>
+</tr>
+<tr>
+<td><code>remote_apply</code></td>
+<td>Also waits for standby replay/visibility; increases latency.</td>
+</tr>
+<tr>
+<td><code>remote_write</code></td>
+<td>Standby OS has written WAL but may not have durably flushed it.</td>
+</tr>
+<tr>
+<td><code>local</code></td>
+<td>Local flush only, not a standby acknowledgment.</td>
+</tr>
+<tr>
+<td><code>off</code></td>
+<td>Does not wait for local durable commit; acknowledged recent work can be lost.</td>
+</tr>
+</tbody>
+</table></div>
+<p>With no qualifying synchronous standby, commits can wait indefinitely. Changing the policy to resume writes is an explicit durability tradeoff, not an invisible health fix. Test loss of a standby, network partition and recovery while measuring both latency and data loss. Keep synchronous nodes in meaningful failure domains, and verify clients are not overriding the commit policy.<a id="postgresql-replication-ha--cite-34-1" class="citation-ref" href="#postgresql-replication-ha--source-34" aria-label="Source 34">[34]</a><a id="postgresql-replication-ha--cite-38-5" class="citation-ref" href="#postgresql-replication-ha--source-38" aria-label="Source 38">[38]</a></p>
+
+<h2 id="logical">Publish a bounded set of tables</h2>
+<p>Logical replication is useful for a selected-table copy or major migration, not an automatic full-cluster standby. For this example use <code>adminlab</code> on the publisher and a new <code>adminlab_sub</code> on a separate subscriber, with no application writes to the destination. A table’s primary key normally supplies replica identity for updates/deletes; <code>REPLICA IDENTITY FULL</code> is a fallback with performance/type limitations, not a default recommendation.<a id="postgresql-replication-ha--cite-40-1" class="citation-ref" href="#postgresql-replication-ha--source-40" aria-label="Source 40">[40]</a><a id="postgresql-replication-ha--cite-41-2" class="citation-ref" href="#postgresql-replication-ha--source-41" aria-label="Source 41">[41]</a></p>
+<ol>
+<li>On the publisher set <code>wal_level = logical</code>, budget replication slots/senders, restart as required and retain the physical replication configuration if also used. Give <code>notes_repl</code> <code>CONNECT</code> on <code>adminlab</code>, <code>USAGE</code> on <code>notes</code> and <code>SELECT</code> on <code>notes.orders</code> for initial copy. Add a separate narrow TLS HBA rule for database <strong>adminlab</strong> from the subscriber; the special <code>replication</code> rule does not match logical database connections.<a id="postgresql-replication-ha--cite-14-1" class="citation-ref" href="#postgresql-replication-ha--source-14" aria-label="Source 14">[14]</a><a id="postgresql-replication-ha--cite-88-1" class="citation-ref" href="#postgresql-replication-ha--source-88" aria-label="Source 88">[88]</a></li>
+<li>Copy the reviewed schema, not rows, to an empty destination. For the fixture, export only <code>notes</code> and exclude topology definitions so an existing publication/subscription is not recreated accidentally:[29]<a id="postgresql-replication-ha--cite-41-3" class="citation-ref" href="#postgresql-replication-ha--source-41" aria-label="Source 41">[41]</a></li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 10, horizontally scrollable"><code class="language-bash"># Publisher, as OS postgres; /secure must be owned/protected appropriately.
+/usr/pgsql-18/bin/pg_dump -h /run/postgresql -p 5432 \
+  -U postgres -d adminlab --schema-only --schema=notes --no-owner --no-acl \
+  --no-publications --no-subscriptions --file=/secure/notes-schema.sql
+</code></pre>
+<p>Transfer the file through an approved secure channel and inspect it. On a <strong>separate</strong> subscriber cluster, create a no-login <code>notes_owner</code> and fresh <code>adminlab_sub</code> owned by it; if either already exists, stop and review, not overwrite. Revoke public database access. Install any required extensions first, then restore the fixture schema with correct ownership:[18]<a id="postgresql-replication-ha--cite-29-1" class="citation-ref" href="#postgresql-replication-ha--source-29" aria-label="Source 29">[29]</a></p>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 11, horizontally scrollable"><code class="language-bash"># Subscriber, as OS postgres, after checking its identity/path/port.
+/usr/pgsql-18/bin/psql -X -v ON_ERROR_STOP=1 \
+  -h /run/postgresql -p 5432 -d adminlab_sub \
+  -c 'SET ROLE notes_owner' -f /secure/notes-schema.sql
+</code></pre>
+<p>Do not create the fixture’s 2,000 rows there; initial synchronization will copy them. Review owners/grants independently because <code>--no-acl</code> intentionally omits source grants. A filtered schema dump can omit external dependencies; this bounded fixture has none, but a real schema needs an explicit dependency inventory.
+3. As the table owner or appropriate administrator on the publisher:</p>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 12, horizontally scrollable"><code class="language-sql">CREATE PUBLICATION notes_pub FOR TABLE notes.orders;
+</code></pre>
+<ol start="4">
+<li>On the subscriber as a trusted <strong>superuser subscription owner</strong> for this bounded example, use a protected server-side passfile (matching database <code>adminlab</code>) and verified CA. This avoids embedding a secret in SQL/catalog connection text; non-superuser ownership has additional password/security restrictions that must not be bypassed casually.<a id="postgresql-replication-ha--cite-42-1" class="citation-ref" href="#postgresql-replication-ha--source-42" aria-label="Source 42">[42]</a></li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Replication and high availability: code 13, horizontally scrollable"><code class="language-sql">CREATE SUBSCRIPTION notes_sub
+CONNECTION 'host=primary.example.test port=5432 dbname=adminlab user=notes_repl sslmode=verify-full sslrootcert=/var/lib/pgsql/tls/ca.crt gssencmode=disable passfile=/var/lib/pgsql/.pgpass'
+PUBLICATION notes_pub
+WITH (copy_data = true, create_slot = true, enabled = true, run_as_owner = false);
+</code></pre>
+<p>Do not run slot-creating subscription setup inside a transaction block. Default <code>run_as_owner = false</code> uses table-owner permissions for apply. Restrict who can alter subscriber table definitions/ownership; replication is a trust boundary, not merely a connection string.<a id="postgresql-replication-ha--cite-42-2" class="citation-ref" href="#postgresql-replication-ha--source-42" aria-label="Source 42">[42]</a></p>
+<ol start="5">
+<li>Inspect <code>pg_stat_subscription</code> and <code>pg_subscription_rel</code>, wait for all subscribed tables to finish synchronization, and compare a quiet-source count plus keyed checks. Commit an approved fixture change on the source and verify it arrives. Watch the publisher slot and subscriber logs for conflicts/schema errors.</li>
+<li>Apply DDL deliberately to both sides (often additive subscriber changes first). Before subscriber cutover, stop source writes, prove all final changes applied, copy/update sequences and validate application state. Logical replication does <strong>not</strong> replicate sequences, schema changes or large objects.<a id="postgresql-replication-ha--cite-41-4" class="citation-ref" href="#postgresql-replication-ha--source-41" aria-label="Source 41">[41]</a></li>
+</ol>
+<p>To abandon this copy, disable <code>notes_sub</code>, then drop it while the publisher is reachable so its slot is cleaned up. If the publisher is unavailable, follow the documented disassociation/slot-removal procedure and track the orphan explicitly; disabling alone keeps retention. Do not skip conflicting transactions to make replication appear green without reconciling missing data.</p>
+
+<h2 id="failover">Promote only after fencing</h2>
+<ol>
+<li>Establish whether the primary is truly failed or merely unreachable from one observer. Stop/reroute clients under the HA incident procedure; identify the best eligible standby and accepted RPO.</li>
+<li><strong>Fence the former primary</strong> using a verified power/storage/network mechanism that prevents it accepting writes. Merely removing a DNS record or failing a health check is not fencing. If exclusive write authority cannot be established, do not promote into split brain.<a id="postgresql-replication-ha--cite-64-2" class="citation-ref" href="#postgresql-replication-ha--source-64" aria-label="Source 64">[64]</a></li>
+<li>Inspect replay/receive positions, pause state and required logical-slot readiness. For a planned switchover, stop writes and wait for the final committed position to replay. For an unplanned failure, explicitly record the possible data-loss window.</li>
+<li>On the chosen standby, run <code>SELECT pg_promote(true, 60);</code> as an authorized administrator. Verify <code>pg_is_in_recovery()</code> becomes false, perform a controlled write and readback, check the new timeline, then update the application endpoint/pool and confirm reconnect behavior.<a id="postgresql-replication-ha--cite-23-1" class="citation-ref" href="#postgresql-replication-ha--source-23" aria-label="Source 23">[23]</a><a id="postgresql-replication-ha--cite-64-3" class="citation-ref" href="#postgresql-replication-ha--source-64" aria-label="Source 64">[64]</a></li>
+<li>Preserve old-primary files/logs for reconciliation. Reconfigure backups/archives for the new primary, create/rejoin a standby and test the degraded-period alert. Promotion does not automatically recreate redundancy.</li>
+</ol>
+
+<h3 id="rejoin">Rejoin without creating a second primary</h3>
+<p>Safest general path: keep the old primary fenced, preserve any divergent data needed for reconciliation, replace its cluster with a fresh base backup from the new primary and start it <strong>as a standby</strong> using the physical procedure. This discards divergence only after an explicit decision.</p>
+<p><code>pg_rewind</code> can be faster for a compatible diverged cluster with common history. It needs target checksums or <code>wal_log_hints</code> enabled before divergence, <code>full_page_writes = on</code>, the required old WAL and a cleanly stopped target. Run <code>--dry-run</code> first with correct source/target and credentials; review exact official prerequisites before the write. A failed rewind can leave the target unusable—rebuild from base backup, not repeated improvisation.<a id="postgresql-replication-ha--cite-44-1" class="citation-ref" href="#postgresql-replication-ha--source-44" aria-label="Source 44">[44]</a></p>
+<p>Rewind can copy source configuration. On RHEL, stop the exact target systemd unit before rewind and keep its boot/restart path fenced; restore file contexts with <code>restorecon</code> and inspect unit/drop-ins before allowing systemd to start it.<a id="postgresql-replication-ha--cite-100-4" class="citation-ref" href="#postgresql-replication-ha--source-100" aria-label="Source 100">[100]</a><a id="postgresql-replication-ha--cite-102-4" class="citation-ref" href="#postgresql-replication-ha--source-102" aria-label="Source 102">[102]</a> Before restart, correct local paths/ports/archive identity, create/verify standby recovery settings, and test <code>pg_is_in_recovery()</code>; starting it without standby configuration can diverge again. Restore client routing only after lag and consistency checks. Keep failover/rejoin drills, fencing evidence and measured RPO/RTO alongside the <a href="postgresql-backup-recovery.html#validation">backup restore report</a>.</p>
+
+<h2 id="postgresql-replication-ha--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="postgresql-replication-ha--source-14">[14] <a href="https://www.postgresql.org/docs/18/auth-pg-hba-conf.html">PostgreSQL: Documentation: 18: 20.1.&nbsp;The pg_hba.conf File</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-14-1" aria-label="Return to citation 14, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-18">[18] <a href="https://www.postgresql.org/docs/18/role-membership.html">PostgreSQL: Documentation: 18: 21.3.&nbsp;Role Membership</a><br>
+</div><div class="source-entry" id="postgresql-replication-ha--source-23">[23] <a href="https://www.postgresql.org/docs/18/functions-admin.html">PostgreSQL: Documentation: 18: 9.28.&nbsp;System Administration Functions</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-23-1" aria-label="Return to citation 23, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-25">[25] <a href="https://www.postgresql.org/docs/18/monitoring-stats.html">PostgreSQL: Documentation: 18: 27.2.&nbsp;The Cumulative Statistics System</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-25-1" aria-label="Return to citation 25, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-29">[29] <a href="https://www.postgresql.org/docs/18/app-pgdump.html">PostgreSQL: Documentation: 18: pg_dump</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-29-1" aria-label="Return to citation 29, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-32">[32] <a href="https://www.postgresql.org/docs/18/app-pgbasebackup.html">PostgreSQL: Documentation: 18: pg_basebackup</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-32-1" aria-label="Return to citation 32, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-replication-ha--cite-32-2" aria-label="Return to citation 32, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-replication-ha--cite-32-3" aria-label="Return to citation 32, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-34">[34] <a href="https://www.postgresql.org/docs/18/runtime-config-wal.html">PostgreSQL: Documentation: 18: 19.5.&nbsp;Write Ahead Log</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-34-1" aria-label="Return to citation 34, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-38">[38] <a href="https://www.postgresql.org/docs/18/warm-standby.html">PostgreSQL: Documentation: 18: 26.2.&nbsp;Log-Shipping Standby Servers</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-38-1" aria-label="Return to citation 38, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-replication-ha--cite-38-2" aria-label="Return to citation 38, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-replication-ha--cite-38-3" aria-label="Return to citation 38, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-replication-ha--cite-38-4" aria-label="Return to citation 38, occurrence 4">↩4</a><a class="citation-return" href="#postgresql-replication-ha--cite-38-5" aria-label="Return to citation 38, occurrence 5">↩5</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-39">[39] <a href="https://www.postgresql.org/docs/18/runtime-config-replication.html">PostgreSQL: Documentation: 18: 19.6.&nbsp;Replication</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-39-1" aria-label="Return to citation 39, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-replication-ha--cite-39-2" aria-label="Return to citation 39, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-replication-ha--cite-39-3" aria-label="Return to citation 39, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-40">[40] <a href="https://www.postgresql.org/docs/18/logical-replication.html">PostgreSQL: Documentation: 18: Chapter&nbsp;29.&nbsp;Logical Replication</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-40-1" aria-label="Return to citation 40, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-41">[41] <a href="https://www.postgresql.org/docs/18/logical-replication-restrictions.html">PostgreSQL: Documentation: 18: 29.8.&nbsp;Restrictions</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-41-1" aria-label="Return to citation 41, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-replication-ha--cite-41-2" aria-label="Return to citation 41, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-replication-ha--cite-41-3" aria-label="Return to citation 41, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-replication-ha--cite-41-4" aria-label="Return to citation 41, occurrence 4">↩4</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-42">[42] <a href="https://www.postgresql.org/docs/18/sql-createsubscription.html">PostgreSQL: Documentation: 18: CREATE SUBSCRIPTION</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-42-1" aria-label="Return to citation 42, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-replication-ha--cite-42-2" aria-label="Return to citation 42, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-44">[44] <a href="https://www.postgresql.org/docs/18/app-pgrewind.html">PostgreSQL: Documentation: 18: pg_rewind</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-44-1" aria-label="Return to citation 44, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-55">[55] <a href="https://www.postgresql.org/docs/18/libpq-pgpass.html">PostgreSQL: Documentation: 18: 32.16.&nbsp;The Password File</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-55-1" aria-label="Return to citation 55, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-64">[64] <a href="https://www.postgresql.org/docs/18/warm-standby-failover.html">PostgreSQL: Documentation: 18: 26.3.&nbsp;Failover</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-64-1" aria-label="Return to citation 64, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-replication-ha--cite-64-2" aria-label="Return to citation 64, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-replication-ha--cite-64-3" aria-label="Return to citation 64, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-74">[74] <a href="https://www.postgresql.org/docs/18/hot-standby.html">PostgreSQL: Documentation: 18: 26.4.&nbsp;Hot Standby</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-74-1" aria-label="Return to citation 74, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-88">[88] <a href="https://www.postgresql.org/docs/18/logical-replication-security.html">PostgreSQL: Documentation: 18: 29.11.&nbsp;Security</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-88-1" aria-label="Return to citation 88, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-90">[90] <a href="https://www.postgresql.org/docs/18/view-pg-replication-slots.html">PostgreSQL: Documentation: 18: 53.20.&nbsp;pg_replication_slots</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-90-1" aria-label="Return to citation 90, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-100">[100] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-server-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18-server 18.6-1PGDG.rhel9.7</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-replication-ha--cite-100-2" aria-label="Return to citation 100, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-replication-ha--cite-100-3" aria-label="Return to citation 100, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-replication-ha--cite-100-4" aria-label="Return to citation 100, occurrence 4">↩4</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-102">[102] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux">Chapter&nbsp;5.&nbsp;Troubleshooting problems related to SELinux | Using SELinux | Red Hat Enterprise Linux | 9 | Red Hat Documentation</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-102-1" aria-label="Return to citation 102, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-replication-ha--cite-102-2" aria-label="Return to citation 102, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-replication-ha--cite-102-3" aria-label="Return to citation 102, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-replication-ha--cite-102-4" aria-label="Return to citation 102, occurrence 4">↩4</a></span></div><div class="source-entry" id="postgresql-replication-ha--source-103">[103] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_firewalls_and_packet_filters/using-and-configuring-firewalld_firewall-packet-filters">Chapter&nbsp;1.&nbsp;Using and configuring firewalld | Configuring firewalls and packet filters | Red Hat Enterprise Linux | 9 | Red Hat Documentation</a><span class="citation-returns"><a class="citation-return" href="#postgresql-replication-ha--cite-103-1" aria-label="Return to citation 103, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="postgresql-backup-recovery.html"><span>Previous · PostgreSQL</span><strong>Backup and point-in-time recovery</strong></a></div><div><a rel="next" href="postgresql-hardening.html"><span>Next · PostgreSQL</span><strong>Authentication, TLS and hardening</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/replicate.html">Explore Keep more than one copy ↗</a><div class="current-group"><h2>In PostgreSQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/postgresql-replication-ha.html">Replication and high availability</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-replication.html">Source-replica replication and recovery</a><a href="mysql-group-replication.html">Group replication and failover</a></div><div><span>MongoDB</span><a href="mongodb-replication.html">Replica sets and high availability</a><a href="mongodb-sharding.html">Sharding and resharding</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

@@ -1,0 +1,110 @@
+/* Teaching figures and their optional viewer follow the handbook tokens. */
+.teaching-figure {
+  container: teaching-figure / inline-size;
+  display: block;
+  min-width: 0;
+  margin: 1.75rem 0 2.25rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--lichen);
+  background: var(--panel);
+  color: var(--ink);
+  font: 1rem/1.55 var(--sans);
+  overflow-wrap: anywhere;
+}
+.teaching-figure *, .teaching-figure *::before, .teaching-figure *::after { box-sizing: border-box; }
+.prose .teaching-figure:target { background: var(--panel); border-top-color: var(--red); }
+.teaching-figure .tf-heading { display: grid; gap: .4rem; padding-bottom: 1.1rem; }
+.teaching-figure .tf-label { color: var(--lichen); font: .875rem/1.5 var(--mono); }
+.teaching-figure .tf-heading > strong { font: 1.75rem/1.15 var(--serif); letter-spacing: -.015em; }
+.teaching-figure .tf-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
+.teaching-figure .tf-lane, .teaching-figure .tf-cell { min-width: 0; }
+.teaching-figure .tf-lane-title { font: 600 .9375rem/1.4 var(--sans); margin: 0 0 1rem; padding-bottom: .6rem; border-bottom: 1px solid var(--rule); }
+.teaching-figure .tf-flow { list-style: none; counter-reset: tf-step; margin: 0; padding: 0 0 0 1rem; }
+.teaching-figure .tf-flow > li { position: relative; counter-increment: tf-step; margin: 0; padding: 0 0 1.25rem 1.25rem; border-left: 1px solid var(--lichen); }
+.teaching-figure .tf-flow > li:last-child { padding-bottom: .3rem; border-left-color: transparent; }
+.teaching-figure .tf-flow > li::before { content: counter(tf-step); position: absolute; left: -.9rem; top: -.05rem; width: 1.75rem; height: 1.75rem; display: grid; place-content: center; background: var(--panel); border: 1px solid var(--lichen); border-radius: 50%; font: .875rem/1 var(--mono); color: var(--lichen); }
+.teaching-figure .tf-flow strong, .teaching-figure .tf-cell strong { display: block; margin-bottom: .35rem; font-weight: 700; }
+.teaching-figure .tf-flow span, .teaching-figure .tf-cell > span { display: block; }
+.teaching-figure .tf-note { margin: 1.25rem 0 0; padding: .9rem 0 .9rem 1rem; border-left: 3px solid var(--red); }
+.teaching-figure .tf-detail { margin: 1rem 0 0; font-size: .9375rem; }
+.teaching-figure .tf-tracks { display: grid; gap: 1.5rem; }
+.teaching-figure .tf-track { display: grid; grid-template-columns: minmax(0, 1fr) 5rem minmax(0, 1fr); gap: .25rem .75rem; align-items: start; }
+.teaching-figure .tf-track > .tf-lane-title { grid-column: 1 / -1; margin-bottom: .4rem; }
+.teaching-figure .tf-track .tf-cell { padding: .8rem; border: 1px solid var(--rule); }
+.teaching-figure .tf-transfer { padding-top: .8rem; text-align: center; color: var(--lichen); font-size: .875rem; }
+.teaching-figure .tf-transfer > span { display: block; font: 1.75rem/1 var(--sans); }
+.teaching-figure .tf-support { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--rule); }
+.teaching-figure .tf-support p { margin: 0; }
+.teaching-figure .tf-support strong { display: block; margin-bottom: .35rem; }
+.teaching-figure .tf-alternatives { margin: 0; }
+.teaching-figure .tf-alternatives dt { font-weight: 700; }
+.teaching-figure .tf-alternatives dd { margin: .3rem 0 1rem; }
+.teaching-figure .tf-disk { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; }
+.teaching-figure .tf-disk-region { min-width: 0; border-top: 3px solid var(--ink); padding-top: .8rem; }
+.teaching-figure .tf-disk-usable { border-top-color: var(--lichen); }
+.teaching-figure .tf-disk-blocks { padding: 0; margin: 0; list-style: none; }
+.teaching-figure .tf-disk-blocks li { padding: .7rem 0; margin: 0; border-bottom: 1px solid var(--rule); }
+.teaching-figure .tf-disk-blocks li:first-child { padding-top: 0; }
+.teaching-figure .tf-disk-blocks strong, .teaching-figure .tf-disk-blocks span { display: block; }
+.teaching-figure .tf-disk-blocks span { margin-top: .25rem; font-size: .9375rem; }
+.teaching-figure figcaption { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--rule); font-size: .9375rem; color: var(--soft); }
+.teaching-figure .tf-sources { margin: .75rem 0 0; font-size: .875rem; line-height: 1.9; }
+.teaching-figure .tf-sources strong { display: block; line-height: 1.5; }
+.teaching-figure .tf-sources a { display: inline-block; padding: .2rem 0; }
+.teaching-figure a { color: var(--red); text-decoration: underline; text-underline-offset: .18em; }
+.teaching-figure code { font-size: .875rem; overflow-wrap: anywhere; }
+.teaching-figure a:focus-visible { outline: 3px solid var(--red); outline-offset: 3px; }
+.teaching-figure .tf-external { margin: .6rem 0 0; font-size: .875rem; }
+.teaching-figure .tf-schema-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.teaching-figure .tf-schema-grid { fill: none; stroke: var(--rule); stroke-width: 1; opacity: .4; }
+.teaching-figure .tf-schema-links { fill: none; stroke: var(--lichen); stroke-width: 2.5; }
+.teaching-figure .tf-schema-box rect { fill: var(--panel); stroke: var(--ink); stroke-width: 1; }
+.teaching-figure .tf-schema-box text { fill: var(--ink); font: 23px var(--serif); }
+.teaching-figure .tf-schema-label { fill: var(--lichen); font: 16px var(--mono); }
+.teaching-figure text.tf-schema-small { fill: var(--ink); font: 18px var(--sans); }
+.teaching-figure .tf-schema-node { fill: var(--lichen); }
+.teaching-figure .tf-schema-key { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin: .8rem 0 0; }
+.teaching-figure .tf-schema-key > div { border-top: 1px solid var(--rule); padding-top: .75rem; }
+.teaching-figure .tf-schema-key dt { font-size: 1rem; font-weight: 700; }
+.teaching-figure .tf-schema-key dd { margin: .3rem 0 0; font-size: .9375rem; }
+@container teaching-figure (max-width: 620px) {
+  .teaching-figure .tf-disk { grid-template-columns: 1fr; }
+  .teaching-figure .tf-disk-region { border-top-width: 2px; }
+}
+@container teaching-figure (max-width: 560px) {
+  .teaching-figure .tf-columns, .teaching-figure .tf-schema-key { grid-template-columns: 1fr; }
+  .teaching-figure .tf-track { grid-template-columns: 1fr; }
+  .teaching-figure .tf-transfer { padding: .25rem 0; display: flex; gap: .65rem; justify-content: center; align-items: center; }
+  .teaching-figure .tf-transfer > span { transform: rotate(90deg); }
+  /* A complete HTML equivalent stays inline; parent may offer an enlarged SVG. */
+  .teaching-figure .tf-schema-svg { display: none; }
+}
+@media print {
+  .teaching-figure { break-inside: avoid; }
+  .teaching-figure .tf-flow > li { break-inside: avoid; }
+  .figure-enlarge { display: none; }
+}
+
+.figure-enlarge, .figure-dialog button {
+  min-height: 44px; padding: .5rem .8rem; border: 1px solid var(--rule);
+  background: var(--panel); color: var(--ink); font: .875rem/1.4 var(--sans);
+}
+.figure-enlarge { margin: 0 0 1rem; }
+.figure-enlarge:hover, .figure-dialog button:hover { border-color: var(--red); color: var(--red); }
+.figure-returns { display: block; margin: -.5rem 0 1rem; }
+.figure-dialog {
+  width: min(960px, calc(100vw - 24px)); max-height: calc(100dvh - 32px);
+  padding: clamp(12px, 3vw, 24px); border: 1px solid var(--ink);
+  background: var(--panel); color: var(--ink);
+}
+.figure-dialog::backdrop { background: #292927a8; }
+.figure-dialog .dialog-top { align-items: start; flex-wrap: wrap; }
+.figure-dialog .dialog-top h2 { flex: 1 1 240px; font-size: 1.75rem; }
+.figure-dialog p { font-size: .9375rem; }
+.figure-dialog .figure-canvas {
+  margin: 1rem 0 0; padding: .5rem; overflow: auto; border: 1px solid var(--rule);
+}
+.figure-dialog .figure-canvas svg { display: block; width: max(100%, 620px); max-width: none; }
+.figure-dialog .fit-width svg { width: 100%; }
+.figure-canvas:focus-visible { outline: 3px solid var(--red); outline-offset: 2px; }

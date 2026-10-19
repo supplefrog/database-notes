@@ -1,0 +1,296 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>TLS and encryption at rest — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-hardening"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/change.html">Protect it and change it safely</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Protect it and change it safely</p><h1>TLS and encryption at rest</h1></header>
+<div class="reader-controls"><a href="../tasks/change.html">← Protect it and change it safely</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a aria-current="page" href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-1342">TLS and encryption solve different problems</a><a class="level-2" href="#mysql-hardening--section-1">Sources</a><a class="level-2" href="#mysql-tls-script--heading-ssl-sh">SSL.sh</a><a class="level-2" href="#mysql-tls-script--section-1">Replace the old script with a controlled TLS deployment</a><a class="level-3" href="#mysql-tls-script--section-2">Prerequisites and certificate identities</a><a class="level-3" href="#mysql-tls-script--section-3">File permissions: the concrete security fix</a><a class="level-3" href="#mysql-tls-script--section-4">Server/client configuration</a><a class="level-3" href="#mysql-tls-script--section-5">Deploy, rotate and roll back</a><a class="level-3" href="#mysql-tls-script--section-6">RHEL placement and SELinux verification</a><a class="level-2" href="#mysql-tls-script--section-7">Historical source — do not deploy</a><a class="level-2" href="#mysql-tls-script--section-8">Sources</a><a class="level-2" href="#mysql-keyring-script--heading-tde-sh">TDE.sh</a><a class="level-2" href="#mysql-keyring-script--section-1">A keyring is not complete transparent data encryption</a><a class="level-3" href="#mysql-keyring-script--section-2">Select and establish the keyring</a><a class="level-3" href="#mysql-keyring-script--section-3">Explicitly enable and verify each encryption scope</a><a class="level-3" href="#mysql-keyring-script--section-4">Key lifecycle, restore and rollback</a><a class="level-3" href="#mysql-keyring-script--section-5">Community file keyring on the selected RHEL host</a><a class="level-2" href="#mysql-keyring-script--section-6">Historical source — do not deploy</a><a class="level-2" href="#mysql-keyring-script--section-7">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-hardening.html">Authentication, TLS and hardening</a><a href="postgresql-upgrades.html">Minor and major upgrades</a><a href="postgresql-migration.html">Migrating to PostgreSQL</a><p class="product-label">MongoDB</p><a href="mongodb-security.html">Hardening, TLS and key rotation</a><a href="mongodb-upgrades.html">Upgrades and feature compatibility</a><a href="mongodb-migration.html">Relational-to-document migration</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-hardening; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-hardening--cite-1-1" class="citation-ref" href="#mysql-hardening--source-1" aria-label="Source 1">[1]</a><a id="mysql-hardening--cite-72-1" class="citation-ref" href="#mysql-hardening--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-hardening--hardening" class="source-anchor"></span>
+<span id="mysql-b-1338" class="source-anchor"></span>
+<span id="mysql-b-1340" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-1342">TLS and encryption solve different problems</h2>
+<p>TLS protects connections; InnoDB encryption protects selected stored data when the corresponding keys are available. Neither replaces least privilege, host security, patching, backups or audit/restore tests. Server, replication, administrative and client connections may use different TLS settings.</p>
+<ul>
+<li><a href="mysql-hardening.html#mysql-tls-script">TLS certificate and transport procedure</a>: trust/hostname verification, separate key permissions, planned rotation and rollback. The old <code>SSL.sh</code> is retained there only as historical text, with the world-readable-key bug explained.</li>
+<li><a href="mysql-hardening.html#mysql-keyring-script">Keyring and encryption procedure</a>: component availability, early loading, key custody, explicitly enabled data/log encryption and restore testing. The old <code>TDE.sh</code> only attempted to load an Enterprise encrypted-file keyring; it did not implement complete TDE.</li>
+</ul>
+<p>For 8.4 Community, evaluate <code>component_keyring_file</code> with its documented threat model; the encrypted-file keyring component is Enterprise. Local file keyrings are not, by themselves, a regulatory-compliance key-management solution. Backup keys separately and verify recovery on an isolated server before claiming data is recoverable.</p>
+<p><a id="mysql-hardening--cite-67-1" class="citation-ref" href="#mysql-hardening--source-67" aria-label="Source 67">[67]</a><a id="mysql-hardening--cite-68-1" class="citation-ref" href="#mysql-hardening--source-68" aria-label="Source 68">[68]</a><a id="mysql-hardening--cite-69-1" class="citation-ref" href="#mysql-hardening--source-69" aria-label="Source 69">[69]</a><a id="mysql-hardening--cite-70-1" class="citation-ref" href="#mysql-hardening--source-70" aria-label="Source 70">[70]</a><a id="mysql-hardening--cite-93-1" class="citation-ref" href="#mysql-hardening--source-93" aria-label="Source 93">[93]</a></p>
+
+<h2 id="mysql-hardening--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-hardening--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-hardening--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-hardening--source-67">[67] <a href="https://dev.mysql.com/doc/refman/8.4/en/keyring-component-installation.html">https://dev.mysql.com/doc/refman/8.4/en/keyring-component-installation.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.4.2 Keyring Component Installation
+<span class="citation-returns"><a class="citation-return" href="#mysql-hardening--cite-67-1" aria-label="Return to citation 67, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-hardening--source-68">[68] <a href="https://dev.mysql.com/doc/refman/8.4/en/keyring-encrypted-file-component.html">https://dev.mysql.com/doc/refman/8.4/en/keyring-encrypted-file-component.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.4.5 Using the component_keyring_encrypted_file Encrypted File-Based Keyring
+Component
+<span class="citation-returns"><a class="citation-return" href="#mysql-hardening--cite-68-1" aria-label="Return to citation 68, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-hardening--source-69">[69] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-data-encryption.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-data-encryption.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.13 InnoDB Data-at-Rest Encryption
+<span class="citation-returns"><a class="citation-return" href="#mysql-hardening--cite-69-1" aria-label="Return to citation 69, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-hardening--source-70">[70] <a href="https://dev.mysql.com/doc/refman/8.4/en/using-encrypted-connections.html">https://dev.mysql.com/doc/refman/8.4/en/using-encrypted-connections.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.3.1 Configuring MySQL to Use Encrypted Connections
+<span class="citation-returns"><a class="citation-return" href="#mysql-hardening--cite-70-1" aria-label="Return to citation 70, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-hardening--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-hardening--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-hardening--source-93">[93] <a href="https://dev.mysql.com/doc/refman/8.4/en/keyring.html">https://dev.mysql.com/doc/refman/8.4/en/keyring.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.4 The MySQL Keyring<span class="citation-returns"><a class="citation-return" href="#mysql-hardening--cite-93-1" aria-label="Return to citation 93, occurrence 1">↩</a></span></div></div>
+<section class="appendix" id="mysql-tls-script"><h2 id="mysql-tls-script--heading-ssl-sh">SSL.sh</h2><p class="appendix-context">Historical source example for reading, not a tested procedure or executable download.</p><!-- reviewed-unit: mysql-tls-script; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-tls-script--cite-1-1" class="citation-ref" href="#mysql-tls-script--source-1" aria-label="Source 1">[1]</a><a id="mysql-tls-script--cite-72-1" class="citation-ref" href="#mysql-tls-script--source-72" aria-label="Source 72">[72]</a></p>
+
+<h2 id="mysql-tls-script--section-1">Replace the old script with a controlled TLS deployment</h2>
+<p>Target: MySQL 8.4 LTS on the selected EL9 RPM platform; use the distribution’s supported OpenSSL build and your organization’s CA/PKI workflow. The OpenSSL 3.x reference explains request/SAN syntax, but no versionless certificate-generation script is recommended. The historical source is reproduced below as <strong>text only</strong>; do not execute it.</p>
+
+<h3 id="mysql-tls-script--section-2">Prerequisites and certificate identities</h3>
+<p>Inventory every endpoint/client (classic, X Protocol, admin interface and replication separately), DNS names/IPs actually used, current account TLS requirements, CA trust, protocol/cipher policy and expiry/rotation policy. Back up current config/certificates <strong>securely</strong>, keep an authenticated administrative connection and console/rollback access, and rehearse on an isolated instance.</p>
+<p>Have the CA issue the server certificate for its real identity with appropriate DNS/IP <strong>subjectAltName</strong> entries and key usage. A certificate for an IP will not automatically verify an unrelated DNS hostname. Modern CA policy, not the source’s fixed ten-year validity or empty <code>APP_NAME</code>/<code>IP</code>, determines lifetime. The CA private key belongs in protected CA custody, not the MySQL datadir. Generate/store server and optional client private keys separately; do not deploy every <code>.pem</code> produced in a working directory.</p>
+<p>Validate chain, identity, expiry and certificate/key match using the CA’s tooling and the selected OpenSSL documentation before modifying the server. For <code>REQUIRE X509</code> or subject/issuer-constrained accounts, each client additionally needs its own suitable certificate and private key. <code>REQUIRE SSL</code> alone requires encrypted transport, not necessarily a client certificate.</p>
+
+<h3 id="mysql-tls-script--section-3">File permissions: the concrete security fix</h3>
+<p>After installing explicitly selected files into the approved server-readable directory, set permissions by role:</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="SSL.sh: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Example EL9 ownership/mode</th>
+<th>Custody</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>server-key.pem</code></td>
+<td><code>mysql:mysql</code>, 0600 (or a narrowly scoped equivalent needed by the service)</td>
+<td>Server private key; never world-readable.</td>
+</tr>
+<tr>
+<td><code>server-cert.pem</code></td>
+<td>root-owned, 0644 with service read access</td>
+<td>Public certificate; integrity still matters.</td>
+</tr>
+<tr>
+<td><code>ca.pem</code></td>
+<td>root-owned, 0644 with service read access</td>
+<td>Public trust chain, not the CA signing key.</td>
+</tr>
+<tr>
+<td>Client private key</td>
+<td>Owned by the specific client OS identity, 0600</td>
+<td>On the client host; not shared among replicas by default.</td>
+</tr>
+<tr>
+<td>CA private key</td>
+<td>Not installed on the DB server</td>
+<td>Protected CA system/backup with separate access control.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Ensure parent directories and SELinux labels permit the intended reads. Use exact paths, not <code>chmod 644 *.pem</code>: that wildcard <strong>overwrites restrictive key modes</strong> and was the source’s blocking defect. Check ACLs as well as numeric mode. If that script was ever used operationally, treat exposed private keys as potentially compromised and plan revocation/reissue rather than merely changing mode afterward.</p>
+
+<h3 id="mysql-tls-script--section-4">Server/client configuration</h3>
+<p>Edit the correct existing <code>[mysqld]</code> group in a reviewed option-file copy. <code>[server]</code> is also a server-read group, but the old script only searched for that heading and missed the supplied file’s <code>[mysqld]</code>. Do not delete every matching TLS line across all groups or duplicate contradictory settings.</p>
+<pre tabindex="0" role="region" aria-label="SSL.sh: code 1, horizontally scrollable"><code class="language-ini">[mysqld]
+ssl_ca=/var/lib/mysql/tls/ca.pem
+ssl_cert=/var/lib/mysql/tls/server-cert.pem
+ssl_key=/var/lib/mysql/tls/server-key.pem
+require_secure_transport=ON
+</code></pre>
+<p>These are example approved file locations to provision/label first. Check permitted local transports and all legacy clients before enforcing <code>require_secure_transport</code>. This setting by itself does not force every client to authenticate the server identity. Do not pin one TLS 1.3 ciphersuite from a copied script without validating client compatibility and organizational policy; TLS 1.2/1.3 cipher settings differ.</p>
+<p>A classic-protocol client verification example, with actual host/account/CA inputs:</p>
+<pre tabindex="0" role="region" aria-label="SSL.sh: code 2, horizontally scrollable"><code class="language-bash">mysql --host=db.example.com --user=operator --password \
+  --ssl-mode=VERIFY_IDENTITY --ssl-ca=/etc/mysql/trust/ca.pem
+</code></pre>
+<p>Within that session, inspect <code>SHOW SESSION STATUS LIKE 'Ssl_cipher';</code> and <code>Ssl_version</code>; empty cipher indicates no TLS for that session. A cipher alone does not prove hostname verification: deliberately test that an untrusted CA/wrong hostname is rejected in a controlled test. Inspect server startup/TLS diagnostics and account requirements, and test application plus replication clients before accepting the change.</p>
+
+<h3 id="mysql-tls-script--section-5">Deploy, rotate and roll back</h3>
+<p>Place validated cert/key files in their final paths <strong>before</strong> a restart/reload. Avoid stopping first then using <code>mv *.pem</code> from an arbitrary current directory. Use a deliberate maintenance restart for initial setup; for rotation, the documented <code>ALTER INSTANCE RELOAD TLS</code> interface can update supported server TLS contexts without restarting, with version/channel behavior checked first. Existing connections may retain their old TLS sessions; test new connections.</p>
+<p>Retain previous usable certificate/configuration until validation is complete, subject to revocation/security rules. On failure, restore only the known prior files/settings and reload/restart the intended context; do not disable verification globally or expose plaintext just to get an application online. Rotate client trust in a staged overlap window where needed, monitor expiry and test backup/recovery of required keys. Never keep an exposed/revoked key solely as a convenient rollback.</p>
+
+<h3 id="mysql-tls-script--section-6">RHEL placement and SELinux verification</h3>
+<p>The server example uses <code>/var/lib/mysql/tls</code>, inside the standard data tree, so its server-read files can use the existing <code>mysqld_db_t</code> data-tree policy instead of leaving a novel <code>/etc/mysql/tls</code> path unprovisioned. Provision it as a restricted directory (for example root-owned, group <code>mysql</code>, mode 0750); deploy only the selected server key, server certificate and public CA chain with the file-specific permissions above. Apply <code>restorecon -Rv /var/lib/mysql/tls</code> and inspect <code>ls -ldZ</code> / <code>ls -lZ</code> before starting. Confirm effective policy on this installed RHEL system; for a relocated datadir use its equivalence mapping and update the TLS paths deliberately.</p>
+<p>Replication-side <code>SOURCE_SSL_CA</code>, <code>SOURCE_SSL_CERT</code> and <code>SOURCE_SSL_KEY</code> are read by <strong>mysqld on the replica</strong>; provision and label them there too. Ordinary client’s <code>--ssl-ca</code> is read by the client OS identity and is a separate path/access contract. The CA private key is never copied into either directory. Do not solve a certificate/key read denial by giving all users read permission. Keep a backup exclusion/inclusion inventory: a physical datadir copy may now include these private keys, so encrypt/restrict that backup and retain controlled recovery access.</p>
+<p><a id="mysql-tls-script--cite-3-1" class="citation-ref" href="#mysql-tls-script--source-3" aria-label="Source 3">[3]</a><a id="mysql-tls-script--cite-38-1" class="citation-ref" href="#mysql-tls-script--source-38" aria-label="Source 38">[38]</a><a id="mysql-tls-script--cite-70-1" class="citation-ref" href="#mysql-tls-script--source-70" aria-label="Source 70">[70]</a><a id="mysql-tls-script--cite-71-1" class="citation-ref" href="#mysql-tls-script--source-71" aria-label="Source 71">[71]</a><a id="mysql-tls-script--cite-104-1" class="citation-ref" href="#mysql-tls-script--source-104" aria-label="Source 104">[104]</a><a id="mysql-tls-script--cite-106-1" class="citation-ref" href="#mysql-tls-script--source-106" aria-label="Source 106">[106]</a><a id="mysql-tls-script--cite-157-1" class="citation-ref" href="#mysql-tls-script--source-157" aria-label="Source 157">[157]</a><a id="mysql-tls-script--cite-115-1" class="citation-ref" href="#mysql-tls-script--source-115" aria-label="Source 115">[115]</a></p>
+<p><span id="ssl-sh-b-0001" class="source-anchor"></span>
+</p>
+<h2 id="mysql-tls-script--section-7">Historical source — do not deploy</h2>
+<p>The following is the complete sanitized original, preserved for comparison. Its exact defects and replacement decisions are explained above. This text is not a supported executable/configuration recipe.</p>
+<pre tabindex="0" role="region" aria-label="SSL.sh: code 3, horizontally scrollable"><code class="language-text">#!/bin/bash
+set -euo pipefail
+
+APP_NAME=""
+IP=""
+DAYS=3650
+
+DATA_DIR="/data/mysql"
+MYCNF="/etc/my.cnf"
+
+# =====================
+# Generate certificates
+# =====================
+{
+openssl genrsa -out ca-key.pem 2048
+openssl req -new -x509 -nodes -key ca-key.pem -out ca.pem -subj "/CN=MySQL_${APP_NAME}_CA" -sha256 -days ${DAYS}
+
+openssl genrsa -out server-key.pem 2048
+openssl req -new -key server-key.pem -out server.csr -subj "/CN=${IP}"
+echo "subjectAltName=IP:${IP}" &gt; san.cnf
+openssl x509 -req -in server.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -out server-cert.pem -extfile san.cnf -sha256 -days ${DAYS}
+
+openssl genrsa -out client-key.pem 2048
+openssl req -new -key client-key.pem -out client.csr -subj "/CN=replica-client"
+openssl x509 -req -in client.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -out client-cert.pem -sha256 -days ${DAYS}
+
+chown mysql:mysql *.pem
+chmod 600 *-key.pem
+chmod 644 *.pem
+}
+
+# =====================
+# Edit my.cnf
+# =====================
+{
+CA="${DATA_DIR}/ca.pem"
+CERT="${DATA_DIR}/server-cert.pem"
+KEY="${DATA_DIR}/server-key.pem"
+
+# Remove ALL cert-related or TLS-related lines anywhere
+sed -i '/ssl-ca=\|ssl-cert=\|ssl-key=\|tls_ciphersuites=\|require_secure_transport/d' "${MYCNF}"
+
+# Append ordered block under [client] if it exists
+if grep -q '^\[client\]' "${MYCNF}"; then
+  sed -i "/^\[client\]/a ssl-ca=${CA}\n" "${MYCNF}"
+fi
+
+# Append ordered block under [server] if it exists
+if grep -q '^\[server\]' "${MYCNF}"; then
+  sed -i "/^\[server\]/a ssl-ca=${CA}\nssl-cert=${CERT}\nssl-key=${KEY}\ntls_ciphersuites=TLS_AES_256_GCM_SHA384\n#require_secure_transport\n" "${MYCNF}"
+fi
+}
+
+systemctl stop mysqld
+mv *.pem $DATA_DIR
+systemctl start mysqld
+</code></pre>
+
+<h2 id="mysql-tls-script--section-8">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-tls-script--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-tls-script--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-tls-script--source-3">[3] <a href="https://dev.mysql.com/doc/refman/8.4/en/encrypted-connections.html">https://dev.mysql.com/doc/refman/8.4/en/encrypted-connections.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.3 Using Encrypted Connections
+<span class="citation-returns"><a class="citation-return" href="#mysql-tls-script--cite-3-1" aria-label="Return to citation 3, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-tls-script--source-38">[38] <a href="https://dev.mysql.com/doc/refman/8.4/en/create-user.html">https://dev.mysql.com/doc/refman/8.4/en/create-user.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.7.1.3 CREATE USER Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-tls-script--cite-38-1" aria-label="Return to citation 38, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-tls-script--source-70">[70] <a href="https://dev.mysql.com/doc/refman/8.4/en/using-encrypted-connections.html">https://dev.mysql.com/doc/refman/8.4/en/using-encrypted-connections.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.3.1 Configuring MySQL to Use Encrypted Connections
+<span class="citation-returns"><a class="citation-return" href="#mysql-tls-script--cite-70-1" aria-label="Return to citation 70, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-tls-script--source-71">[71] <a href="https://dev.mysql.com/doc/refman/8.4/en/creating-ssl-rsa-files.html">https://dev.mysql.com/doc/refman/8.4/en/creating-ssl-rsa-files.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.3.3 Creating SSL and RSA Certificates and Keys
+<span class="citation-returns"><a class="citation-return" href="#mysql-tls-script--cite-71-1" aria-label="Return to citation 71, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-tls-script--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-tls-script--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-tls-script--source-104">[104] <a href="https://docs.openssl.org/3.2/man1/openssl-req">https://docs.openssl.org/3.2/man1/openssl-req</a> — openssl-req - OpenSSL Documentation
+<span class="citation-returns"><a class="citation-return" href="#mysql-tls-script--cite-104-1" aria-label="Return to citation 104, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-tls-script--source-106">[106] <a href="https://dev.mysql.com/doc/refman/8.4/en/selinux-file-context.html">https://dev.mysql.com/doc/refman/8.4/en/selinux-file-context.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.7.4 SELinux File Context
+<span class="citation-returns"><a class="citation-return" href="#mysql-tls-script--cite-106-1" aria-label="Return to citation 106, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-tls-script--source-115">[115] <a href="https://dev.mysql.com/doc/refman/8.4/en/alter-instance.html">https://dev.mysql.com/doc/refman/8.4/en/alter-instance.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.1.5 ALTER INSTANCE Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-tls-script--cite-115-1" aria-label="Return to citation 115, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-tls-script--source-157">[157] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/using_selinux/index">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/using_selinux/index</a> — Using SELinux | Red Hat Enterprise Linux | 9 | Red Hat Documentation<span class="citation-returns"><a class="citation-return" href="#mysql-tls-script--cite-157-1" aria-label="Return to citation 157, occurrence 1">↩</a></span></div></div>
+</section>
+<section class="appendix" id="mysql-keyring-script"><h2 id="mysql-keyring-script--heading-tde-sh">TDE.sh</h2><p class="appendix-context">Historical source example for reading, not a tested procedure or executable download.</p><!-- reviewed-unit: mysql-keyring-script; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-keyring-script--cite-1-1" class="citation-ref" href="#mysql-keyring-script--source-1" aria-label="Source 1">[1]</a><a id="mysql-keyring-script--cite-72-1" class="citation-ref" href="#mysql-keyring-script--source-72" aria-label="Source 72">[72]</a></p>
+
+<h2 id="mysql-keyring-script--section-1">A keyring is not complete transparent data encryption</h2>
+<p>Target: MySQL <strong>8.4 LTS</strong>. The source names <code>component_keyring_encrypted_file</code>, an <strong>Enterprise Edition</strong> component, not a universally available Community plugin. Community has <code>component_keyring_file</code>; external key-management implementations have separate platform/edition/service dependencies. Both local file-based components have limited threat models and are not stand-alone regulatory-compliance solutions.</p>
+<p>Do not run the historical script below. It stops a service, overwrites hardcoded files, embeds a configuration password and omits key recovery, permissions and encryption enablement. No literal credential survives in the preserved snapshot.</p>
+
+<h3 id="mysql-keyring-script--section-2">Select and establish the keyring</h3>
+<ol>
+<li>Inventory existing encrypted tablespaces/logs and the already active keyring. <strong>Never replace/reinitialize a keyring that holds keys needed by existing data.</strong> Confirm edition, selected component library, exact server/plugin paths and backup-tool compatibility.</li>
+<li>Read the component’s version-specific manifest/configuration rules. A global <code>mysqld.my</code> belongs alongside the actual <code>mysqld</code> executable; local manifests may be read from the instance datadir when enabled. The source’s <code>/sbin/mysqld.my</code> and <code>/lib64/mysql/plugin/...</code> are not portable paths. Components needed to open encrypted InnoDB data must load early through the documented manifest mechanism, not a late generic plugin recipe.</li>
+<li>Preserve existing manifest entries rather than overwriting the file. Determine whether global versus local component configuration is appropriate for multiple instances. Each instance needs independent custody/access to the intended key store, not an accidental shared keyring path.</li>
+<li>For the encrypted-file component, provision <code>path</code>, the configuration <code>password</code>, and <code>read_only</code> as documented. Supply the secret through a controlled secret-management/deployment process; it is not safe simply because it sits inside JSON. Restrict the config and keyring files/directories to required OS identities, apply ownership/SELinux policy and ensure the keyring path is not publicly readable or casually backed up with its unlocking secret beside it.</li>
+<li>Start/restart only in a maintenance window after a tested rollback/backup plan. Inspect server errors and <code>performance_schema.keyring_component_status</code>; verify the selected component/path/status. A returned status row proves neither that all tables are encrypted nor that backup recovery works.</li>
+</ol>
+
+<h3 id="mysql-keyring-script--section-3">Explicitly enable and verify each encryption scope</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="TDE.sh: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Action/check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>New InnoDB file-per-table/general tablespaces</td>
+<td>Review supported <code>ENCRYPTION='Y'</code> DDL and <code>default_table_encryption</code> / privilege controls. Defaults govern creation and do not retroactively encrypt every old table.</td>
+</tr>
+<tr>
+<td>Existing tables</td>
+<td>For a compatible file-per-table table, <code>ALTER TABLE app.table_name ENCRYPTION='Y';</code> is a deliberate storage operation with time/space/lock implications. Shared/general tablespace encryption is changed at its appropriate tablespace scope, not with an arbitrary per-table operation. Back up and rehearse first.</td>
+</tr>
+<tr>
+<td>mysql system tablespace</td>
+<td>Separate supported system-tablespace encryption control/DDL; not covered merely by setting an application schema default.</td>
+</tr>
+<tr>
+<td>Redo / undo</td>
+<td>Review and explicitly enable <code>innodb_redo_log_encrypt</code> / <code>innodb_undo_log_encrypt</code> where required, with recovery/keyring prerequisites. Observe transition behavior; do not infer all preexisting bytes change instantly.</td>
+</tr>
+<tr>
+<td>Binary / relay logs</td>
+<td><code>binlog_encryption</code> is a separate feature. Retain keys and use the supported server-mediated reading/recovery path for encrypted logs.</td>
+</tr>
+<tr>
+<td>Temporary storage, general/slow/error/audit logs, exports</td>
+<td>Not automatically protected by the above table settings. Evaluate each documented coverage boundary and disk/log/backup encryption separately.</td>
+</tr>
+<tr>
+<td>Backups</td>
+<td>Database encryption and backup-image encryption differ. Confirm the backup product can capture/restore encrypted tables and key material for this exact component/version.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Inspect the relevant Information Schema InnoDB tablespace encryption metadata and actual configuration after each change. Test reads/writes and restart. Do not declare “TDE complete” because only the component was loaded or a default changed.</p>
+
+<h3 id="mysql-keyring-script--section-4">Key lifecycle, restore and rollback</h3>
+<p>Back up the data <strong>and every key/keyring state needed by that backup</strong> under separate access controls, including component configuration and the securely recoverable unlocking secret. Document who can recover them during a host/CA/KMS outage; encrypt/protect backups off-host and retain key history as long as dependent data/log backups exist.</p>
+<p><code>ALTER INSTANCE ROTATE INNODB MASTER KEY</code> rotates the InnoDB master key under its documented privileges and prerequisites; it is not a rotation of every unrelated log/audit/backup encryption key. Test rotation, keyring backup update, restart and reading older retained backups. Do not delete an old key because a new key was created.</p>
+<p>The acceptance test is an isolated restore to compatible binaries/component configuration using only the retained backup and recovery key material: start, read encrypted objects, validate application data and replay the required logs. Also test the expected controlled failure when keys are unavailable, without damaging the only copies.</p>
+<p>Rollback is <strong>not unloading/removing the keyring</strong> while data still needs it. Keep the working component/keyring available; reverse a failed configuration deployment only to a configuration that can still read the required keys. If changing encryption policy, use supported decrypt/reencrypt/migration steps with backups and revalidation. Lose the necessary keys and the encrypted data may be unrecoverable.</p>
+
+<h3 id="mysql-keyring-script--section-5">Community file keyring on the selected RHEL host</h3>
+<p>For a <strong>new, single instance with no existing keyring or encrypted data</strong>, Community’s <code>component_keyring_file</code> is a concrete alternative to the historical Enterprise-only encrypted-file script. First inspect <code>@@plugin_dir</code>, the actual RPM <code>mysqld</code> executable path and all existing manifests. Only one keyring implementation may be enabled; changing one for existing encrypted data requires a supported key migration, not the following new-instance setup.</p>
+<p>For the selected <code>/usr/sbin/mysqld</code>, the global manifest is <code>/usr/sbin/mysqld.my</code>:</p>
+<pre tabindex="0" role="region" aria-label="TDE.sh: code 1, horizontally scrollable"><code class="language-json">{"components":"file://component_keyring_file"}
+</code></pre>
+<p>Place <code>component_keyring_file.cnf</code> beside its actual component library in the <strong>queried plugin directory</strong>, not an assumed <code>/lib64</code> path:</p>
+<pre tabindex="0" role="region" aria-label="TDE.sh: code 2, horizontally scrollable"><code class="language-json">{"path":"/var/lib/mysql-keyring/component_keyring_file.keys","read_only":false}
+</code></pre>
+<p>The keyring data path <strong>must not point into the MySQL datadir</strong>. Provision the approved <code>/var/lib/mysql-keyring</code> independently of <code>/var/lib/mysql</code>, owned by the service identity with mode 0700 and no unnecessary ACL access. Keep manifest/configuration root-controlled and server-readable but not server-writable (for example root:mysql 0640, with traversable parent directories); restrict key data to the required service identity. The component’s local key file is not encrypted merely because its filename contains “keyring”.</p>
+<p>Inspect the installed policy and expected labels first. For this mutable MySQL-owned key data directory, a reviewed <code>mysqld_db_t</code> file-context mapping plus <code>restorecon</code> is the data-access policy pattern; do not label the manifest, component library and all configuration as writable database data. Verify actual process/file contexts and any AVC during the controlled restart. If policy denies access, diagnose the specific path/type/permission rather than widening all file modes or disabling enforcement.</p>
+<p>With <strong>multiple instances sharing the executable/plugin directory</strong>, do not deploy the preceding global-only key-path configuration: it would make them share one key file. Use the documented global <code>read_local_manifest:true</code> and <code>read_local_config:true</code> routing, place each local manifest/configuration in its corresponding datadir, and select a distinct external key-store path per instance. Provision and test every instance affected by the shared global files before restarting any of them. Retain the original working files for rollback.</p>
+<p>After the planned restart, inspect <code>SELECT * FROM performance_schema.keyring_component_status;</code>, error logs and the actual key-store permissions/labels; Active means component initialization, not encrypted tables or recoverable backups. Explicitly enable only the intended encryption scopes described above. A backup of the datadir alone <strong>omits this external key directory</strong>: include its version-consistent key material, manifests/configuration and recovery access in a separately protected backup set and prove an isolated encrypted-data restore before relying on the configuration.</p>
+<p><a id="mysql-keyring-script--cite-46-1" class="citation-ref" href="#mysql-keyring-script--source-46" aria-label="Source 46">[46]</a><a id="mysql-keyring-script--cite-67-1" class="citation-ref" href="#mysql-keyring-script--source-67" aria-label="Source 67">[67]</a><a id="mysql-keyring-script--cite-68-1" class="citation-ref" href="#mysql-keyring-script--source-68" aria-label="Source 68">[68]</a><a id="mysql-keyring-script--cite-69-1" class="citation-ref" href="#mysql-keyring-script--source-69" aria-label="Source 69">[69]</a><a id="mysql-keyring-script--cite-93-1" class="citation-ref" href="#mysql-keyring-script--source-93" aria-label="Source 93">[93]</a><a id="mysql-keyring-script--cite-167-1" class="citation-ref" href="#mysql-keyring-script--source-167" aria-label="Source 167">[167]</a><a id="mysql-keyring-script--cite-106-1" class="citation-ref" href="#mysql-keyring-script--source-106" aria-label="Source 106">[106]</a><a id="mysql-keyring-script--cite-157-1" class="citation-ref" href="#mysql-keyring-script--source-157" aria-label="Source 157">[157]</a><a id="mysql-keyring-script--cite-115-1" class="citation-ref" href="#mysql-keyring-script--source-115" aria-label="Source 115">[115]</a></p>
+<p><span id="tde-sh-b-0001" class="source-anchor"></span>
+</p>
+<h2 id="mysql-keyring-script--section-6">Historical source — do not deploy</h2>
+<p>The following is the complete sanitized original, preserved for comparison. Its exact defects and replacement decisions are explained above. This text is not a supported executable/configuration recipe.</p>
+<pre tabindex="0" role="region" aria-label="TDE.sh: code 3, horizontally scrollable"><code class="language-text">systemctl stop mysqld;
+
+cat &lt;&lt;EOF &gt; /sbin/mysqld.my
+{
+  "components": "file://component_keyring_encrypted_file"
+}
+EOF 
+
+cat &lt;&lt;EOF &gt; /lib64/mysql/plugin/component_keyring_encrypted_file.cnf
+{
+  "path": "/var/lib/mysql-keyring/component_keyring_encrypted_file",
+  "password": "&lt;REDACTED_PASSWORD&gt;",
+  "read_only": false
+}
+EOF
+
+systemctl start mysqld;
+
+# SELECT * FROM performance_schema.keyring_component_status;
+</code></pre>
+
+<h2 id="mysql-keyring-script--section-7">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-keyring-script--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-keyring-script--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-keyring-script--source-46">[46] <a href="https://dev.mysql.com/doc/refman/8.4/en/reset-binary-logs-and-gtids.html">https://dev.mysql.com/doc/refman/8.4/en/reset-binary-logs-and-gtids.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.4.1.2 RESET BINARY LOGS AND GTIDS Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-keyring-script--cite-46-1" aria-label="Return to citation 46, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-keyring-script--source-67">[67] <a href="https://dev.mysql.com/doc/refman/8.4/en/keyring-component-installation.html">https://dev.mysql.com/doc/refman/8.4/en/keyring-component-installation.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.4.2 Keyring Component Installation
+<span class="citation-returns"><a class="citation-return" href="#mysql-keyring-script--cite-67-1" aria-label="Return to citation 67, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-keyring-script--source-68">[68] <a href="https://dev.mysql.com/doc/refman/8.4/en/keyring-encrypted-file-component.html">https://dev.mysql.com/doc/refman/8.4/en/keyring-encrypted-file-component.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.4.5 Using the component_keyring_encrypted_file Encrypted File-Based Keyring
+Component
+<span class="citation-returns"><a class="citation-return" href="#mysql-keyring-script--cite-68-1" aria-label="Return to citation 68, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-keyring-script--source-69">[69] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-data-encryption.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-data-encryption.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.13 InnoDB Data-at-Rest Encryption
+<span class="citation-returns"><a class="citation-return" href="#mysql-keyring-script--cite-69-1" aria-label="Return to citation 69, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-keyring-script--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-keyring-script--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-keyring-script--source-93">[93] <a href="https://dev.mysql.com/doc/refman/8.4/en/keyring.html">https://dev.mysql.com/doc/refman/8.4/en/keyring.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.4 The MySQL Keyring
+<span class="citation-returns"><a class="citation-return" href="#mysql-keyring-script--cite-93-1" aria-label="Return to citation 93, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-keyring-script--source-106">[106] <a href="https://dev.mysql.com/doc/refman/8.4/en/selinux-file-context.html">https://dev.mysql.com/doc/refman/8.4/en/selinux-file-context.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.7.4 SELinux File Context
+<span class="citation-returns"><a class="citation-return" href="#mysql-keyring-script--cite-106-1" aria-label="Return to citation 106, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-keyring-script--source-115">[115] <a href="https://dev.mysql.com/doc/refman/8.4/en/alter-instance.html">https://dev.mysql.com/doc/refman/8.4/en/alter-instance.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.1.5 ALTER INSTANCE Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-keyring-script--cite-115-1" aria-label="Return to citation 115, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-keyring-script--source-157">[157] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/using_selinux/index">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/using_selinux/index</a> — Using SELinux | Red Hat Enterprise Linux | 9 | Red Hat Documentation
+<span class="citation-returns"><a class="citation-return" href="#mysql-keyring-script--cite-157-1" aria-label="Return to citation 157, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-keyring-script--source-167">[167] <a href="https://dev.mysql.com/doc/refman/8.4/en/keyring-file-component.html">https://dev.mysql.com/doc/refman/8.4/en/keyring-file-component.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.4.4 Using the component_keyring_file File-Based Keyring Component<span class="citation-returns"><a class="citation-return" href="#mysql-keyring-script--cite-167-1" aria-label="Return to citation 167, occurrence 1">↩</a></span></div></div>
+</section></article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-group-replication.html"><span>Previous · MySQL</span><strong>Group replication and failover</strong></a></div><div><a rel="next" href="mysql-upgrades.html"><span>Next · MySQL</span><strong>Upgrades and rollback planning</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/change.html">Explore Protect it and change it safely ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-hardening.html">Authentication, TLS and hardening</a><a href="postgresql-upgrades.html">Minor and major upgrades</a><a href="postgresql-migration.html">Migrating to PostgreSQL</a></div><div><span>MongoDB</span><a href="mongodb-security.html">Hardening, TLS and key rotation</a><a href="mongodb-upgrades.html">Upgrades and feature compatibility</a><a href="mongodb-migration.html">Relational-to-document migration</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

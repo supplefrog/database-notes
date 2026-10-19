@@ -1,0 +1,328 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Backup and point-in-time recovery — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="postgresql-backup-recovery"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/recover.html">Back up, then restore</a></nav>
+<header class="reader-head"><p class="reader-context">PostgreSQL <span aria-hidden="true">/</span> Back up, then restore</p><h1>Backup and point-in-time recovery</h1></header>
+<div class="reader-controls"><a href="../tasks/recover.html">← Back up, then restore</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="PostgreSQL chapters"><ol class="chapter-list"><li><a  href="../chapters/postgresql-foundations.html">PostgreSQL foundations and tools</a></li><li><a  href="../chapters/postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></li><li><a  href="../chapters/postgresql-install-instances.html">Installation, services and instances</a></li><li><a  href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a  href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li><li><a  href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a  href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li><li><a aria-current="page" href="../chapters/postgresql-backup-recovery.html">Backup and point-in-time recovery</a></li><li><a  href="../chapters/postgresql-replication-ha.html">Replication and high availability</a></li><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a  href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a  href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#policy">Decide what must be recoverable</a><a class="level-2" href="#logical">Make and restore a logical backup</a><a class="level-2" href="#physical">Take a full physical base backup</a><a class="level-2" href="#pitr">Rehearse PITR with a named target</a><a class="level-2" href="#validation">Prove the restored service is usable</a><a class="level-2" href="#postgresql-backup-recovery--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a><a href="mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a><p class="product-label">MongoDB</p><a href="mongodb-backup.html">Backup and recovery</a></nav></details></div>
+<article class="prose">
+<h2 id="policy">Decide what must be recoverable</h2>
+<p><strong>RPO</strong> is acceptable lost work; <strong>RTO</strong> is acceptable time to restore service. A successful backup command measures neither. Budget detection, provisioning, download/decryption, restore, WAL replay, validation and routing—not just copy time. Replication is not backup: it can faithfully reproduce a mistaken delete.<a id="postgresql-backup-recovery--cite-33-1" class="citation-ref" href="#postgresql-backup-recovery--source-33" aria-label="Source 33">[33]</a><a id="postgresql-backup-recovery--cite-38-1" class="citation-ref" href="#postgresql-backup-recovery--source-38" aria-label="Source 38">[38]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Backup and point-in-time recovery: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Captures</th>
+<th>Recovery boundary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pg_dump</code></td>
+<td>One database’s logical definitions/data in a consistent snapshot</td>
+<td>Selective restore and major migration; no cluster globals or WAL replay.</td>
+</tr>
+<tr>
+<td><code>pg_dumpall --globals-only</code></td>
+<td>Roles and tablespaces</td>
+<td>Complement to per-database dumps; protect role hashes if included.</td>
+</tr>
+<tr>
+<td>Full <code>pg_basebackup</code> with WAL</td>
+<td>Whole physical cluster, including all databases/tablespaces</td>
+<td>Same-major physical restore on a compatible platform.</td>
+</tr>
+<tr>
+<td>Base backup + continuous WAL archive</td>
+<td>Cluster state plus later changes</td>
+<td>PITR to a reachable target, only with an unbroken required WAL chain.</td>
+</tr>
+<tr>
+<td>Consistent storage snapshot</td>
+<td>All required volumes at one coordinated point, or a clean stopped copy</td>
+<td>A casual live directory copy is not a consistent backup.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Keep multiple generations in separate failure domains, encrypt off-host copies and restrict delete rights. Retain encryption keys, recovery credentials, extension packages, configs, certificate chains and archive metadata separately from a failed host. Test restoring with the keys the recovery team can actually retrieve. Never delete archive WAL solely by file age: retain all WAL needed by the oldest retained recoverable base and every recovery/replica consumer.<a id="postgresql-backup-recovery--cite-31-1" class="citation-ref" href="#postgresql-backup-recovery--source-31" aria-label="Source 31">[31]</a><a id="postgresql-backup-recovery--cite-33-2" class="citation-ref" href="#postgresql-backup-recovery--source-33" aria-label="Source 33">[33]</a></p>
+
+<h2 id="logical">Make and restore a logical backup</h2>
+<p>This bounded procedure backs up <code>adminlab</code> on <code>postgresql-18</code> and restores it to a fresh, <strong>isolated</strong> <code>postgresql-18-restore</code> cluster on port <strong>5543</strong>. It assumes no user tablespaces, the fixture roles/objects, local peer administration and a secure backup filesystem. Check existing cluster names/ports first. Do not overwrite an existing restore cluster or database.</p>
+<ol>
+<li>Create a fresh directory owned by <code>postgres</code> with mode 0700; the example is <code>/srv/pg-backups/logical-drill</code>. Use a unique job directory for every real run, <code>umask 077</code>, and the major-18 binaries. As the OS <code>postgres</code> account:</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Backup and point-in-time recovery: code 1, horizontally scrollable"><code class="language-bash">/usr/pgsql-18/bin/pg_dump -h /run/postgresql -p 5432 \
+  -U postgres -d adminlab --format=custom \
+  --file=/srv/pg-backups/logical-drill/adminlab.dump
+/usr/pgsql-18/bin/pg_dumpall -h /run/postgresql -p 5432 \
+  -U postgres --globals-only --no-role-passwords \
+  --file=/srv/pg-backups/logical-drill/globals.sql
+/usr/pgsql-18/bin/pg_restore --list \
+  /srv/pg-backups/logical-drill/adminlab.dump
+</code></pre>
+<p>Require zero exit status and retain stderr for both exports; <code>--list</code> only reads the archive catalog, not every data block. A dump uses one database snapshot and can coexist with writes, but holds locks and can conflict with DDL. Multiple database dumps are not automatically one cluster-wide transaction snapshot.<a id="postgresql-backup-recovery--cite-29-1" class="citation-ref" href="#postgresql-backup-recovery--source-29" aria-label="Source 29">[29]</a><a id="postgresql-backup-recovery--cite-31-2" class="citation-ref" href="#postgresql-backup-recovery--source-31" aria-label="Source 31">[31]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Backup and point-in-time recovery: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Use</th>
+<th>Restriction</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-Fc</code> / <code>--format=custom</code></td>
+<td>Compressed, selective restore archive</td>
+<td>Parallel dump requires directory format instead.</td>
+</tr>
+<tr>
+<td><code>-Fd -j 4</code></td>
+<td>Parallel directory dump</td>
+<td>Destination must not already exist; adds connections and load.</td>
+</tr>
+<tr>
+<td><code>--schema-only</code> / <code>--data-only</code></td>
+<td>Definitions or contents only</td>
+<td>Not a complete backup; dependencies still matter.</td>
+</tr>
+<tr>
+<td><code>-n schema</code> / <code>-t pattern</code></td>
+<td>Filter objects</td>
+<td>Dependencies outside selection are not necessarily included.</td>
+</tr>
+<tr>
+<td><code>pg_restore --exit-on-error</code></td>
+<td>Fail instead of continuing past errors</td>
+<td>Inspect failures; partial work otherwise may remain.</td>
+</tr>
+<tr>
+<td><code>pg_restore --single-transaction</code></td>
+<td>Atomic bounded restore</td>
+<td>Cannot combine with parallel jobs; large restores may need a different plan.</td>
+</tr>
+<tr>
+<td><code>--no-owner --no-acl</code></td>
+<td>Restore under new ownership without grants</td>
+<td>Useful for deliberate remapping, not permission-fidelity validation.</td>
+</tr>
+<tr>
+<td><code>--clean</code> / <code>--create</code></td>
+<td>Drop objects / use database name in archive</td>
+<td>Destructive; intentionally absent from this drill.</td>
+</tr>
+</tbody>
+</table></div>
+<ol start="2">
+<li>Register <code>postgresql-18-restore.service</code> using the <a href="postgresql-install-instances.html#multiple">separate-unit procedure</a>, with <code>PGDATA=/var/lib/pgsql/18/restore</code>, an empty owned directory and mount ordering. Initialize <strong>only this empty logical-restore target</strong> with the bootstrap locale/checksum/auth options and <code>postgresql-18-setup initdb postgresql-18-restore</code>. In its config set <code>listen_addresses = ''</code>, <code>port = 5543</code>, <code>unix_socket_directories = '/run/postgresql'</code>, <code>logging_collector = on</code>, <code>log_directory = 'log'</code>; use the bootstrap local peer rules. No firewalld rule is needed because TCP is disabled. Apply/verify labels before startup.<a id="postgresql-backup-recovery--cite-100-1" class="citation-ref" href="#postgresql-backup-recovery--source-100" aria-label="Source 100">[100]</a><a id="postgresql-backup-recovery--cite-102-1" class="citation-ref" href="#postgresql-backup-recovery--source-102" aria-label="Source 102">[102]</a></li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Backup and point-in-time recovery: code 2, horizontally scrollable"><code class="language-bash">sudo restorecon -Rv /var/lib/pgsql/18/restore
+sudo systemctl start postgresql-18-restore.service
+sudo -u postgres /usr/pgsql-18/bin/psql -X -h /run/postgresql -p 5543 -d postgres \
+  -c 'SHOW data_directory;'
+</code></pre>
+<ol start="3">
+<li>Inspect <code>globals.sql</code> as sensitive executable SQL. For this fixture, prepare a <strong>reviewed copy</strong> omitting only the already-existing bootstrap <code>CREATE ROLE postgres</code> and its bootstrap-specific role alterations; do not remove the <code>notes_*</code> definitions or membership grants. Stop if unexpected role/tablespace collisions exist. <code>--no-role-passwords</code> deliberately means restored login roles need password reprovisioning before use. On a general restore, review tablespace locations so they cannot target live storage.<a id="postgresql-backup-recovery--cite-31-3" class="citation-ref" href="#postgresql-backup-recovery--source-31" aria-label="Source 31">[31]</a></li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Backup and point-in-time recovery: code 3, horizontally scrollable"><code class="language-bash"># Run these as OS postgres; the reviewed file is readable only to recovery staff.
+/usr/pgsql-18/bin/psql -X -v ON_ERROR_STOP=1 -h /run/postgresql -p 5543 -d postgres \
+  -f /srv/pg-backups/logical-drill/globals-reviewed.sql
+/usr/pgsql-18/bin/createdb -h /run/postgresql -p 5543 -U postgres --template=template0 --owner=notes_owner adminlab
+/usr/pgsql-18/bin/psql -X -v ON_ERROR_STOP=1 -h /run/postgresql -p 5543 -d adminlab \
+  -c 'REVOKE ALL ON DATABASE adminlab FROM PUBLIC; GRANT CONNECT ON DATABASE adminlab TO notes_read, notes_write;'
+/usr/pgsql-18/bin/pg_restore -h /run/postgresql -p 5543 -U postgres -d adminlab --exit-on-error \
+  --single-transaction /srv/pg-backups/logical-drill/adminlab.dump
+/usr/pgsql-18/bin/psql -X -v ON_ERROR_STOP=1 -h /run/postgresql -p 5543 -d adminlab -c 'ANALYZE;'
+</code></pre>
+<p>Install every required extension binary first. The fixture has no third-party extension dependency, but a later <code>pg_stat_statements</code> installation must also exist on the target. Inspect archive SQL before restoring from an untrusted server: a dump can execute source-defined functions/code with the restore account’s authority. A failed atomic restore leaves the pre-created database; investigate rather than blindly rerun into it. Discard/recreate only the verified empty drill database after preserving error evidence.<a id="postgresql-backup-recovery--cite-29-2" class="citation-ref" href="#postgresql-backup-recovery--source-29" aria-label="Source 29">[29]</a><a id="postgresql-backup-recovery--cite-30-1" class="citation-ref" href="#postgresql-backup-recovery--source-30" aria-label="Source 30">[30]</a></p>
+<ol start="4">
+<li>Validate data <strong>and</strong> privilege behavior using <a href="postgresql-backup-recovery.html#validation">the acceptance checks</a>, provision temporary test credentials through the approved secret channel if needed, then <code>sudo systemctl stop postgresql-18-restore.service</code>. Do not route applications to it. Retain a drill report and securely retire the copy under policy.</li>
+</ol>
+
+<h2 id="physical">Take a full physical base backup</h2>
+<p>Use PostgreSQL 18 tools against the 18 server. The baseline below intentionally excludes external tablespaces: inspect <code>pg_tablespace</code> first and stop if any user tablespace exists. For those clusters use a complete reviewed mapping for <strong>every</strong> external path with <code>--tablespace-mapping=old=new</code> or tar archives and an isolated host. Plain-format backups otherwise use the source’s absolute tablespace paths—a dangerous same-host surprise.<a id="postgresql-backup-recovery--cite-32-1" class="citation-ref" href="#postgresql-backup-recovery--source-32" aria-label="Source 32">[32]</a></p>
+<p>The backup account needs replication capability and a matching HBA rule. Here OS <code>postgres</code> connects over the local socket using the <a href="postgresql-install-instances.html#bootstrap">bootstrap replication peer rule</a>; no network superuser exposure is added. Check <code>wal_level</code> is <code>replica</code> or higher and enough <code>max_wal_senders</code> are available: <code>--wal-method=stream</code> uses a second connection.<a id="postgresql-backup-recovery--cite-32-2" class="citation-ref" href="#postgresql-backup-recovery--source-32" aria-label="Source 32">[32]</a></p>
+<p>As administrator, provision empty <code>/srv/pg-backups/base-drill</code> owned by <code>postgres</code>, mode 0700, with enough free space. Then as OS <code>postgres</code>:</p>
+<pre tabindex="0" role="region" aria-label="Backup and point-in-time recovery: code 4, horizontally scrollable"><code class="language-bash">/usr/pgsql-18/bin/pg_basebackup \
+  --host=/run/postgresql --port=5432 --username=postgres \
+  --pgdata=/srv/pg-backups/base-drill --format=plain \
+  --wal-method=stream --checkpoint=spread --progress
+/usr/pgsql-18/bin/pg_verifybackup /srv/pg-backups/base-drill
+</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Backup and point-in-time recovery: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Meaning / reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--wal-method=stream</code></td>
+<td>Includes WAL needed to make the base consistent; temporary slot protection is used when supported and no permanent slot was requested.</td>
+</tr>
+<tr>
+<td><code>--checkpoint=spread</code></td>
+<td>Spreads checkpoint work; <code>fast</code> can create an I/O burst.</td>
+</tr>
+<tr>
+<td><code>--format=plain</code></td>
+<td>Direct physical file layout; safest here only because external tablespaces were excluded.</td>
+</tr>
+<tr>
+<td><code>--write-recovery-conf</code> / <code>-R</code></td>
+<td>Creates standby settings; <strong>not used for a standalone backup</strong>.</td>
+</tr>
+<tr>
+<td><code>--no-sync</code></td>
+<td>Skips durable file synchronization; do not use for real backups.</td>
+</tr>
+<tr>
+<td><code>--incremental</code></td>
+<td>A different backup chain requiring manifests/WAL summaries and combination before restore; not what this full-backup procedure does.</td>
+</tr>
+</tbody>
+</table></div>
+<p>A manifest check catches many missing/corrupt files, not every possible server/application failure. Use matching major tools for WAL verification and perform an actual isolated restore. Preserve the completed backup read-only; never start the only backup directory itself.<a id="postgresql-backup-recovery--cite-32-3" class="citation-ref" href="#postgresql-backup-recovery--source-32" aria-label="Source 32">[32]</a><a id="postgresql-backup-recovery--cite-35-1" class="citation-ref" href="#postgresql-backup-recovery--source-35" aria-label="Source 35">[35]</a></p>
+<p>PGDG config/HBA/auto.conf normally reside <strong>inside PGDATA</strong>, so the physical backup includes them; inspect and neutralize source-specific settings before restore. External includes, systemd units/drop-ins, tmpfiles definitions, SELinux local mappings, firewalld rules and any certificates/secrets outside PGDATA still require separate protected backup.<a id="postgresql-backup-recovery--cite-100-2" class="citation-ref" href="#postgresql-backup-recovery--source-100" aria-label="Source 100">[100]</a> Also retain roles’ operational secrets, TLS material, extension versions, system identifier, start/end times, tablespace map and archive/timeline metadata. Do not include secrets in a world-readable job log.</p>
+
+<h2 id="pitr">Rehearse PITR with a named target</h2>
+<p>PITR needs a base backup plus continuous WAL from its starting point through the target. A dump archive cannot substitute. This local, no-tablespace exercise uses core’s <strong>example</strong> <code>basic_archive</code> module to learn the chain; it is not an off-site production backup system. Production archiving needs monitored durable storage, collision-safe/idempotent delivery, encryption, retention and restore-tested tooling.<a id="postgresql-backup-recovery--cite-33-3" class="citation-ref" href="#postgresql-backup-recovery--source-33" aria-label="Source 33">[33]</a><a id="postgresql-backup-recovery--cite-67-1" class="citation-ref" href="#postgresql-backup-recovery--source-67" aria-label="Source 67">[67]</a></p>
+<ol>
+<li>Before the physical backup above, create a new archive directory <code>/srv/pg-archive/main</code> owned by <code>postgres</code> mode 0700 on persistent storage. Install the approved <code>postgresql18-contrib</code> RPM and verify <code>/usr/pgsql-18/lib/basic_archive.so</code> with <code>rpm -ql postgresql18-contrib</code>.<a id="postgresql-backup-recovery--cite-101-1" class="citation-ref" href="#postgresql-backup-recovery--source-101" aria-label="Source 101">[101]</a> The <strong>server</strong> writes this custom archive path, so check current policy and add a narrow persistent data label, then apply it; do not label a whole backup filesystem indiscriminately:[102]<a id="postgresql-backup-recovery--cite-104-1" class="citation-ref" href="#postgresql-backup-recovery--source-104" aria-label="Source 104">[104]</a></li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Backup and point-in-time recovery: code 5, horizontally scrollable"><code class="language-bash">sudo semanage fcontext -a -t postgresql_db_t '/srv/pg-archive/main(/.*)?'
+sudo restorecon -Rv /srv/pg-archive/main
+</code></pre>
+<p>Use <code>-a</code> only when the exact local mapping does not already exist; review a conflicting mapping rather than overwrite it. Verify owner/mode, all parent traversal and mount readiness; add <code>RequiresMountsFor=/srv/pg-archive/main</code> to the source unit and reload systemd. Configure the source:</p>
+<pre tabindex="0" role="region" aria-label="Backup and point-in-time recovery: code 6, horizontally scrollable"><code class="language-ini">wal_level = replica
+archive_mode = on
+archive_command = ''
+archive_library = 'basic_archive'
+basic_archive.archive_directory = '/srv/pg-archive/main'
+</code></pre>
+<p>Restart for <code>archive_mode</code>/any startup settings; inspect the log and <code>pg_stat_archiver</code>. Preserve <code>wal_level = logical</code> if logical replication already needs it; the minimum here is <code>replica</code>, not an instruction to downgrade a working configuration. Do not set <code>archive_command</code> and <code>archive_library</code> simultaneously. Use a <strong>different archive namespace per cluster identity</strong>, never a shared directory for unrelated primaries.<a id="postgresql-backup-recovery--cite-33-4" class="citation-ref" href="#postgresql-backup-recovery--source-33" aria-label="Source 33">[33]</a><a id="postgresql-backup-recovery--cite-34-1" class="citation-ref" href="#postgresql-backup-recovery--source-34" aria-label="Source 34">[34]</a></p>
+<ol start="2">
+<li>Complete and verify the full base backup. Only then, while fixture writers are quiesced, capture baseline counts/sums and the order-1 state. As superuser create a uniquely named restore point and force completed WAL to archive:</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Backup and point-in-time recovery: code 7, horizontally scrollable"><code class="language-sql">SELECT pg_create_restore_point('adminlab_before_change');
+SELECT pg_switch_wal();
+SELECT archived_count, last_archived_wal, last_archived_time,
+       failed_count, last_failed_wal, last_failed_time
+FROM pg_stat_archiver;
+</code></pre>
+<p>Wait for the relevant segment to be archived and verify the archive storage, not merely a non-null historic timestamp. Archive the job’s target name, source timeline and baseline results. Optionally change the fixture afterward to make reversal observable. Do not reuse this target name in a real run: recovery stops at the first matching restore point after backup.<a id="postgresql-backup-recovery--cite-23-1" class="citation-ref" href="#postgresql-backup-recovery--source-23" aria-label="Source 23">[23]</a><a id="postgresql-backup-recovery--cite-33-5" class="citation-ref" href="#postgresql-backup-recovery--source-33" aria-label="Source 33">[33]</a></p>
+<ol start="3">
+<li>
+<p>Use a <strong>separate copy</strong> of <code>/srv/pg-backups/base-drill</code> at <code>/srv/pg-restore/main</code>, owned by <code>postgres</code> mode 0700. The target must be empty, port 5543 unused, no logical <code>postgresql-18-restore</code> drill running, and no live tablespace paths shared. Verify the copy with <code>pg_verifybackup</code> before modifying recovery configuration. Keep the original base/archive unchanged.</p>
+</li>
+<li>
+<p>Remove any inherited <code>standby.signal</code> from the <em>restore copy only</em> if present. Save its <code>postgresql.auto.conf</code> outside the restored PGDATA and replace it with an empty file owned by <code>postgres</code> mode 0600, so source connection/archive settings cannot override isolation. Save and replace any inherited main/HBA config in the copy. Use the existing tmpfiles-managed <code>/run/postgresql</code> socket directory with the distinct 5543 filename; keep TCP disabled. Put this new <code>postgresql.conf</code> in the restore PGDATA:</p>
+</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Backup and point-in-time recovery: code 8, horizontally scrollable"><code class="language-ini">data_directory = '/srv/pg-restore/main'
+hba_file = '/srv/pg-restore/main/pg_hba.conf'
+listen_addresses = ''
+port = 5543
+unix_socket_directories = '/run/postgresql'
+hot_standby = on
+archive_mode = off
+restore_command = 'cp /srv/pg-archive/main/%f %p'
+recovery_target_name = 'adminlab_before_change'
+recovery_target_timeline = 'current'
+recovery_target_action = 'pause'
+</code></pre>
+<p>Create <code>pg_hba.conf</code> containing only <code>local all postgres peer</code>. Review compatibility settings from the source before starting: recovery’s <code>max_connections</code>, <code>max_worker_processes</code>, <code>max_wal_senders</code>, <code>max_prepared_transactions</code> and <code>max_locks_per_transaction</code> must not be lower than the source values where required. Install required extension libraries and deliberately choose any preload entries; do not blindly inherit a network or external side-effect configuration.<a id="postgresql-backup-recovery--cite-74-1" class="citation-ref" href="#postgresql-backup-recovery--source-74" aria-label="Source 74">[74]</a></p>
+<p>Create <code>recovery.signal</code> as OS <code>postgres</code> in the restore copy only. Register <strong><code>postgresql-18-pitr.service</code></strong> from the inspected vendor unit using <a href="postgresql-install-instances.html#multiple">multiple instances</a>, with <code>PGDATA=/srv/pg-restore/main</code> and <code>RequiresMountsFor=/srv/pg-restore/main /srv/pg-archive/main</code>. <strong>Skip initdb:</strong> this is already restored physical data. Keep it disabled at boot. Before launch, create the protected parent/data/log directories and map the copy persistently to the normal PGDATA label tree; do not let a file copy’s old labels silently define access.<a id="postgresql-backup-recovery--cite-100-3" class="citation-ref" href="#postgresql-backup-recovery--source-100" aria-label="Source 100">[100]</a><a id="postgresql-backup-recovery--cite-102-2" class="citation-ref" href="#postgresql-backup-recovery--source-102" aria-label="Source 102">[102]</a></p>
+<pre tabindex="0" role="region" aria-label="Backup and point-in-time recovery: code 9, horizontally scrollable"><code class="language-bash">sudo semanage fcontext -a -e /var/lib/pgsql/18/data /srv/pg-restore/main
+sudo restorecon -Rv /srv/pg-restore/main
+sudo systemctl daemon-reload
+sudo systemctl cat postgresql-18-pitr.service
+</code></pre>
+<p>Configure <code>logging_collector = on</code>, <code>log_directory = 'log'</code> in the copy; make <code>PGDATA/log</code> owned by <code>postgres</code> mode 0700 and verify its label. Then:</p>
+<pre tabindex="0" role="region" aria-label="Backup and point-in-time recovery: code 10, horizontally scrollable"><code class="language-bash">sudo -u postgres touch /srv/pg-restore/main/recovery.signal
+sudo systemctl start postgresql-18-pitr.service
+sudo -u postgres /usr/pgsql-18/bin/psql -X \
+  -h /run/postgresql -p 5543 -d adminlab
+</code></pre>
+<p>Verify the intended confined <code>postgresql_t</code> process domain, file labels and absence of relevant AVC denials; journal startup diagnostics belong to <code>postgresql-18-pitr</code>, collector logs to the restored <code>PGDATA/log</code>. The simple restore command copies <strong>from a read-only archive</strong> to PostgreSQL’s requested file and must fail for absent files; never return success for an unsuccessful restore. The example restricts recovery to the backup’s current timeline; for a post-failover target select the documented descendant timeline and retain its history files. <code>latest</code> is not a substitute for deciding which history is correct.<a id="postgresql-backup-recovery--cite-33-6" class="citation-ref" href="#postgresql-backup-recovery--source-33" aria-label="Source 33">[33]</a><a id="postgresql-backup-recovery--cite-34-2" class="citation-ref" href="#postgresql-backup-recovery--source-34" aria-label="Source 34">[34]</a></p>
+<ol start="5">
+<li>Follow <code>journalctl -u postgresql-18-pitr.service</code> and the copy’s collector log. Missing required WAL or an unreached target is failure, not permission to promote early. When the target is reached, verify:</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Backup and point-in-time recovery: code 11, horizontally scrollable"><code class="language-sql">SELECT pg_is_in_recovery(), pg_is_wal_replay_paused(), pg_last_wal_replay_lsn();
+SELECT count(*), sum(amount) FROM notes.orders;
+SELECT order_id, status, amount FROM notes.orders WHERE order_id = 1;
+</code></pre>
+<p>Compare to the recorded pre-change baseline. A pause allows read-only checks before accepting the recovery point. If the point is too early, a later target may be replayed after stop/reconfiguration; to go <strong>backward</strong>, restore a fresh base copy. For an approved standalone recovery, <code>SELECT pg_wal_replay_resume();</code> at the reached pause ends targeted recovery; confirm <code>pg_is_in_recovery()</code> is false and record the new timeline. For a drill, <code>sudo systemctl stop postgresql-18-pitr.service</code> and retain evidence.<a id="postgresql-backup-recovery--cite-34-3" class="citation-ref" href="#postgresql-backup-recovery--source-34" aria-label="Source 34">[34]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Backup and point-in-time recovery: table 4, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Target choice</th>
+<th>Required precision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>recovery_target_name</code></td>
+<td>Unique restore point after backup completion.</td>
+</tr>
+<tr>
+<td><code>recovery_target_time</code></td>
+<td>Timestamp with explicit UTC offset; inclusivity and transaction commit boundary matter.</td>
+</tr>
+<tr>
+<td><code>recovery_target_lsn</code></td>
+<td>Known WAL location from the intended timeline.</td>
+</tr>
+<tr>
+<td><code>recovery_target_xid</code></td>
+<td>Known transaction ID; not a wall-clock ordering shortcut.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Set one target selector, not several. Default inclusive behavior applies to time/XID/LSN; for an unwanted committed transaction choose/test the intended boundary explicitly. The selected target cannot precede the base backup’s recoverable state.<a id="postgresql-backup-recovery--cite-34-4" class="citation-ref" href="#postgresql-backup-recovery--source-34" aria-label="Source 34">[34]</a></p>
+
+<h2 id="validation">Prove the restored service is usable</h2>
+<p>Validation is acceptance work, not invented command output. Record source snapshot/target, tool versions, backup checksums/manifests, exit codes, elapsed restore stages and each comparison.</p>
+<ul>
+<li><strong>Identity and recovery:</strong> correct system identifier for physical copies; intended major/port/path; target reached; expected primary/standby state; no source connections or live file paths reused.</li>
+<li><strong>Structure:</strong> schemas, extensions/versions, constraints, indexes, functions/triggers, owners and grants. Check invalid indexes and unvalidated constraints rather than counting only tables.</li>
+<li><strong>Data:</strong> per-table counts, null/range checks, totals and deterministic keyed exports/checksums against the <strong>same snapshot/target</strong>. A count against a source that kept changing is not a valid baseline.</li>
+<li><strong>Integrity:</strong> <code>pg_verifybackup</code> before physical restore; optionally <code>pg_amcheck</code> with installed <code>amcheck</code> and appropriate privileges after start. Checksum/structure checks do not establish business correctness.<a id="postgresql-backup-recovery--cite-35-2" class="citation-ref" href="#postgresql-backup-recovery--source-35" aria-label="Source 35">[35]</a><a id="postgresql-backup-recovery--cite-66-1" class="citation-ref" href="#postgresql-backup-recovery--source-66" aria-label="Source 66">[66]</a></li>
+<li><strong>Application:</strong> representative reads, join results, a rollback-wrapped write, identity sequence next values, role-denial tests, time zone/collation behavior, external integrations safely disabled.</li>
+<li><strong>Operations:</strong> new backups/archiving, monitoring, alerting and secret recovery work; measured RPO/RTO meet the objective before switching traffic.</li>
+</ul>
+<p>For the fixture, these read-only catalog checks make structure acceptance explicit. Run in the restored <code>adminlab</code> as an administrator; investigate every returned invalid index or unvalidated constraint, including any documented exception inherited from the source.<a id="postgresql-backup-recovery--cite-28-1" class="citation-ref" href="#postgresql-backup-recovery--source-28" aria-label="Source 28">[28]</a><a id="postgresql-backup-recovery--cite-71-1" class="citation-ref" href="#postgresql-backup-recovery--source-71" aria-label="Source 71">[71]</a></p>
+<pre tabindex="0" role="region" aria-label="Backup and point-in-time recovery: code 12, horizontally scrollable"><code class="language-sql">SELECT indexrelid::regclass, indisvalid, indisready
+FROM pg_index WHERE NOT indisvalid OR NOT indisready;
+SELECT conrelid::regclass, conname, contype
+FROM pg_constraint WHERE NOT convalidated AND conrelid &lt;&gt; 0;
+SELECT extname, extversion FROM pg_extension ORDER BY extname;
+</code></pre>
+<p>The socket-only logical drill permits only matching OS identities through peer. To exercise the restored <code>notes_app</code> login itself, provision its credentials and temporarily enable a specifically approved loopback/TLS rule and listener, or provide a matching OS test identity; do not switch the drill to <code>trust</code>. A superuser’s <code>SET ROLE notes_app</code> can test grants, but cannot prove login authentication. PITR remains read-only while paused, so defer write/sequence smoke tests until an approved promotion on an isolated copy.<a id="postgresql-backup-recovery--cite-14-1" class="citation-ref" href="#postgresql-backup-recovery--source-14" aria-label="Source 14">[14]</a><a id="postgresql-backup-recovery--cite-34-5" class="citation-ref" href="#postgresql-backup-recovery--source-34" aria-label="Source 34">[34]</a></p>
+<p>Logical migration generally loads into the same or newer major; an older <code>pg_dump</code> refuses a newer server, and downgrade restore compatibility is not promised. Physical file/WAL formats are major-specific. Use the target-major dump/restore tools for a planned major migration and read intervening release notes.<a id="postgresql-backup-recovery--cite-29-3" class="citation-ref" href="#postgresql-backup-recovery--source-29" aria-label="Source 29">[29]</a><a id="postgresql-backup-recovery--cite-36-1" class="citation-ref" href="#postgresql-backup-recovery--source-36" aria-label="Source 36">[36]</a></p>
+<p>If checks fail, keep the production source unchanged, preserve the failed copy/logs and retry from a clean target after diagnosis. After a real cutover accepts writes, reverting to the old snapshot loses those writes unless reconciled. Keep source log rotation, WAL archive retention and backup retention separate: never <code>rm</code> WAL from PGDATA and never treat archiver success as proof the off-site copy or decryption key is available.</p>
+
+<h2 id="postgresql-backup-recovery--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="postgresql-backup-recovery--source-14">[14] <a href="https://www.postgresql.org/docs/18/auth-pg-hba-conf.html">PostgreSQL: Documentation: 18: 20.1.&nbsp;The pg_hba.conf File</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-14-1" aria-label="Return to citation 14, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-23">[23] <a href="https://www.postgresql.org/docs/18/functions-admin.html">PostgreSQL: Documentation: 18: 9.28.&nbsp;System Administration Functions</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-23-1" aria-label="Return to citation 23, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-28">[28] <a href="https://www.postgresql.org/docs/18/sql-createindex.html">PostgreSQL: Documentation: 18: CREATE INDEX</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-28-1" aria-label="Return to citation 28, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-29">[29] <a href="https://www.postgresql.org/docs/18/app-pgdump.html">PostgreSQL: Documentation: 18: pg_dump</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-29-1" aria-label="Return to citation 29, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-backup-recovery--cite-29-2" aria-label="Return to citation 29, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-backup-recovery--cite-29-3" aria-label="Return to citation 29, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-30">[30] <a href="https://www.postgresql.org/docs/18/app-pgrestore.html">PostgreSQL: Documentation: 18: pg_restore</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-30-1" aria-label="Return to citation 30, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-31">[31] <a href="https://www.postgresql.org/docs/18/app-pg-dumpall.html">PostgreSQL: Documentation: 18: pg_dumpall</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-31-1" aria-label="Return to citation 31, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-backup-recovery--cite-31-2" aria-label="Return to citation 31, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-backup-recovery--cite-31-3" aria-label="Return to citation 31, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-32">[32] <a href="https://www.postgresql.org/docs/18/app-pgbasebackup.html">PostgreSQL: Documentation: 18: pg_basebackup</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-32-1" aria-label="Return to citation 32, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-backup-recovery--cite-32-2" aria-label="Return to citation 32, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-backup-recovery--cite-32-3" aria-label="Return to citation 32, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-33">[33] <a href="https://www.postgresql.org/docs/18/continuous-archiving.html">PostgreSQL: Documentation: 18: 25.3.&nbsp;Continuous Archiving and Point-in-Time Recovery (PITR)</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-33-1" aria-label="Return to citation 33, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-backup-recovery--cite-33-2" aria-label="Return to citation 33, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-backup-recovery--cite-33-3" aria-label="Return to citation 33, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-backup-recovery--cite-33-4" aria-label="Return to citation 33, occurrence 4">↩4</a><a class="citation-return" href="#postgresql-backup-recovery--cite-33-5" aria-label="Return to citation 33, occurrence 5">↩5</a><a class="citation-return" href="#postgresql-backup-recovery--cite-33-6" aria-label="Return to citation 33, occurrence 6">↩6</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-34">[34] <a href="https://www.postgresql.org/docs/18/runtime-config-wal.html">PostgreSQL: Documentation: 18: 19.5.&nbsp;Write Ahead Log</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-34-1" aria-label="Return to citation 34, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-backup-recovery--cite-34-2" aria-label="Return to citation 34, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-backup-recovery--cite-34-3" aria-label="Return to citation 34, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-backup-recovery--cite-34-4" aria-label="Return to citation 34, occurrence 4">↩4</a><a class="citation-return" href="#postgresql-backup-recovery--cite-34-5" aria-label="Return to citation 34, occurrence 5">↩5</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-35">[35] <a href="https://www.postgresql.org/docs/18/app-pgverifybackup.html">PostgreSQL: Documentation: 18: pg_verifybackup</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-35-1" aria-label="Return to citation 35, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-backup-recovery--cite-35-2" aria-label="Return to citation 35, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-36">[36] <a href="https://www.postgresql.org/docs/18/pgupgrade.html">PostgreSQL: Documentation: 18: pg_upgrade</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-36-1" aria-label="Return to citation 36, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-38">[38] <a href="https://www.postgresql.org/docs/18/warm-standby.html">PostgreSQL: Documentation: 18: 26.2.&nbsp;Log-Shipping Standby Servers</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-38-1" aria-label="Return to citation 38, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-66">[66] <a href="https://www.postgresql.org/docs/18/app-pgamcheck.html">PostgreSQL: Documentation: 18: pg_amcheck</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-66-1" aria-label="Return to citation 66, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-67">[67] <a href="https://www.postgresql.org/docs/18/basic-archive.html">PostgreSQL: Documentation: 18: F.5.&nbsp;basic_archive — an example WAL archive module</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-67-1" aria-label="Return to citation 67, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-71">[71] <a href="https://www.postgresql.org/docs/18/sql-altertable.html">PostgreSQL: Documentation: 18: ALTER TABLE</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-71-1" aria-label="Return to citation 71, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-74">[74] <a href="https://www.postgresql.org/docs/18/hot-standby.html">PostgreSQL: Documentation: 18: 26.4.&nbsp;Hot Standby</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-74-1" aria-label="Return to citation 74, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-100">[100] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-server-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18-server 18.6-1PGDG.rhel9.7</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-backup-recovery--cite-100-2" aria-label="Return to citation 100, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-backup-recovery--cite-100-3" aria-label="Return to citation 100, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-101">[101] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-contrib-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18-contrib 18.6-1PGDG.rhel9.7</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-101-1" aria-label="Return to citation 101, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-102">[102] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux">Chapter&nbsp;5.&nbsp;Troubleshooting problems related to SELinux | Using SELinux | Red Hat Enterprise Linux | 9 | Red Hat Documentation</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-102-1" aria-label="Return to citation 102, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-backup-recovery--cite-102-2" aria-label="Return to citation 102, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-backup-recovery--source-104">[104] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/7/html/selinux_users_and_administrators_guide/sect-managing_confined_services-postgresql-configuration_examples">21.4.&nbsp;Configuration Examples | SELinux User’s and Administrator’s Guide | Red Hat Enterprise Linux | 7 | Red Hat Documentation</a><span class="citation-returns"><a class="citation-return" href="#postgresql-backup-recovery--cite-104-1" aria-label="Return to citation 104, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="postgresql-audit-performance.html"><span>Previous · PostgreSQL</span><strong>Audit, statistics and performance</strong></a></div><div><a rel="next" href="postgresql-replication-ha.html"><span>Next · PostgreSQL</span><strong>Replication and high availability</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/recover.html">Explore Back up, then restore ↗</a><div class="current-group"><h2>In PostgreSQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/postgresql-backup-recovery.html">Backup and point-in-time recovery</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a><a href="mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></div><div><span>MongoDB</span><a href="mongodb-backup.html">Backup and recovery</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

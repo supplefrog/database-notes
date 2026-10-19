@@ -1,0 +1,234 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Networking, SSH and file transfer — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="os-networking"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../operating-systems.html">Operating systems</a><a href="../operating-systems.html">Work on the host</a></nav>
+<header class="reader-head"><p class="reader-context">OS <span aria-hidden="true">/</span> Work on the host</p><h1>Networking, SSH and file transfer</h1></header>
+<div class="reader-controls"><a href="../operating-systems.html">← Work on the host</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="OS chapters"><ol class="chapter-list"><li><a  href="../chapters/os-processes.html">Processes and scheduling</a></li><li><a  href="../chapters/os-memory.html">Memory and virtual memory</a></li><li><a  href="../chapters/os-kernel-devices.html">Devices, kernel services and isolation</a></li><li><a  href="../chapters/os-boot.html">From power-on to login</a></li><li><a  href="../chapters/os-linux-foundations.html">Linux distributions, terminals and shells</a></li><li><a  href="../chapters/os-shell-files.html">Finding, editing and protecting files</a></li><li><a  href="../chapters/os-users-processes.html">Users, processes and resource monitoring</a></li><li><a  href="../chapters/os-services.html">Systemd service types</a></li><li><a  href="../chapters/os-storage.html">Filesystems, RAID, directories and partitions</a></li><li><a aria-current="page" href="../chapters/os-networking.html">Networking, SSH and file transfer</a></li><li><a  href="../chapters/os-access-security.html">Access control, passwords and recovery</a></li><li><a  href="../chapters/os-windows.html">Windows tools and licensing</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#os-networking--networking">Networking</a><a class="level-2" href="#os-networking--section-1">rsync transfers and mirrors</a><a class="level-2" href="#os-networking--section-2">SSH identity and file copy</a><a class="level-3" href="#os-networking--section-3">A changed host key is a security event</a><a class="level-2" href="#os-networking--section-4">IP addresses and reapplying configuration</a><a class="level-2" href="#os-networking--section-5">Sources</a></nav></details></div>
+<article class="prose"><p><span id="os-b-0531" class="source-anchor"></span>
+<span id="os-b-0533" class="source-anchor"></span></p>
+
+<h2 id="os-networking--networking">Networking</h2>
+<p>Examples use <strong>RHEL 9 with NetworkManager</strong>. Interface names such as <code>enp1s0</code> are examples; discover the actual interface and active connection profile before changes. Read-only inspection:</p>
+<pre tabindex="0" role="region" aria-label="Networking, SSH and file transfer: code 1, horizontally scrollable"><code class="language-bash">nmcli device status
+nmcli connection show --active
+ip address show
+ss -tuln
+</code></pre>
+<p><strong>Connection changes can disconnect you.</strong> For authorized maintenance, retain out-of-band console access, record the active profile/address/routes/DNS, back up relevant profile configuration, and prepare a tested rollback before changing a remote interface. Do not release/flush the interface carrying your only administrative session.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Networking, SSH and file transfer: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nmcli</code></td>
+<td>NetworkManager command-line client, not a “BSD-style” networking subsystem</td>
+</tr>
+<tr>
+<td><code>nmcli device</code></td>
+<td>Show device status (<code>d</code> is an accepted abbreviation)</td>
+</tr>
+<tr>
+<td><code>nmcli device show IFACE</code></td>
+<td>Show interface properties</td>
+</tr>
+<tr>
+<td><code>nmcli device connect IFACE</code></td>
+<td>Ask NetworkManager to connect the device; may activate a matching profile or create a suitable one</td>
+</tr>
+<tr>
+<td><code>nmcli device disconnect IFACE</code></td>
+<td>Disconnect the device; can terminate remote sessions</td>
+</tr>
+<tr>
+<td><code>nmcli --ask device wifi connect 'SSID'</code></td>
+<td>Connect to Wi-Fi, prompting for the secret when required instead of putting it in shell history or the process argument list</td>
+</tr>
+<tr>
+<td><code>ss -tu</code></td>
+<td>TCP/UDP sockets, with selection depending on other flags</td>
+</tr>
+<tr>
+<td><code>ss -tuln</code></td>
+<td>Listening TCP/UDP sockets, numeric addresses/ports.<a id="os-networking--cite-89-1" class="citation-ref" href="#os-networking--source-89" aria-label="Source 89">[89]</a></td>
+</tr>
+<tr>
+<td><code>netstat -tuln</code></td>
+<td>Legacy net-tools equivalent where installed; prefer <code>ss</code> for routine inspection.<a id="os-networking--cite-126-1" class="citation-ref" href="#os-networking--source-126" aria-label="Source 126">[126]</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>Socket listeners are not proof of firewall reachability. Verify the intended connection from an authorized client after a change; keep the prior working profile until the new path is verified.<a id="os-networking--cite-28-1" class="citation-ref" href="#os-networking--source-28" aria-label="Source 28">[28]</a><a id="os-networking--cite-33-1" class="citation-ref" href="#os-networking--source-33" aria-label="Source 33">[33]</a></p>
+<p><span id="os-b-0544" class="source-anchor"></span></p>
+
+<h2 id="os-networking--section-1">rsync transfers and mirrors</h2>
+<p>Syntax is <code>rsync [OPTIONS] SOURCE DEST</code>; one endpoint may be remote, for example <code>user@host:/path/</code>. Ordinary rsync does <strong>not</strong> accept two remote endpoints in one transfer. The examples below use SSH transport.<a id="os-networking--cite-29-1" class="citation-ref" href="#os-networking--source-29" aria-label="Source 29">[29]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Networking, SSH and file transfer: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-a</code></td>
+<td>Archive mode (<code>-rlptgoD</code>): recursive, links, permissions, times, group, owner, devices/special files as privileges allow; <strong>not</strong> hard links, ACLs or extended attributes</td>
+</tr>
+<tr>
+<td><code>-r</code></td>
+<td>Recurse without implying archive metadata preservation</td>
+</tr>
+<tr>
+<td><code>-v</code></td>
+<td>Verbose</td>
+</tr>
+<tr>
+<td><code>-z</code></td>
+<td>Compress transfer data; benefit depends on content and link</td>
+</tr>
+<tr>
+<td><code>-P</code></td>
+<td><code>--partial --progress</code>: keep partial files and report progress; lowercase <code>-p</code> instead means permissions</td>
+</tr>
+<tr>
+<td><code>--delete</code></td>
+<td>Delete extraneous destination entries within the synchronized scope; excluded/protected entries and delete timing/options matter</td>
+</tr>
+<tr>
+<td><code>--exclude=PATTERN</code></td>
+<td>Exclude matching paths according to rsync’s filter rules</td>
+</tr>
+<tr>
+<td><code>-n</code> / <code>--dry-run</code></td>
+<td>Preview without writing the transfer</td>
+</tr>
+</tbody>
+</table></div>
+<p>A trailing slash matters: <code>source/</code> copies its contents, while <code>source</code> includes that directory level. A partial file is not an integrity-verified backup, and <code>-P</code> is not a promise to resume every file from exactly the last byte. Add <code>-H</code>, <code>-A</code>, or <code>-X</code> only when hard links, ACLs or xattrs are required and both ends support them.<a id="os-networking--cite-29-2" class="citation-ref" href="#os-networking--source-29" aria-label="Source 29">[29]</a></p>
+<p>Example preview for an <strong>approved test destination</strong>, with deletion deliberately absent:</p>
+<pre tabindex="0" role="region" aria-label="Networking, SSH and file transfer: code 2, horizontally scrollable"><code class="language-bash">rsync -anvi -e ssh -- /srv/example-source/ user@host.example:/srv/example-copy/
+</code></pre>
+<p>Before enabling a mirror’s <code>--delete</code>, obtain authorization for the destination, confirm both roots/trailing slashes, maintain a separate recoverable backup or protected snapshot, and inspect the itemized dry run with the exact intended filters. Do not mirror into a live database directory. Stop if the source is unexpectedly empty or unavailable. After an approved transfer, verify expected files and application-consistent recovery separately; a zero exit status alone is not a restore test.<a id="os-networking--cite-29-3" class="citation-ref" href="#os-networking--source-29" aria-label="Source 29">[29]</a></p>
+<p><span id="os-b-0555" class="source-anchor"></span>
+<span id="os-b-0559" class="source-anchor"></span></p>
+
+<h2 id="os-networking--section-2">SSH identity and file copy</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Networking, SSH and file transfer: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Protocol/tool</th>
+<th>Default port</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SSH, SFTP, SCP over SSH</td>
+<td>TCP 22, unless server/client configuration selects another port.<a id="os-networking--cite-124-1" class="citation-ref" href="#os-networking--source-124" aria-label="Source 124">[124]</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>SFTP is a file-transfer protocol over SSH, not FTP with TLS. Upstream OpenSSH <code>scp</code> uses SFTP by default from 9.0; distribution packages can backport this change, so do not infer protocol behavior from the command name alone.<a id="os-networking--cite-32-1" class="citation-ref" href="#os-networking--source-32" aria-label="Source 32">[32]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Networking, SSH and file transfer: table 4, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ssh user@host.example</code></td>
+<td>Open an authenticated remote session</td>
+</tr>
+<tr>
+<td><code>scp FILE user@host.example:/approved/path/</code></td>
+<td>Copy local to remote; quote paths as required</td>
+</tr>
+<tr>
+<td><code>scp -r DIR user@host.example:/approved/path/</code></td>
+<td>Recursive directory copy; validate destination and symlink behavior</td>
+</tr>
+<tr>
+<td><code>scp user@host1.example:/path/FILE user@host2.example:/path/</code></td>
+<td>Remote-to-remote copy; data routing/authentication behavior depends on scp options/version</td>
+</tr>
+<tr>
+<td><code>ssh-keygen -t rsa -b 4096 -C 'admin@example.invalid'</code></td>
+<td>Create an RSA keypair if allowed by organizational policy; use an interactive passphrase and a new filename rather than overwriting an existing key</td>
+</tr>
+<tr>
+<td><code>ssh-copy-id user@host.example</code></td>
+<td>Install an appropriate <strong>public</strong> key after authenticating the server and account; review key selection and server policy.<a id="os-networking--cite-109-1" class="citation-ref" href="#os-networking--source-109" aria-label="Source 109">[109]</a></td>
+</tr>
+<tr>
+<td><code>ssh-keygen -l -f KEYFILE.pub</code></td>
+<td>Display a public-key fingerprint</td>
+</tr>
+<tr>
+<td><code>ssh-keygen -R host.example</code></td>
+<td>Remove that host’s stored known-hosts trust entry; use only after the identity checks below</td>
+</tr>
+</tbody>
+</table></div>
+<p>Keep the private key private; a passphrase protects it at rest and an agent can assist use. “Key login” is not synonymous with “no authentication.” RSA key type does not require enabling obsolete SHA-1 <code>ssh-rsa</code> signatures.<a id="os-networking--cite-30-1" class="citation-ref" href="#os-networking--source-30" aria-label="Source 30">[30]</a><a id="os-networking--cite-31-1" class="citation-ref" href="#os-networking--source-31" aria-label="Source 31">[31]</a></p>
+
+<h3 id="os-networking--section-3">A changed host key is a security event</h3>
+<p>Do <strong>not</strong> fix a warning by immediately deleting <code>known_hosts</code> or disabling <code>StrictHostKeyChecking</code>. Confirm the expected host and new fingerprint through a trusted independent channel (for example the console or an authenticated administrator/asset record). A fresh network scan alone does not establish identity.<a id="os-networking--cite-30-2" class="citation-ref" href="#os-networking--source-30" aria-label="Source 30">[30]</a></p>
+<p>Only after confirming an authorized key rotation/rebuild: preserve the old trust record, remove the precise stale entry with <code>ssh-keygen -R</code>, reconnect, and compare the displayed fingerprint to the verified value before accepting. Non-default ports use the known-hosts form <code>[host.example]:PORT</code>; check aliases and IP entries individually. Stop and investigate if verification fails.<a id="os-networking--cite-31-2" class="citation-ref" href="#os-networking--source-31" aria-label="Source 31">[31]</a></p>
+<p><span id="os-b-0567" class="source-anchor"></span></p>
+
+<h2 id="os-networking--section-4">IP addresses and reapplying configuration</h2>
+<p>Prefer NetworkManager connection profiles for persistent RHEL 9 configuration. Direct <code>ip</code> address changes are runtime changes and may be overwritten by the manager.<a id="os-networking--cite-28-2" class="citation-ref" href="#os-networking--source-28" aria-label="Source 28">[28]</a><a id="os-networking--cite-33-2" class="citation-ref" href="#os-networking--source-33" aria-label="Source 33">[33]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Networking, SSH and file transfer: table 5, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Command/reference</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Inspect interface addresses</td>
+<td><code>ip address show dev enp1s0</code></td>
+</tr>
+<tr>
+<td>Add a runtime IPv4 address</td>
+<td><code>ip address add 192.0.2.10/24 dev enp1s0</code></td>
+</tr>
+<tr>
+<td>Remove that specific runtime address</td>
+<td><code>ip address del 192.0.2.10/24 dev enp1s0</code></td>
+</tr>
+<tr>
+<td>Reapply supported changes to an active device</td>
+<td><code>nmcli device reapply enp1s0</code></td>
+</tr>
+<tr>
+<td>Flush matching addresses</td>
+<td><code>ip address flush dev enp1s0</code> — disruptive; can remove both IPv4 and IPv6 selections, not a normal repair step</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>192.0.2.10/24</code> is a documentation address, not a value to assign to a production network. <strong>Do not execute add/delete/flush until the maintenance prerequisites above are met</strong>, the interface and address plan are verified, and an explicit inverse change or prior profile can be restored from the console. <code>reapply</code> applies only changes NetworkManager can update without full reconnection; it is not a guarantee against interruption.<a id="os-networking--cite-28-3" class="citation-ref" href="#os-networking--source-28" aria-label="Source 28">[28]</a></p>
+<p>The older pattern <code>dhclient -r &amp;&amp; dhclient IFACE</code> releases leases too broadly and can conflict with NetworkManager. On RHEL 9, do not start an independent DHCP client on a NetworkManager-managed device. Refresh/reconnect the intended profile through NetworkManager during approved maintenance instead; a profile down/up still interrupts traffic. For a genuinely unmanaged interface, use the distribution’s documented DHCP client procedure rather than this generic release-all chain.</p>
+<p>After any approved change, inspect addresses, routes and DNS, test the gateway and intended service from the correct network, and verify a new management connection before closing the console. If it fails, restore the recorded profile/addresses from that console—not by stacking further speculative changes.</p>
+
+<h2 id="os-networking--section-5">Sources</h2>
+<div class="source-list"><div class="source-entry" id="os-networking--source-28">[28] <a href="https://networkmanager.dev/docs/api/latest/nmcli.html">https://networkmanager.dev/docs/api/latest/nmcli.html</a> — NetworkManager upstream; stable RHEL 9 commands, no latest-only options
+<span class="citation-returns"><a class="citation-return" href="#os-networking--cite-28-1" aria-label="Return to citation 28, occurrence 1">↩1</a><a class="citation-return" href="#os-networking--cite-28-2" aria-label="Return to citation 28, occurrence 2">↩2</a><a class="citation-return" href="#os-networking--cite-28-3" aria-label="Return to citation 28, occurrence 3">↩3</a></span></div><div class="source-entry" id="os-networking--source-29">[29] <a href="https://download.samba.org/pub/rsync/rsync.1">https://download.samba.org/pub/rsync/rsync.1</a> — rsync upstream; common 3.x options
+<span class="citation-returns"><a class="citation-return" href="#os-networking--cite-29-1" aria-label="Return to citation 29, occurrence 1">↩1</a><a class="citation-return" href="#os-networking--cite-29-2" aria-label="Return to citation 29, occurrence 2">↩2</a><a class="citation-return" href="#os-networking--cite-29-3" aria-label="Return to citation 29, occurrence 3">↩3</a></span></div><div class="source-entry" id="os-networking--source-30">[30] <a href="https://man.openbsd.org/ssh">https://man.openbsd.org/ssh</a> — OpenSSH upstream; common client behavior
+<span class="citation-returns"><a class="citation-return" href="#os-networking--cite-30-1" aria-label="Return to citation 30, occurrence 1">↩1</a><a class="citation-return" href="#os-networking--cite-30-2" aria-label="Return to citation 30, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-networking--source-31">[31] <a href="https://man.openbsd.org/ssh-keygen">https://man.openbsd.org/ssh-keygen</a> — OpenSSH key handling; common options
+<span class="citation-returns"><a class="citation-return" href="#os-networking--cite-31-1" aria-label="Return to citation 31, occurrence 1">↩1</a><a class="citation-return" href="#os-networking--cite-31-2" aria-label="Return to citation 31, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-networking--source-32">[32] <a href="https://man.openbsd.org/scp">https://man.openbsd.org/scp</a> — OpenSSH; SFTP default since 9.0, RHEL packaging may backport
+<span class="citation-returns"><a class="citation-return" href="#os-networking--cite-32-1" aria-label="Return to citation 32, occurrence 1">↩</a></span></div><div class="source-entry" id="os-networking--source-33">[33] <a href="https://man7.org/linux/man-pages/man8/ip-address.8.html">https://man7.org/linux/man-pages/man8/ip-address.8.html</a> — iproute2 address operations
+<span class="citation-returns"><a class="citation-return" href="#os-networking--cite-33-1" aria-label="Return to citation 33, occurrence 1">↩1</a><a class="citation-return" href="#os-networking--cite-33-2" aria-label="Return to citation 33, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-networking--source-89">[89] <a href="https://man7.org/linux/man-pages/man8/ss.8.html">https://man7.org/linux/man-pages/man8/ss.8.html</a> — iproute2 socket inspection
+<span class="citation-returns"><a class="citation-return" href="#os-networking--cite-89-1" aria-label="Return to citation 89, occurrence 1">↩</a></span></div><div class="source-entry" id="os-networking--source-109">[109] <a href="https://man7.org/linux/man-pages/man1/ssh-copy-id.1.html">https://man7.org/linux/man-pages/man1/ssh-copy-id.1.html</a> — OpenSSH ssh-copy-id
+<span class="citation-returns"><a class="citation-return" href="#os-networking--cite-109-1" aria-label="Return to citation 109, occurrence 1">↩</a></span></div><div class="source-entry" id="os-networking--source-124">[124] <a href="https://man.openbsd.org/ssh_config">https://man.openbsd.org/ssh_config</a> — OpenSSH client configuration
+<span class="citation-returns"><a class="citation-return" href="#os-networking--cite-124-1" aria-label="Return to citation 124, occurrence 1">↩</a></span></div><div class="source-entry" id="os-networking--source-126">[126] <a href="https://man7.org/linux/man-pages/man8/netstat.8.html">https://man7.org/linux/man-pages/man8/netstat.8.html</a> — net-tools legacy netstat<span class="citation-returns"><a class="citation-return" href="#os-networking--cite-126-1" aria-label="Return to citation 126, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="os-storage.html"><span>Previous · OS</span><strong>Filesystems, RAID, directories and partitions</strong></a></div><div><a rel="next" href="os-access-security.html"><span>Next · OS</span><strong>Access control, passwords and recovery</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../operating-systems.html">Explore Work on the host ↗</a><div class="current-group"><h2>In this group</h2><ol class="chapter-list"><li><a  href="../chapters/os-linux-foundations.html">Linux distributions, terminals and shells</a></li><li><a  href="../chapters/os-shell-files.html">Finding, editing and protecting files</a></li><li><a  href="../chapters/os-users-processes.html">Users, processes and resource monitoring</a></li><li><a  href="../chapters/os-services.html">Systemd service types</a></li><li><a  href="../chapters/os-storage.html">Filesystems, RAID, directories and partitions</a></li><li><a aria-current="page" href="../chapters/os-networking.html">Networking, SSH and file transfer</a></li><li><a  href="../chapters/os-access-security.html">Access control, passwords and recovery</a></li></ol></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

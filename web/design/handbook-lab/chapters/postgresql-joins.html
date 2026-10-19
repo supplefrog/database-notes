@@ -1,0 +1,123 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Joins: keep the rows you mean — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="postgresql-joins"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/use.html">Work with objects and access</a></nav>
+<header class="reader-head"><p class="reader-context">PostgreSQL <span aria-hidden="true">/</span> Work with objects and access</p><h1>Joins: keep the rows you mean</h1></header>
+<div class="reader-controls"><a href="../tasks/use.html">← Work with objects and access</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="PostgreSQL chapters"><ol class="chapter-list"><li><a  href="../chapters/postgresql-foundations.html">PostgreSQL foundations and tools</a></li><li><a  href="../chapters/postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></li><li><a  href="../chapters/postgresql-install-instances.html">Installation, services and instances</a></li><li><a  href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a aria-current="page" href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li><li><a  href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a  href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li><li><a  href="../chapters/postgresql-backup-recovery.html">Backup and point-in-time recovery</a></li><li><a  href="../chapters/postgresql-replication-ha.html">Replication and high availability</a></li><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a  href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a  href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#inner-join">Inner join</a><a class="level-2" href="#left-join">Left join</a><a class="level-2" href="#filter-placement">Filter placement</a><a class="level-2" href="#practice">Practice</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-accounts-settings.html">Settings, accounts, roles and privileges</a><p class="product-label">MongoDB</p><a href="mongodb-administration.html">Objects, users and administration</a></nav></details></div>
+<article class="prose"><p><span id="joins-md-b-0001" class="source-anchor"></span>
+</p>
+<h2 id="inner-join">Inner join</h2>
+<p><span id="joins-md-b-0003" class="source-anchor"></span>
+An inner join keeps only rows that find a partner. Here, the customer id is the shared fact: <code>orders.customer_id</code> points to <code>customers.id</code>.</p>
+<p><span id="joins-md-b-0005" class="source-anchor"></span></p>
+<pre tabindex="0" role="region" aria-label="Joins: keep the rows you mean: code 1, horizontally scrollable"><code class="language-sql">SELECT c.name, o.id AS order_id, o.total
+FROM customers AS c
+INNER JOIN orders AS o ON o.customer_id = c.id
+ORDER BY c.id, o.id;
+</code></pre>
+<p><span id="joins-md-b-0012" class="source-anchor"></span></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Joins: keep the rows you mean: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>name</th>
+<th style="text-align: right">order_id</th>
+<th style="text-align: right">total</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Ada</td>
+<td style="text-align: right">101</td>
+<td style="text-align: right">42</td>
+</tr>
+<tr>
+<td>Ada</td>
+<td style="text-align: right">102</td>
+<td style="text-align: right">18</td>
+</tr>
+<tr>
+<td>Grace</td>
+<td style="text-align: right">103</td>
+<td style="text-align: right">35</td>
+</tr>
+</tbody>
+</table></div>
+<p><span id="joins-md-b-0018" class="source-anchor"></span>
+Ada appears twice because she has two orders. Linus is absent because an inner join has no row to return for a customer without an order.</p><span class="citation-returns figure-returns"><a class="citation-return" href="#tf-pg-schema-ref-1" aria-label="Return to figure: A missing match is not a missing customer">↩ Figure</a></span>
+<p><span id="joins-md-b-0020" class="source-anchor"></span>
+</p>
+<h2 id="left-join">Left join</h2>
+<p><span id="joins-md-b-0022" class="source-anchor"></span>
+A left join preserves every row from the table on the left. Put <code>customers</code> there when the question is “which customers have—or have not—ordered?”</p><figure class="teaching-figure schema-figure" id="tf-pg-schema" data-after-heading="left-join" aria-labelledby="tf-pg-schema-title" aria-describedby="tf-pg-schema-caption"><div class="tf-heading"><span class="tf-label">PostgreSQL lesson · customer / order</span><strong id="tf-pg-schema-title">A missing match is not a missing customer</strong></div><svg class="tf-schema-svg" viewBox="0 0 620 380" role="img" aria-labelledby="tf-pg-schema-svg-title tf-pg-schema-svg-desc"><title id="tf-pg-schema-svg-title">Customers and their matching orders</title><desc id="tf-pg-schema-svg-desc">Solid curves link Ada to orders 101 and 102, and Grace to order 103. Linus has no connecting curve because he has no matching order. A left join still returns Linus with NULL order columns; no order row is invented.</desc><path class="tf-schema-grid" d="M0 76H620M0 152H620M0 228H620M0 304H620M103 0V380M206 0V380M309 0V380M412 0V380M515 0V380"></path><text class="tf-schema-label" x="28" y="33">CUSTOMERS</text><text class="tf-schema-label" x="354" y="33">ORDERS</text><g class="tf-schema-links"><path d="M210 91C280 91 285 91 354 91"></path><path d="M210 91C280 91 285 183 354 183"></path><path d="M210 203C280 203 285 275 354 275"></path></g><g class="tf-schema-box"><rect x="28" y="58" width="182" height="66" rx="3"></rect><text x="44" y="99">Ada</text><rect x="28" y="170" width="182" height="66" rx="3"></rect><text x="44" y="211">Grace</text><rect x="28" y="282" width="182" height="66" rx="3"></rect><text x="44" y="323">Linus</text><rect x="354" y="58" width="238" height="66" rx="3"></rect><text x="370" y="86">Order 101</text><text class="tf-schema-small" x="370" y="110">Ada · total 42</text><rect x="354" y="150" width="238" height="66" rx="3"></rect><text x="370" y="178">Order 102</text><text class="tf-schema-small" x="370" y="202">Ada · total 18</text><rect x="354" y="242" width="238" height="66" rx="3"></rect><text x="370" y="270">Order 103</text><text class="tf-schema-small" x="370" y="294">Grace · total 35</text></g><g class="tf-schema-node"><circle cx="210" cy="91" r="5"></circle><circle cx="210" cy="203" r="5"></circle><circle cx="354" cy="91" r="5"></circle><circle cx="354" cy="183" r="5"></circle><circle cx="354" cy="275" r="5"></circle></g><text class="tf-schema-small" x="235" y="346">Linus: no matching order</text></svg><dl class="tf-schema-key"><div><dt>Ada → two matches</dt><dd>Order 101 · total 42; order 102 · total 18.</dd></div><div><dt>Grace → one match</dt><dd>Order 103 · total 35.</dd></div><div><dt>Linus → no match</dt><dd>No connecting line and no stored order row.</dd></div></dl><p class="tf-note"><strong>Relationship ≠ result row.</strong> The join matches <code>orders.customer_id = customers.id</code>. In this unfiltered left join, Linus produces one result row whose order columns are <code>NULL</code>—not a stored order with zero values. An inner join omits him.</p><figcaption id="tf-pg-schema-caption">Teaching illustration of the lesson’s data, not an exact engine schematic. A customer can have zero or more orders. Every curve represents a real match; the unmatched customer is deliberately unconnected. The text key carries the same information at narrow widths.<p class="tf-sources"><strong>Read the lesson evidence</strong> <a href="#joins-md-b-0018" id="tf-pg-schema-ref-1" class="figure-source-ref">Why Ada appears twice</a> · <a href="#joins-md-b-0038" id="tf-pg-schema-ref-2" class="figure-source-ref">Linus and NULL</a> · <a href="#joins-md-b-0042" id="tf-pg-schema-ref-3" class="figure-source-ref">How filtering changes the result</a></p></figcaption></figure>
+<p><span id="joins-md-b-0024" class="source-anchor"></span></p>
+<pre tabindex="0" role="region" aria-label="Joins: keep the rows you mean: code 2, horizontally scrollable"><code class="language-sql">SELECT c.name, o.id AS order_id, o.total
+FROM customers AS c
+LEFT JOIN orders AS o ON o.customer_id = c.id
+ORDER BY c.id, o.id;
+</code></pre>
+<p><span id="joins-md-b-0031" class="source-anchor"></span></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Joins: keep the rows you mean: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>name</th>
+<th style="text-align: right">order_id</th>
+<th style="text-align: right">total</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Ada</td>
+<td style="text-align: right">101</td>
+<td style="text-align: right">42</td>
+</tr>
+<tr>
+<td>Ada</td>
+<td style="text-align: right">102</td>
+<td style="text-align: right">18</td>
+</tr>
+<tr>
+<td>Grace</td>
+<td style="text-align: right">103</td>
+<td style="text-align: right">35</td>
+</tr>
+<tr>
+<td>Linus</td>
+<td style="text-align: right">NULL</td>
+<td style="text-align: right">NULL</td>
+</tr>
+</tbody>
+</table></div>
+<p><span id="joins-md-b-0038" class="source-anchor"></span>
+<code>NULL</code> is useful information here: Linus exists, but no matching order does. It is not zero and it is not an empty string.</p><span class="citation-returns figure-returns"><a class="citation-return" href="#tf-pg-schema-ref-2" aria-label="Return to figure: A missing match is not a missing customer">↩ Figure</a></span>
+<p><span id="joins-md-b-0040" class="source-anchor"></span>
+</p>
+<h2 id="filter-placement">Filter placement</h2>
+<p><span id="joins-md-b-0042" class="source-anchor"></span>
+The location of a filter changes a left join. A <code>WHERE</code> clause runs after the join, so this query removes both low-value orders and the unmatched Linus row:</p><span class="citation-returns figure-returns"><a class="citation-return" href="#tf-pg-schema-ref-3" aria-label="Return to figure: A missing match is not a missing customer">↩ Figure</a></span>
+<p><span id="joins-md-b-0044" class="source-anchor"></span></p>
+<pre tabindex="0" role="region" aria-label="Joins: keep the rows you mean: code 3, horizontally scrollable"><code class="language-sql">SELECT c.name, o.total
+FROM customers AS c
+LEFT JOIN orders AS o ON o.customer_id = c.id
+WHERE o.total &gt; 30
+ORDER BY c.id, o.id;
+</code></pre>
+<p><span id="joins-md-b-0052" class="source-anchor"></span>
+It returns Ada’s 42 order and Grace’s 35 order: <strong>2 rows</strong>. Move the same condition into <code>ON</code> when you want all customers but only qualifying order matches:</p>
+<p><span id="joins-md-b-0054" class="source-anchor"></span></p>
+<pre tabindex="0" role="region" aria-label="Joins: keep the rows you mean: code 4, horizontally scrollable"><code class="language-sql">SELECT c.name, o.total
+FROM customers AS c
+LEFT JOIN orders AS o
+  ON o.customer_id = c.id AND o.total &gt; 30
+ORDER BY c.id, o.id;
+</code></pre>
+<p><span id="joins-md-b-0062" class="source-anchor"></span>
+That version returns <strong>3 customer rows</strong>: Ada with 42, Grace with 35, and Linus with <code>NULL</code>. Ada’s 18 order no longer qualifies as a match. The practical rule is to say the question aloud: “filter the final rows” suggests <code>WHERE</code>; “limit what may match” suggests <code>ON</code>.</p>
+<p><span id="joins-md-b-0064" class="source-anchor"></span>
+</p>
+<h2 id="practice">Practice</h2>
+<p><span id="joins-md-b-0066" class="source-anchor"></span>
+Run the left join, then move <code>o.total &gt; 30</code> between <code>WHERE</code> and <code>ON</code>. Predict which people remain before pressing Run. The database is disposable and local to this page; Reset restores the three customers and three orders.</p>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="postgresql-administration.html"><span>Previous · PostgreSQL</span><strong>Objects, roles and administration</strong></a></div><div><a rel="next" href="postgresql-vacuum.html"><span>Next · PostgreSQL</span><strong>Vacuum, freezing and bloat</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/use.html">Explore Work with objects and access ↗</a><div class="current-group"><h2>In PostgreSQL</h2><ol class="chapter-list"><li><a  href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a aria-current="page" href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></div><div><span>MongoDB</span><a href="mongodb-administration.html">Objects, users and administration</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

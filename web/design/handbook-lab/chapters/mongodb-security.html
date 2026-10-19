@@ -1,0 +1,241 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Hardening, TLS and key rotation — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mongodb-security"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/change.html">Protect it and change it safely</a></nav>
+<header class="reader-head"><p class="reader-context">MongoDB <span aria-hidden="true">/</span> Protect it and change it safely</p><h1>Hardening, TLS and key rotation</h1></header>
+<div class="reader-controls"><a href="../tasks/change.html">← Protect it and change it safely</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MongoDB chapters"><ol class="chapter-list"><li><a  href="../chapters/mongodb-architecture.html">Architecture, editions and tools</a></li><li><a  href="../chapters/mongodb-storage.html">WiredTiger, transactions and consistency</a></li><li><a  href="../chapters/mongodb-modeling.html">Document modeling and BSON types</a></li><li><a  href="../chapters/mongodb-installation.html">Installation and first start</a></li><li><a  href="../chapters/mongodb-instances.html">Troubleshooting and isolated instances</a></li><li><a  href="../chapters/mongodb-administration.html">Objects, users and administration</a></li><li><a  href="../chapters/mongodb-performance.html">Auditing and performance</a></li><li><a  href="../chapters/mongodb-backup.html">Backup and recovery</a></li><li><a  href="../chapters/mongodb-replication.html">Replica sets and high availability</a></li><li><a  href="../chapters/mongodb-sharding.html">Sharding and resharding</a></li><li><a aria-current="page" href="../chapters/mongodb-security.html">Hardening, TLS and key rotation</a></li><li><a  href="../chapters/mongodb-upgrades.html">Upgrades and feature compatibility</a></li><li><a  href="../chapters/mongodb-migration.html">Relational-to-document migration</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#authorization">Separate the controls</a><a class="level-2" href="#firewall">Scope firewalld before remote binding</a><a class="level-2" href="#tls">Require TLS and validate identity</a><a class="level-2" href="#internal-auth">SCRAM, x.509 and internal authentication</a><a class="level-2" href="#rotation">Rotate without breaking trust</a><a class="level-2" href="#encryption">At-rest encryption and recovery keys</a><a class="level-2" href="#secrets">Secret, log and incident discipline</a><a class="level-2" href="#mongodb-security--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-hardening.html">TLS and encryption at rest</a><a href="mysql-upgrades.html">Upgrades and rollback planning</a><a href="mysql-migration.html">Migrating MySQL to Oracle</a><p class="product-label">PostgreSQL</p><a href="postgresql-hardening.html">Authentication, TLS and hardening</a><a href="postgresql-upgrades.html">Minor and major upgrades</a><a href="postgresql-migration.html">Migrating to PostgreSQL</a></nav></details></div>
+<article class="prose">
+<h2 id="authorization">Separate the controls</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Hardening, TLS and key rotation: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Control</th>
+<th>Question answered</th>
+<th>Baseline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Network ACL/firewall</td>
+<td>Which machines can reach the listener?</td>
+<td>Private interfaces; explicit application/member allowlist</td>
+</tr>
+<tr>
+<td>TLS identity</td>
+<td>Is this the expected peer, and is transport encrypted?</td>
+<td>Trusted CA, matching DNS SAN, <code>requireTLS</code></td>
+</tr>
+<tr>
+<td>Authentication</td>
+<td>Which user/member is connecting?</td>
+<td>SCRAM-SHA-256 users; keyfile membership in the lab</td>
+</tr>
+<tr>
+<td>Authorization</td>
+<td>Which actions on which resources?</td>
+<td>Explicit least-privilege roles</td>
+</tr>
+<tr>
+<td>Storage encryption</td>
+<td>What can a stolen disk/snapshot reveal?</td>
+<td>Host/volume encryption for Community</td>
+</tr>
+<tr>
+<td>Backup/secret controls</td>
+<td>Can recovery work without exposing credentials/data?</td>
+<td>Encrypted off-host copies, separated keys, restore drills</td>
+</tr>
+</tbody>
+</table></div>
+<p>Bind selection is not an access-control list; loopback is a bootstrap boundary, not sufficient isolation against other local users. Keep authorization enabled, patch the OS/server/clients, use a dedicated unprivileged service account, and keep its data/log/key directories unavailable to unrelated users.<a id="mongodb-security--cite-6-1" class="citation-ref" href="#mongodb-security--source-6" aria-label="Source 6">[6]</a><a id="mongodb-security--cite-9-1" class="citation-ref" href="#mongodb-security--source-9" aria-label="Source 9">[9]</a><a id="mongodb-security--cite-14-1" class="citation-ref" href="#mongodb-security--source-14" aria-label="Source 14">[14]</a></p>
+<p>Use <a href="mongodb-administration.html#users">custom collection roles</a>, not <code>root</code> for an application. User administrators can elevate privileges and need strong custody. Check permissions from fresh allowed and denied sessions; an authenticated <code>ping</code> is not a least-privilege test.<a id="mongodb-security--cite-18-1" class="citation-ref" href="#mongodb-security--source-18" aria-label="Source 18">[18]</a><a id="mongodb-security--cite-85-1" class="citation-ref" href="#mongodb-security--source-85" aria-label="Source 85">[85]</a></p>
+
+<h2 id="firewall">Scope firewalld before remote binding</h2>
+<p>RHEL 9 uses firewalld zones and separate runtime/permanent configuration. An allow rule is <strong>not a deny-all policy</strong>: existing broad ports/services, source-based zone selection, <code>trusted</code>/ACCEPT zones, forwarding or upstream ACLs can defeat the intended restriction. Inventory them first and keep an out-of-band administration path; do not move interfaces or remove SSH access blindly.<a id="mongodb-security--cite-109-1" class="citation-ref" href="#mongodb-security--source-109" aria-label="Source 109">[109]</a><a id="mongodb-security--cite-111-1" class="citation-ref" href="#mongodb-security--source-111" aria-label="Source 111">[111]</a></p>
+<pre tabindex="0" role="region" aria-label="Hardening, TLS and key rotation: code 1, horizontally scrollable"><code class="language-bash">sudo firewall-cmd --state
+sudo firewall-cmd --get-active-zones
+sudo firewall-cmd --list-all-zones
+sudo firewall-cmd --permanent --list-all-zones
+</code></pre>
+<p>The worked rule assumes the database interface is already in an approved restrictive <code>public</code> zone and <strong>192.0.2.40/32 is a documentation placeholder</strong> for one authorized client. Substitute the actual zone and host source address seen after NAT. Check that no existing rule admits everyone to 27017. Add/test one source-qualified rule at runtime, then persist that exact rule after acceptance; do not save unrelated runtime changes with <code>--runtime-to-permanent</code>.<a id="mongodb-security--cite-109-2" class="citation-ref" href="#mongodb-security--source-109" aria-label="Source 109">[109]</a></p>
+<pre tabindex="0" role="region" aria-label="Hardening, TLS and key rotation: code 2, horizontally scrollable"><code class="language-bash">sudo firewall-cmd --zone=public \
+  --add-rich-rule='rule family="ipv4" source address="192.0.2.40/32" port port="27017" protocol="tcp" accept'
+sudo firewall-cmd --zone=public \
+  --query-rich-rule='rule family="ipv4" source address="192.0.2.40/32" port port="27017" protocol="tcp" accept'
+# Test a NEW TLS/authenticated connection from the allowed client and
+# a NEW connection from an unapproved host; the latter must not reach the port.
+sudo firewall-cmd --permanent --zone=public \
+  --add-rich-rule='rule family="ipv4" source address="192.0.2.40/32" port port="27017" protocol="tcp" accept'
+sudo firewall-cmd --check-config
+sudo firewall-cmd --permanent --zone=public --list-rich-rules
+sudo firewall-cmd --zone=public --list-rich-rules
+</code></pre>
+<p>Rollback removes <strong>that same exact rich rule</strong> with <code>--remove-rich-rule</code> in runtime and permanent configuration, followed by readback. A controlled <code>firewall-cmd --reload</code> later proves persistence but replaces runtime-only rules with permanent state; audit those differences before reloading. Test fresh connections after reload/reboot, not an already established session.<a id="mongodb-security--cite-109-3" class="citation-ref" href="#mongodb-security--source-109" aria-label="Source 109">[109]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Hardening, TLS and key rotation: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Destination</th>
+<th>Approved sources only</th>
+<th>TCP</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Standalone/replica member</td>
+<td>Actual application/backup/monitor hosts; every peer member for a replica set</td>
+<td>27017</td>
+</tr>
+<tr>
+<td>Router</td>
+<td>Approved application/admin/backup/monitor hosts</td>
+<td>27017</td>
+</tr>
+<tr>
+<td>Shard members</td>
+<td>Peer/internal cluster hosts and authorized maintenance/backup hosts, not general application clients</td>
+<td>27018</td>
+</tr>
+<tr>
+<td>Config members</td>
+<td>Peer/internal cluster hosts (including shards/routers) and approved maintenance hosts</td>
+<td>27019</td>
+</tr>
+<tr>
+<td>Local restore instance</td>
+<td>None remotely; retain loopback bind, no inbound opening</td>
+<td>27018 locally</td>
+</tr>
+</tbody>
+</table></div>
+<p>Build the complete private cluster communication matrix: all members need the documented inter-member connections, not just app-to-primary access. Repeat scoped rules for the actual member addresses/ports on each destination. If IPv6 is enabled/bound, implement equivalent <code>family="ipv6"</code> rules with approved <code>/128</code> or reviewed CIDRs; IPv4 rules do not constrain IPv6. Review egress policy, DNS/CA reachability and upstream firewalls separately. <code>mongod_port_t</code> labels permit daemon use of ports; they do not grant remote hosts access.<a id="mongodb-security--cite-103-1" class="citation-ref" href="#mongodb-security--source-103" aria-label="Source 103">[103]</a><a id="mongodb-security--cite-109-4" class="citation-ref" href="#mongodb-security--source-109" aria-label="Source 109">[109]</a></p>
+
+<h2 id="tls">Require TLS and validate identity</h2>
+<p><strong>Configuration mutation and restart.</strong> Before binding remotely, obtain certificates from the approved CA. Each server PEM contains its own private key, certificate and required intermediate chain. SANs must include the exact DNS names clients/members use; include <code>localhost</code> only where the local TLS bootstrap requires it. Check validity, chain, key match and permitted usage before deployment. For inter-member TLS the node certificate must support its server/client roles.<a id="mongodb-security--cite-14-2" class="citation-ref" href="#mongodb-security--source-14" aria-label="Source 14">[14]</a><a id="mongodb-security--cite-58-1" class="citation-ref" href="#mongodb-security--source-58" aria-label="Source 58">[58]</a></p>
+<p>Paths used consistently in these notes:</p>
+<pre tabindex="0" role="region" aria-label="Hardening, TLS and key rotation: code 3, horizontally scrollable"><code class="language-text">/etc/mongodb/tls/ca.pem      trust bundle, no private key
+/etc/mongodb/tls/server.pem  this host's certificate + private key
+/etc/mongodb/rs0.key         shared membership secret (replica lab)
+/etc/mongodb/cluster.key     shared membership secret (sharding lab)
+</code></pre>
+<p>The service must read them, but other users must not read private material. Keep root ownership for policy/config where possible, with controlled group/read access for <code>mongod</code>. Example installation of already approved artifacts on the target host:[13]<a id="mongodb-security--cite-14-3" class="citation-ref" href="#mongodb-security--source-14" aria-label="Source 14">[14]</a></p>
+<pre tabindex="0" role="region" aria-label="Hardening, TLS and key rotation: code 4, horizontally scrollable"><code class="language-bash">sudo install -d -o root -g mongod -m 750 /etc/mongodb
+sudo install -d -o root -g mongod -m 750 /etc/mongodb/tls
+sudo install -o root -g mongod -m 640 approved-ca.pem /etc/mongodb/tls/ca.pem
+sudo install -o mongod -g mongod -m 600 approved-node.pem /etc/mongodb/tls/server.pem
+sudo restorecon -Rv /etc/mongodb
+sudo ls -ldZ /etc/mongodb /etc/mongodb/tls
+sudo ls -lZ /etc/mongodb/tls
+sudo -u mongod test -r /etc/mongodb/tls/server.pem
+</code></pre>
+<p>Use the host policy’s expected <code>/etc</code>/certificate contexts (<code>matchpathcon -V</code>), not home-directory labels carried in by a move. The pinned mongod policy reads generic <code>/etc</code> files and certificate types; DAC still restricts the private key. Do not label secrets as writable database files to force access. <code>test -r</code> checks DAC only: verify actual mongod startup/new TLS connections in <code>mongod_t</code> and review AVCs under enforcing mode.<a id="mongodb-security--cite-108-1" class="citation-ref" href="#mongodb-security--source-108" aria-label="Source 108">[108]</a><a id="mongodb-security--cite-110-1" class="citation-ref" href="#mongodb-security--source-110" aria-label="Source 110">[110]</a></p>
+<p>Merge into existing <code>/etc/mongod.conf</code>; this example exposes only the chosen private interface plus loopback and allows SCRAM clients without client certificates:[6]<a id="mongodb-security--cite-14-4" class="citation-ref" href="#mongodb-security--source-14" aria-label="Source 14">[14]</a></p>
+<pre tabindex="0" role="region" aria-label="Hardening, TLS and key rotation: code 5, horizontally scrollable"><code class="language-yaml">net:
+  port: 27017
+  bindIp: 127.0.0.1,db1.example.net
+  tls:
+    mode: requireTLS
+    certificateKeyFile: /etc/mongodb/tls/server.pem
+    CAFile: /etc/mongodb/tls/ca.pem
+    allowConnectionsWithoutCertificates: true
+    disabledProtocols: TLS1_0,TLS1_1
+security:
+  authorization: enabled
+</code></pre>
+<p>Retain any existing keyfile and replica settings; replacing the whole <code>security</code> block and losing <code>keyFile</code> breaks membership authentication. Configure firewall rules before remote start. Restart a standalone in a maintenance window; for existing TLS replica sets use rolling member maintenance and keep quorum. Migrating a live plaintext set requires the documented staged TLS modes and client transition, not switching one member blindly to <code>requireTLS</code>.<a id="mongodb-security--cite-14-5" class="citation-ref" href="#mongodb-security--source-14" aria-label="Source 14">[14]</a></p>
+<pre tabindex="0" role="region" aria-label="Hardening, TLS and key rotation: code 6, horizontally scrollable"><code class="language-bash">mongosh --host db1.example.net --port 27017 --username operator \
+  --authenticationDatabase admin --tls --tlsCAFile=/etc/mongodb/tls/ca.pem
+</code></pre>
+<p>Acceptance: trusted/hostname-matched connection and protected operation succeed; plaintext, wrong CA, wrong hostname and unauthorized identity fail as expected. Inspect logs without logging secrets. Do not use <code>tlsInsecure</code>, invalid-certificate or invalid-hostname flags to make these negative tests pass. If startup fails, correct certificate permissions/chain/config or restore the last <strong>secure</strong> known-good config while keeping exposure restricted.<a id="mongodb-security--cite-14-6" class="citation-ref" href="#mongodb-security--source-14" aria-label="Source 14">[14]</a></p>
+
+<h2 id="internal-auth">SCRAM, x.509 and internal authentication</h2>
+<p>SCRAM-SHA-256 authenticates username/password accounts in their authentication database. Use <code>passwordPrompt()</code>/client prompts; never a reusable password literal in a shell command. x.509 client authentication instead maps a certificate subject to an external user in <code>$external</code>; trust in the CA alone does not grant the client’s database role.<a id="mongodb-security--cite-18-2" class="citation-ref" href="#mongodb-security--source-18" aria-label="Source 18">[18]</a><a id="mongodb-security--cite-58-2" class="citation-ref" href="#mongodb-security--source-58" aria-label="Source 58">[58]</a></p>
+<p>For an approved client certificate, copy its exact RFC2253 subject from the certificate inspection result—do not guess or normalize its distinguished name. Create the corresponding external user as user administrator:[58]</p>
+<pre tabindex="0" role="region" aria-label="Hardening, TLS and key rotation: code 7, horizontally scrollable"><code class="language-javascript">// Replace the marked subject with the EXACT approved certificate subject.
+const subject = "&lt;EXACT_RFC2253_CLIENT_CERTIFICATE_SUBJECT&gt;";
+db.getSiblingDB("$external").createUser({
+  user: subject,
+  roles: [{role: "read", db: "shop"}]
+});
+</code></pre>
+<pre tabindex="0" role="region" aria-label="Hardening, TLS and key rotation: code 8, horizontally scrollable"><code class="language-bash">mongosh --host db1.example.net --port 27017 --tls \
+  --tlsCAFile=/etc/mongodb/tls/ca.pem --tlsCertificateKeyFile=/secure/client.pem \
+  --authenticationMechanism=MONGODB-X509 --authenticationDatabase='$external'
+</code></pre>
+<p>Authorize only the intended subject/role; test another valid but unregistered client certificate is denied protected access. Do not reuse cluster-member certificates as client identities.<a id="mongodb-security--cite-58-3" class="citation-ref" href="#mongodb-security--source-58" aria-label="Source 58">[58]</a></p>
+<p>Internal authentication is separate from application authentication. Keyfiles provide shared-secret membership and enable access control; all communicating replica/sharded members need compatible shared keys. File permissions must deny group/world access on Unix. Keyfiles do not encrypt transport; pair them with TLS.<a id="mongodb-security--cite-13-1" class="citation-ref" href="#mongodb-security--source-13" aria-label="Source 13">[13]</a></p>
+<p>For production x.509 membership, use the official member-certificate requirements: trusted chain, required matching organization-related attributes or explicitly configured membership attributes, distinct client-versus-member subjects, and appropriate extended key usage. Configure <code>security.clusterAuthMode: x509</code> and <code>net.tls.clusterFile</code>/CA options where separate member certificates are used. A conversion from keyfile is a staged rolling procedure (<code>sendKeyFile</code>/<code>sendX509</code> transitions as documented), not a one-node instant switch. Plan it on a restored staging topology first.<a id="mongodb-security--cite-88-1" class="citation-ref" href="#mongodb-security--source-88" aria-label="Source 88">[88]</a><a id="mongodb-security--cite-91-1" class="citation-ref" href="#mongodb-security--source-91" aria-label="Source 91">[91]</a></p>
+
+<h2 id="rotation">Rotate without breaking trust</h2>
+<p>TLS rotation and membership-key rotation are different operations. For TLS, retain trusted CA overlap across servers and clients, distribute valid new PEM/CA files at the <strong>same paths</strong>, preserve ownership/modes <strong>and restore/check expected SELinux contexts after replacement</strong>, then run on each process with the <code>rotateCertificates</code> privilege:[52]</p>
+<pre tabindex="0" role="region" aria-label="Hardening, TLS and key rotation: code 9, horizontally scrollable"><code class="language-javascript">db.getSiblingDB("admin").runCommand({
+  rotateCertificates: 1, message: "scheduled certificate renewal"
+});
+</code></pre>
+<p>The command reloads applicable certificate/CA/CRL files. If the private-key file is encrypted, its password must remain the configured password for online rotation; changing that secret requires a different reviewed procedure. Do not infer success for all members from one command. Test <strong>new</strong> client/member connections after each rotation; existing connections can hide a failed trust change. Keep the old valid files for rollback until acceptance and then remove obsolete trust after every dependent client/member has moved.<a id="mongodb-security--cite-52-1" class="citation-ref" href="#mongodb-security--source-52" aria-label="Source 52">[52]</a></p>
+<p>For shared membership key rotation, use the documented keyfile multi-key rolling process: distribute a file accepting old/new keys to every member, roll while retaining majority, transition the sending/accepted key set, then remove the old key only after all members have converged. Replacing the shared key on one member with a disjoint secret partitions it. Certificate renewal does not rotate this secret. On replica sets the documented sequence is two rolling passes: first every keyfile accepts old and new; then every keyfile contains only the new key, with secondaries first and primary stepdown in each pass.<a id="mongodb-security--cite-65-1" class="citation-ref" href="#mongodb-security--source-65" aria-label="Source 65">[65]</a><a id="mongodb-security--cite-66-1" class="citation-ref" href="#mongodb-security--source-66" aria-label="Source 66">[66]</a></p>
+
+<h2 id="encryption">At-rest encryption and recovery keys</h2>
+<p>MongoDB Enterprise’s encrypted storage engine and its key-management options are not available as a Community YAML switch. Do not publish <code>security.enableEncryption</code>/KMIP commands as Community instructions. For this baseline, provision OS/volume encryption under the platform’s supported process and verify mount/unlock/reboot/recovery behavior before placing the dbPath there.<a id="mongodb-security--cite-11-1" class="citation-ref" href="#mongodb-security--source-11" aria-label="Source 11">[11]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Hardening, TLS and key rotation: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Boundary</th>
+<th>Still needs protection</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Encrypted disk</td>
+<td>Running privileged processes can read data; logs/temp/swap may live elsewhere</td>
+</tr>
+<tr>
+<td>TLS</td>
+<td>Plaintext on client/server endpoints and exported files</td>
+</tr>
+<tr>
+<td>Backup encryption</td>
+<td>Keys, metadata, credentials, restore worker and offsite deletion authority</td>
+</tr>
+<tr>
+<td>Client-side field encryption</td>
+<td>Driver/library/edition feature compatibility, key vault and application access patterns</td>
+</tr>
+</tbody>
+</table></div>
+<p>Do not assume every client-side encryption feature, automatic encryption workflow or Queryable Encryption backup tool is available in every edition. The pinned Tools manuals explicitly exclude <code>mongodump</code>/<code>mongorestore</code> use for Queryable Encryption collections; those require a separately supported backup design.<a id="mongodb-security--cite-2-1" class="citation-ref" href="#mongodb-security--source-2" aria-label="Source 2">[2]</a><a id="mongodb-security--cite-3-1" class="citation-ref" href="#mongodb-security--source-3" aria-label="Source 3">[3]</a><a id="mongodb-security--cite-11-2" class="citation-ref" href="#mongodb-security--source-11" aria-label="Source 11">[11]</a></p>
+<p>Escrow recovery keys separately from the only encrypted backup. Record key identifiers and rotation history, not secret bytes in an evidence report. Test restoring an older retained backup after rotation; deleting its last required key makes that backup unrecoverable.</p>
+
+<h2 id="secrets">Secret, log and incident discipline</h2>
+<p>Use interactive prompts for manual operations. For automated Tools jobs, a protected <code>--config</code> file can carry the documented sensitive fields; use restrictive permissions and a secret manager/rotation policy. Environment variables and command-line URIs can leak through process/environment dumps, shell history, CI logs and copied diagnostics.<a id="mongodb-security--cite-2-2" class="citation-ref" href="#mongodb-security--source-2" aria-label="Source 2">[2]</a><a id="mongodb-security--cite-3-2" class="citation-ref" href="#mongodb-security--source-3" aria-label="Source 3">[3]</a></p>
+<p>Never store keys/passwords in notes, source control or fixture JSON. Restrict profiler data, shell history/output and diagnostic logs, which can contain query/customer data. FTDC does <strong>not</strong> sample end-user collection/index data or include query contents; it does include hostnames, OS information and configuration metadata, so inspect its privacy boundary before sharing it.<a id="mongodb-security--cite-96-1" class="citation-ref" href="#mongodb-security--source-96" aria-label="Source 96">[96]</a> Clear exposed artifacts through an incident process and rotate compromised secrets; simply deleting one history entry does not revoke a leaked credential.<a id="mongodb-security--cite-23-1" class="citation-ref" href="#mongodb-security--source-23" aria-label="Source 23">[23]</a><a id="mongodb-security--cite-43-1" class="citation-ref" href="#mongodb-security--source-43" aria-label="Source 43">[43]</a></p>
+<p>Lost administrative access is a controlled recovery incident. First use an independently secured administrator or restored access plan. Any exceptional auth-disabled recovery must be isolated at the OS/network level and follow a topology-specific official procedure; this manual intentionally provides no public-listener bypass recipe. Validate allowed/denied operations again after recovery.<a id="mongodb-security--cite-7-1" class="citation-ref" href="#mongodb-security--source-7" aria-label="Source 7">[7]</a><a id="mongodb-security--cite-9-2" class="citation-ref" href="#mongodb-security--source-9" aria-label="Source 9">[9]</a></p>
+
+<h2 id="mongodb-security--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mongodb-security--source-2">[2] <a href="https://www.mongodb.com/docs/database-tools/mongodump">https://www.mongodb.com/docs/database-tools/mongodump</a> — mongodump - Database Tools - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-2-1" aria-label="Return to citation 2, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-security--cite-2-2" aria-label="Return to citation 2, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-security--source-3">[3] <a href="https://www.mongodb.com/docs/database-tools/mongorestore">https://www.mongodb.com/docs/database-tools/mongorestore</a> — mongorestore - Database Tools - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-3-1" aria-label="Return to citation 3, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-security--cite-3-2" aria-label="Return to citation 3, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-security--source-6">[6] <a href="https://www.mongodb.com/docs/v8.0/reference/configuration-options">https://www.mongodb.com/docs/v8.0/reference/configuration-options</a> — Self-Managed Configuration File Options - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-6-1" aria-label="Return to citation 6, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-7">[7] <a href="https://www.mongodb.com/docs/v8.0/core/localhost-exception">https://www.mongodb.com/docs/v8.0/core/localhost-exception</a> — Localhost Exception in Self-Managed Deployments - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-7-1" aria-label="Return to citation 7, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-9">[9] <a href="https://www.mongodb.com/docs/v8.0/tutorial/enable-authentication">https://www.mongodb.com/docs/v8.0/tutorial/enable-authentication</a> — Enable Access Control on Self-Managed Deployments - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-9-1" aria-label="Return to citation 9, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-security--cite-9-2" aria-label="Return to citation 9, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-security--source-11">[11] <a href="https://www.mongodb.com/docs/v8.0/core/security-encryption-at-rest">https://www.mongodb.com/docs/v8.0/core/security-encryption-at-rest</a> — Encryption at Rest - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-11-1" aria-label="Return to citation 11, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-security--cite-11-2" aria-label="Return to citation 11, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-security--source-13">[13] <a href="https://www.mongodb.com/docs/v8.0/tutorial/deploy-replica-set-with-keyfile-access-control">https://www.mongodb.com/docs/v8.0/tutorial/deploy-replica-set-with-keyfile-access-control</a> — Deploy Self-Managed Replica Set With Keyfile Authentication - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-13-1" aria-label="Return to citation 13, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-14">[14] <a href="https://www.mongodb.com/docs/v8.0/tutorial/configure-ssl">https://www.mongodb.com/docs/v8.0/tutorial/configure-ssl</a> — Configure MongoDB Instances for TLS/SSL Encryption - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-14-1" aria-label="Return to citation 14, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-security--cite-14-2" aria-label="Return to citation 14, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-security--cite-14-3" aria-label="Return to citation 14, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-security--cite-14-4" aria-label="Return to citation 14, occurrence 4">↩4</a><a class="citation-return" href="#mongodb-security--cite-14-5" aria-label="Return to citation 14, occurrence 5">↩5</a><a class="citation-return" href="#mongodb-security--cite-14-6" aria-label="Return to citation 14, occurrence 6">↩6</a></span></div><div class="source-entry" id="mongodb-security--source-18">[18] <a href="https://www.mongodb.com/docs/v8.0/tutorial/manage-users-and-roles">https://www.mongodb.com/docs/v8.0/tutorial/manage-users-and-roles</a> — Manage Users and Roles on Self-Managed Deployments - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-18-1" aria-label="Return to citation 18, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-security--cite-18-2" aria-label="Return to citation 18, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-security--source-23">[23] <a href="https://www.mongodb.com/docs/v8.0/tutorial/manage-the-database-profiler">https://www.mongodb.com/docs/v8.0/tutorial/manage-the-database-profiler</a> — Database Profiler - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-23-1" aria-label="Return to citation 23, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-43">[43] <a href="https://www.mongodb.com/docs/v8.0/tutorial/rotate-log-files">https://www.mongodb.com/docs/v8.0/tutorial/rotate-log-files</a> — Rotate Log Files - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-43-1" aria-label="Return to citation 43, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-52">[52] <a href="https://www.mongodb.com/docs/v8.0/reference/command/rotateCertificates">https://www.mongodb.com/docs/v8.0/reference/command/rotateCertificates</a> — rotateCertificates (database command) - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-52-1" aria-label="Return to citation 52, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-58">[58] <a href="https://www.mongodb.com/docs/v8.0/core/security-x.509">https://www.mongodb.com/docs/v8.0/core/security-x.509</a> — Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-58-1" aria-label="Return to citation 58, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-security--cite-58-2" aria-label="Return to citation 58, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-security--cite-58-3" aria-label="Return to citation 58, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-security--source-65">[65] <a href="https://www.mongodb.com/docs/v8.0/core/security-internal-authentication">https://www.mongodb.com/docs/v8.0/core/security-internal-authentication</a> — Self-Managed Internal/Membership Authentication - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-65-1" aria-label="Return to citation 65, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-66">[66] <a href="https://www.mongodb.com/docs/v8.0/tutorial/rotate-key-replica-set">https://www.mongodb.com/docs/v8.0/tutorial/rotate-key-replica-set</a> — Rotate Keys for Self-Managed Replica Sets - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-66-1" aria-label="Return to citation 66, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-85">[85] <a href="https://www.mongodb.com/docs/v8.0/reference/built-in-roles.md">https://www.mongodb.com/docs/v8.0/reference/built-in-roles.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-85-1" aria-label="Return to citation 85, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-88">[88] <a href="https://www.mongodb.com/docs/v8.0/tutorial/upgrade-keyfile-to-x509.md">https://www.mongodb.com/docs/v8.0/tutorial/upgrade-keyfile-to-x509.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-88-1" aria-label="Return to citation 88, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-91">[91] <a href="https://www.mongodb.com/docs/v8.0/core/security-internal-authentication.md">https://www.mongodb.com/docs/v8.0/core/security-internal-authentication.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-91-1" aria-label="Return to citation 91, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-96">[96] <a href="https://www.mongodb.com/docs/v8.0/administration/full-time-diagnostic-data-capture.md">https://www.mongodb.com/docs/v8.0/administration/full-time-diagnostic-data-capture.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-96-1" aria-label="Return to citation 96, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-103">[103] <a href="https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/README.md">https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/README.md</a> — Official MongoDB SELinux policy scope and assumptions
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-103-1" aria-label="Return to citation 103, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-108">[108] <a href="https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/selinux/mongodb.te">https://raw.githubusercontent.com/mongodb/mongodb-selinux/18181652362a46fd4511a56f20c4055712deb252/selinux/mongodb.te</a> — MongoDB SELinux pinned type enforcement
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-108-1" aria-label="Return to citation 108, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-109">[109] <a href="https://firewalld.org/documentation/man-pages/firewall-cmd.html">https://firewalld.org/documentation/man-pages/firewall-cmd.html</a> — firewall-cmd runtime and permanent configuration
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-109-1" aria-label="Return to citation 109, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-security--cite-109-2" aria-label="Return to citation 109, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-security--cite-109-3" aria-label="Return to citation 109, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-security--cite-109-4" aria-label="Return to citation 109, occurrence 4">↩4</a></span></div><div class="source-entry" id="mongodb-security--source-110">[110] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux</a> — RHEL 9 SELinux diagnostics and persistent contexts
+<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-110-1" aria-label="Return to citation 110, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-security--source-111">[111] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_firewalls_and_packet_filters/using-and-configuring-firewalld_firewall-packet-filters">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_firewalls_and_packet_filters/using-and-configuring-firewalld_firewall-packet-filters</a> — RHEL 9 firewalld zones and persistence<span class="citation-returns"><a class="citation-return" href="#mongodb-security--cite-111-1" aria-label="Return to citation 111, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mongodb-sharding.html"><span>Previous · MongoDB</span><strong>Sharding and resharding</strong></a></div><div><a rel="next" href="mongodb-upgrades.html"><span>Next · MongoDB</span><strong>Upgrades and feature compatibility</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/change.html">Explore Protect it and change it safely ↗</a><div class="current-group"><h2>In MongoDB</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mongodb-security.html">Hardening, TLS and key rotation</a></li><li><a  href="../chapters/mongodb-upgrades.html">Upgrades and feature compatibility</a></li><li><a  href="../chapters/mongodb-migration.html">Relational-to-document migration</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-hardening.html">TLS and encryption at rest</a><a href="mysql-upgrades.html">Upgrades and rollback planning</a><a href="mysql-migration.html">Migrating MySQL to Oracle</a></div><div><span>PostgreSQL</span><a href="postgresql-hardening.html">Authentication, TLS and hardening</a><a href="postgresql-upgrades.html">Minor and major upgrades</a><a href="postgresql-migration.html">Migrating to PostgreSQL</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

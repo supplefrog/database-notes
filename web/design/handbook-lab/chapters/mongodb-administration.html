@@ -1,0 +1,250 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Objects, users and administration — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mongodb-administration"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/use.html">Work with objects and access</a></nav>
+<header class="reader-head"><p class="reader-context">MongoDB <span aria-hidden="true">/</span> Work with objects and access</p><h1>Objects, users and administration</h1></header>
+<div class="reader-controls"><a href="../tasks/use.html">← Work with objects and access</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MongoDB chapters"><ol class="chapter-list"><li><a  href="../chapters/mongodb-architecture.html">Architecture, editions and tools</a></li><li><a  href="../chapters/mongodb-storage.html">WiredTiger, transactions and consistency</a></li><li><a  href="../chapters/mongodb-modeling.html">Document modeling and BSON types</a></li><li><a  href="../chapters/mongodb-installation.html">Installation and first start</a></li><li><a  href="../chapters/mongodb-instances.html">Troubleshooting and isolated instances</a></li><li><a aria-current="page" href="../chapters/mongodb-administration.html">Objects, users and administration</a></li><li><a  href="../chapters/mongodb-performance.html">Auditing and performance</a></li><li><a  href="../chapters/mongodb-backup.html">Backup and recovery</a></li><li><a  href="../chapters/mongodb-replication.html">Replica sets and high availability</a></li><li><a  href="../chapters/mongodb-sharding.html">Sharding and resharding</a></li><li><a  href="../chapters/mongodb-security.html">Hardening, TLS and key rotation</a></li><li><a  href="../chapters/mongodb-upgrades.html">Upgrades and feature compatibility</a></li><li><a  href="../chapters/mongodb-migration.html">Relational-to-document migration</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#inspection">Inspect without changing data</a><a class="level-2" href="#fixture">Create a BSON-aware fixture</a><a class="level-2" href="#objects">CRUD, views and schema changes</a><a class="level-2" href="#users">Users, roles and authentication databases</a><a class="level-2" href="#operations">Operations and sessions</a><a class="level-2" href="#settings">Runtime settings versus startup configuration</a><a class="level-2" href="#mongodb-administration--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-accounts-settings.html">Settings, accounts, roles and privileges</a><p class="product-label">PostgreSQL</p><a href="postgresql-administration.html">Objects, roles and administration</a><a href="postgresql-joins.html">Joins: keep the rows you mean</a></nav></details></div>
+<article class="prose">
+<h2 id="inspection">Inspect without changing data</h2>
+<p>Use the authenticated <code>operator</code> from <a href="mongodb-installation.html#bootstrap">bootstrap</a>. A database becomes durable when it contains data/objects; <code>use shop</code> only changes shell context. A collection is a set of BSON documents, not a SQL table with implicit column types or foreign keys.<a id="mongodb-administration--cite-35-1" class="citation-ref" href="#mongodb-administration--source-35" aria-label="Source 35">[35]</a><a id="mongodb-administration--cite-37-1" class="citation-ref" href="#mongodb-administration--source-37" aria-label="Source 37">[37]</a></p>
+<pre tabindex="0" role="region" aria-label="Objects, users and administration: code 1, horizontally scrollable"><code class="language-javascript">use shop
+db.getName();
+db.getCollectionInfos();
+db.orders.getIndexes();
+db.orders.find({}, {_id: 1, tenantId: 1, status: 1}).limit(5);
+db.orders.countDocuments({tenantId: "t1"});
+db.runCommand({collStats: "orders", scale: 1024});
+</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Objects, users and administration: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Command</th>
+<th>Interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Database names</td>
+<td><code>db.adminCommand({listDatabases: 1, nameOnly: true})</code></td>
+<td>Results/permission depend on account</td>
+</tr>
+<tr>
+<td>Collection definition</td>
+<td><code>db.getCollectionInfos({name: "orders"})</code></td>
+<td>Type, validator, collation and other options</td>
+</tr>
+<tr>
+<td>Index definitions</td>
+<td><code>db.orders.getIndexes()</code></td>
+<td>Key order, uniqueness, partial/TTL/collation options</td>
+</tr>
+<tr>
+<td>View definition</td>
+<td><code>db.getCollectionInfos({type: "view"})</code></td>
+<td>Stored pipeline, not materialized data</td>
+</tr>
+<tr>
+<td>Exact filtered count</td>
+<td><code>countDocuments(filter)</code></td>
+<td>Executes work; bound expensive production use</td>
+</tr>
+<tr>
+<td>Fast estimate</td>
+<td><code>estimatedDocumentCount()</code></td>
+<td>Metadata estimate, not migration acceptance</td>
+</tr>
+</tbody>
+</table></div>
+<p>To capture a bounded query, store a reviewed script <code>inspect-orders.js</code> containing the following and run it via <code>mongosh --file</code>. Shell output is not a backup; protect the file because it may contain customer data. <code>relaxed: false</code> requests canonical Extended JSON so BSON types remain represented.<a id="mongodb-administration--cite-94-1" class="citation-ref" href="#mongodb-administration--source-94" aria-label="Source 94">[94]</a></p>
+<pre tabindex="0" role="region" aria-label="Objects, users and administration: code 2, horizontally scrollable"><code class="language-javascript">const rows = db.getSiblingDB("shop").orders.find(
+  {tenantId: "t1"}, {_id: 1, total: 1, status: 1}
+).sort({_id: 1}).limit(20).toArray();
+print(EJSON.stringify(rows, null, 2, {relaxed: false}));
+</code></pre>
+<pre tabindex="0" role="region" aria-label="Objects, users and administration: code 3, horizontally scrollable"><code class="language-bash">umask 077
+mongosh --quiet --host 127.0.0.1 --port 27017 --username operator \
+  --authenticationDatabase admin --file inspect-orders.js &gt; orders-inspection.json
+</code></pre>
+<p>Use an interactive credential prompt; do not redirect a secret into a URI or script. This loopback command is for the initial authenticated standalone. After enabling <code>requireTLS</code>, use the approved CA and certificate-matching hostname as in <a href="mongodb-security.html#tls">TLS connections</a>; for replicas/routers use their topology URI. Do not relax transport settings to keep an old loopback example working.</p>
+
+<h2 id="fixture">Create a BSON-aware fixture</h2>
+<p><strong>Data mutation in a disposable <code>shop</code> database.</strong> Stop if <code>orders</code> already exists: inspect it rather than dropping it. The examples share these three orders. Stable string IDs make idempotency and tenant routing explicit; prices use Decimal128, quantities use BSON int, and dates are UTC BSON dates.<a id="mongodb-administration--cite-35-2" class="citation-ref" href="#mongodb-administration--source-35" aria-label="Source 35">[35]</a><a id="mongodb-administration--cite-37-2" class="citation-ref" href="#mongodb-administration--source-37" aria-label="Source 37">[37]</a><a id="mongodb-administration--cite-54-1" class="citation-ref" href="#mongodb-administration--source-54" aria-label="Source 54">[54]</a></p>
+<pre tabindex="0" role="region" aria-label="Objects, users and administration: code 4, horizontally scrollable"><code class="language-javascript">const shop = db.getSiblingDB("shop");
+if (shop.getCollectionInfos({name: "orders"}).length) {
+  throw new Error("orders already exists: inspect it; do not reset it");
+}
+shop.createCollection("orders", {
+  validator: {$jsonSchema: {
+    bsonType: "object",
+    required: ["_id", "tenantId", "customerId", "placedAt", "status", "total", "lines"],
+    properties: {
+      _id: {bsonType: "string"},
+      tenantId: {bsonType: "string"},
+      customerId: {bsonType: "string"},
+      placedAt: {bsonType: "date"},
+      status: {enum: ["new", "paid", "cancelled"]},
+      total: {bsonType: "decimal", minimum: Decimal128("0")},
+      lines: {bsonType: "array", minItems: 1, maxItems: 100,
+        items: {bsonType: "object", required: ["sku", "qty", "unitPrice"],
+          properties: {
+            sku: {bsonType: "string"},
+            qty: {bsonType: "int", minimum: 1},
+            unitPrice: {bsonType: "decimal", minimum: Decimal128("0")}
+          }}}
+    }
+  }},
+  validationLevel: "strict", validationAction: "error"
+});
+shop.orders.insertMany([
+  {_id: "o1001", tenantId: "t1", customerId: "c1",
+   placedAt: ISODate("2026-09-01T09:00:00Z"), status: "new", total: Decimal128("5.00"),
+   lines: [{sku: "pencil", qty: Int32(2), unitPrice: Decimal128("2.50")}]},
+  {_id: "o1002", tenantId: "t1", customerId: "c2",
+   placedAt: ISODate("2026-09-02T09:00:00Z"), status: "paid", total: Decimal128("9.00"),
+   lines: [{sku: "notebook", qty: Int32(1), unitPrice: Decimal128("9.00")}]},
+  {_id: "o1003", tenantId: "t2", customerId: "c3",
+   placedAt: ISODate("2026-09-03T09:00:00Z"), status: "new", total: Decimal128("2.50"),
+   lines: [{sku: "pencil", qty: Int32(1), unitPrice: Decimal128("2.50")}]}
+]);
+shop.orders.createIndex({tenantId: 1, placedAt: -1}, {name: "tenant_recent"});
+shop.orders.countDocuments({});
+shop.orders.find({_id: "o1001"}).toArray();
+</code></pre>
+<p>Acceptance: the three IDs exist once, values retain their BSON types, and <code>tenant_recent</code> exists. A document with <code>total: "5.00"</code> should be rejected by validation; do not weaken the validator to import a string accidentally. Duplicate-key errors on rerun are useful evidence that the stable IDs already exist, not a reason to clear the database. If an ordered insert fails midway, inspect which IDs landed before retrying.<a id="mongodb-administration--cite-37-3" class="citation-ref" href="#mongodb-administration--source-37" aria-label="Source 37">[37]</a><a id="mongodb-administration--cite-54-2" class="citation-ref" href="#mongodb-administration--source-54" aria-label="Source 54">[54]</a></p>
+
+<h2 id="objects">CRUD, views and schema changes</h2>
+<pre tabindex="0" role="region" aria-label="Objects, users and administration: code 5, horizontally scrollable"><code class="language-javascript">const shop = db.getSiblingDB("shop");
+shop.orders.find({tenantId: "t1", status: "new"}, {_id: 1, total: 1})
+  .sort({placedAt: -1}).limit(10);
+shop.orders.updateOne(
+  {_id: "o1001", tenantId: "t1", status: "new"},
+  {$set: {status: "paid"}}
+);
+shop.createView("paid_orders", "orders", [
+  {$match: {status: "paid"}},
+  {$project: {_id: 1, tenantId: 1, total: 1}}
+]);
+shop.paid_orders.find().limit(10);
+</code></pre>
+<p><code>updateOne</code> changes only specified fields with <code>$set</code>; <code>replaceOne</code> replaces the document body and can remove omitted fields. Include the tenant and old status to avoid an unintended transition. Ordinary views are read-only pipelines over source data; their underlying indexes determine performance.<a id="mongodb-administration--cite-80-1" class="citation-ref" href="#mongodb-administration--source-80" aria-label="Source 80">[80]</a></p>
+<p>Use <code>collMod</code> for validator changes. Inspect and save the entire current validator first; supplying a new validator replaces it, not merges it. For a staged rollout, make old data conform, enable strict/error validation, and test rejected and accepted writes. <code>validationAction: "warn"</code> accepts invalid data and is not a final integrity control.<a id="mongodb-administration--cite-37-4" class="citation-ref" href="#mongodb-administration--source-37" aria-label="Source 37">[37]</a><a id="mongodb-administration--cite-55-1" class="citation-ref" href="#mongodb-administration--source-55" aria-label="Source 55">[55]</a></p>
+<pre tabindex="0" role="region" aria-label="Objects, users and administration: code 6, horizontally scrollable"><code class="language-javascript">shop.getCollectionInfos({name: "orders"});
+shop.runCommand({collMod: "orders", validationLevel: "strict", validationAction: "error"});
+</code></pre>
+<p>MongoDB does not supply SQL foreign keys, SQL stored procedures/triggers, sequences or per-session temporary tables as interchangeable features. Enforce cross-document references and sequencing in application design; change streams are asynchronous notifications, not a synchronous constraint trigger. Do not use server-side JavaScript as a stored-procedure replacement: relevant server-side JavaScript features are deprecated in 8.0.<a id="mongodb-administration--cite-29-1" class="citation-ref" href="#mongodb-administration--source-29" aria-label="Source 29">[29]</a><a id="mongodb-administration--cite-35-3" class="citation-ref" href="#mongodb-administration--source-35" aria-label="Source 35">[35]</a></p>
+<p>For deletion, preview the exact predicate and count, obtain approval and retain a backup. <code>deleteMany({})</code>, collection <code>drop()</code> and database <code>dropDatabase()</code> are destructive, not “reset settings.” A safer fixture cleanup uses the explicit known IDs <strong>only in a disposable database</strong>, after confirming no dependent exercise needs them; even that has no automatic undo.<a id="mongodb-administration--cite-54-3" class="citation-ref" href="#mongodb-administration--source-54" aria-label="Source 54">[54]</a></p>
+
+<h2 id="users">Users, roles and authentication databases</h2>
+<p>Authenticate as <code>useradmin</code> on <code>admin</code> to administer users. A user created in <code>shop</code> authenticates against <code>shop</code> even when granted privileges elsewhere. The same username in different authentication databases denotes different identities.<a id="mongodb-administration--cite-99-1" class="citation-ref" href="#mongodb-administration--source-99" aria-label="Source 99">[99]</a></p>
+<pre tabindex="0" role="region" aria-label="Objects, users and administration: code 7, horizontally scrollable"><code class="language-javascript">use shop
+db.createRole({
+  role: "orderWriter",
+  privileges: [{resource: {db: "shop", collection: "orders"},
+    actions: ["find", "insert", "update"]}],
+  roles: []
+});
+db.createUser({user: "shopapp", pwd: passwordPrompt(),
+  roles: [{role: "orderWriter", db: "shop"}]});
+db.getUser("shopapp", {showPrivileges: true});
+db.getRole("orderWriter", {showPrivileges: true});
+</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Objects, users and administration: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Identity</th>
+<th>Authentication DB</th>
+<th>Privileges</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>shopapp</code></td>
+<td><code>shop</code></td>
+<td>Find/insert/update orders only; no delete, DDL or user management</td>
+</tr>
+<tr>
+<td><code>operator</code></td>
+<td><code>admin</code></td>
+<td>Cluster administration plus <code>readWrite</code>/<code>dbAdmin</code> on <code>shop</code> for exercises</td>
+</tr>
+<tr>
+<td><code>monitor</code></td>
+<td><code>admin</code></td>
+<td><code>clusterMonitor</code>; add only required per-DB visibility</td>
+</tr>
+<tr>
+<td><code>backup</code></td>
+<td><code>admin</code></td>
+<td><code>backup</code>; protect broad read access</td>
+</tr>
+<tr>
+<td><code>restore</code></td>
+<td><code>admin</code></td>
+<td><code>restore</code>; additional reviewed privilege needed for oplog replay</td>
+</tr>
+<tr>
+<td><code>useradmin</code></td>
+<td><code>admin</code></td>
+<td>User/role administrator; escalation-capable, not app access</td>
+</tr>
+</tbody>
+</table></div>
+<p>Tenant isolation is <strong>not</strong> enforced by this collection role: the application must constrain tenant predicates, or use a stronger tenancy design. Test denied operations from a fresh <code>shopapp</code> session as well as permitted reads/writes.<a id="mongodb-administration--cite-18-1" class="citation-ref" href="#mongodb-administration--source-18" aria-label="Source 18">[18]</a><a id="mongodb-administration--cite-85-1" class="citation-ref" href="#mongodb-administration--source-85" aria-label="Source 85">[85]</a></p>
+<pre tabindex="0" role="region" aria-label="Objects, users and administration: code 8, horizontally scrollable"><code class="language-javascript">// useradmin, context shop: credential rotation and role revocation examples
+db.changeUserPassword("shopapp", passwordPrompt());
+db.revokeRolesFromUser("shopapp", [{role: "orderWriter", db: "shop"}]);
+// Restore approved access if revocation was a drill:
+db.grantRolesToUser("shopapp", [{role: "orderWriter", db: "shop"}]);
+</code></pre>
+<p>Coordinate password rotation with application connection pools; test a new connection before retiring the previous deployment secret. For incident revocation, restrict network access and invalidate/close affected sessions as part of the response; changing credentials alone is not proof every old operation stopped. Keep a separate emergency administrator, not an undocumented bypass.<a id="mongodb-administration--cite-17-1" class="citation-ref" href="#mongodb-administration--source-17" aria-label="Source 17">[17]</a><a id="mongodb-administration--cite-18-2" class="citation-ref" href="#mongodb-administration--source-18" aria-label="Source 18">[18]</a></p>
+
+<h2 id="operations">Operations and sessions</h2>
+<p>Read-only inspection first; <code>clusterMonitor</code> supplies broad visibility. <code>$currentOp</code> is preferred over deprecated <code>db.currentOp()</code> in 8.0. Match namespace/client/comment and inspect returned operation IDs; do not kill by an example ID copied from notes.<a id="mongodb-administration--cite-19-1" class="citation-ref" href="#mongodb-administration--source-19" aria-label="Source 19">[19]</a><a id="mongodb-administration--cite-51-1" class="citation-ref" href="#mongodb-administration--source-51" aria-label="Source 51">[51]</a></p>
+<pre tabindex="0" role="region" aria-label="Objects, users and administration: code 9, horizontally scrollable"><code class="language-javascript">const admin = db.getSiblingDB("admin");
+admin.aggregate([
+  {$currentOp: {allUsers: true, idleConnections: false}},
+  {$match: {active: true, ns: "shop.orders", secs_running: {$gte: 5}}},
+  {$project: {opid: 1, ns: 1, secs_running: 1, client: 1,
+              command: 1, waitingForLock: 1, lsid: 1}}
+]).toArray();
+</code></pre>
+<p>Prefer application cancellation and <code>maxTimeMS</code> on bounded reads. <code>db.killOp(observedOpId)</code> asks the server to interrupt a particular operation; it is not a Linux process kill. Run only against the confirmed target, with <code>killop</code> privileges when killing another user’s work. In a sharded cluster use the documented router-aware operation identifier/path; do not strip shard information from an ID.<a id="mongodb-administration--cite-51-2" class="citation-ref" href="#mongodb-administration--source-51" aria-label="Source 51">[51]</a><a id="mongodb-administration--cite-53-1" class="citation-ref" href="#mongodb-administration--source-53" aria-label="Source 53">[53]</a></p>
+<p><code>killSessions</code> takes observed session identifiers and can terminate related work/cursors/transactions. It is broader than one operation and distinct from ending your own shell session with <code>endSession()</code>. Prepared transactions are an exception: <code>killSessions</code> ignores their sessions rather than undoing a prepared distributed transaction.<a id="mongodb-administration--cite-17-2" class="citation-ref" href="#mongodb-administration--source-17" aria-label="Source 17">[17]</a> Review ownership, topology and privileges first. After cancellation, inspect operations and application outcome; a write already committed is not undone.<a id="mongodb-administration--cite-17-3" class="citation-ref" href="#mongodb-administration--source-17" aria-label="Source 17">[17]</a><a id="mongodb-administration--cite-53-2" class="citation-ref" href="#mongodb-administration--source-53" aria-label="Source 53">[53]</a></p>
+
+<h2 id="settings">Runtime settings versus startup configuration</h2>
+<pre tabindex="0" role="region" aria-label="Objects, users and administration: code 10, horizontally scrollable"><code class="language-javascript">const admin = db.getSiblingDB("admin");
+const prior = admin.runCommand({getParameter: 1, logLevel: 1});
+if (prior.ok !== 1) throw new Error("could not capture prior logLevel");
+printjson(prior); // Also save securely outside this session.
+try {
+  admin.runCommand({setParameter: 1, logLevel: 1});
+  // Capture a short, supervised diagnostic window here.
+} finally {
+  admin.runCommand({setParameter: 1, logLevel: prior.logLevel});
+}
+admin.runCommand({getParameter: 1, logLevel: 1});
+</code></pre>
+<p>Use an account authorized for <code>setParameter</code>; restore and verify the observed prior value rather than assuming zero. If the shell disconnects, reconnect and restore the externally saved value. Verbose logging adds overhead and can expose data. <code>setParameter</code> is node-scoped/runtime for supported parameters, not a broadcast to all members and not persistence through restart. Put an approved persistent value in YAML under its documented setting and schedule a restart; <code>daemon-reload</code> does not reload MongoDB YAML.<a id="mongodb-administration--cite-6-1" class="citation-ref" href="#mongodb-administration--source-6" aria-label="Source 6">[6]</a><a id="mongodb-administration--cite-16-1" class="citation-ref" href="#mongodb-administration--source-16" aria-label="Source 16">[16]</a></p>
+
+<h2 id="mongodb-administration--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mongodb-administration--source-6">[6] <a href="https://www.mongodb.com/docs/v8.0/reference/configuration-options">https://www.mongodb.com/docs/v8.0/reference/configuration-options</a> — Self-Managed Configuration File Options - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-6-1" aria-label="Return to citation 6, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-administration--source-16">[16] <a href="https://www.mongodb.com/docs/v8.0/reference/command/setParameter">https://www.mongodb.com/docs/v8.0/reference/command/setParameter</a> — setParameter (database command) - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-16-1" aria-label="Return to citation 16, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-administration--source-17">[17] <a href="https://www.mongodb.com/docs/v8.0/reference/command/killSessions">https://www.mongodb.com/docs/v8.0/reference/command/killSessions</a> — killSessions (database command) - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-17-1" aria-label="Return to citation 17, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-administration--cite-17-2" aria-label="Return to citation 17, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-administration--cite-17-3" aria-label="Return to citation 17, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-administration--source-18">[18] <a href="https://www.mongodb.com/docs/v8.0/tutorial/manage-users-and-roles">https://www.mongodb.com/docs/v8.0/tutorial/manage-users-and-roles</a> — Manage Users and Roles on Self-Managed Deployments - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-18-1" aria-label="Return to citation 18, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-administration--cite-18-2" aria-label="Return to citation 18, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-administration--source-19">[19] <a href="https://www.mongodb.com/docs/v8.0/reference/method/db.currentOp">https://www.mongodb.com/docs/v8.0/reference/method/db.currentOp</a> — Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-19-1" aria-label="Return to citation 19, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-administration--source-29">[29] <a href="https://www.mongodb.com/docs/v8.0/release-notes/8.0-compatibility">https://www.mongodb.com/docs/v8.0/release-notes/8.0-compatibility</a> — Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-29-1" aria-label="Return to citation 29, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-administration--source-35">[35] <a href="https://www.mongodb.com/docs/v8.0/data-modeling">https://www.mongodb.com/docs/v8.0/data-modeling</a> — Data Modeling in MongoDB - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-35-1" aria-label="Return to citation 35, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-administration--cite-35-2" aria-label="Return to citation 35, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-administration--cite-35-3" aria-label="Return to citation 35, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-administration--source-37">[37] <a href="https://www.mongodb.com/docs/v8.0/core/schema-validation">https://www.mongodb.com/docs/v8.0/core/schema-validation</a> — Schema Validation - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-37-1" aria-label="Return to citation 37, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-administration--cite-37-2" aria-label="Return to citation 37, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-administration--cite-37-3" aria-label="Return to citation 37, occurrence 3">↩3</a><a class="citation-return" href="#mongodb-administration--cite-37-4" aria-label="Return to citation 37, occurrence 4">↩4</a></span></div><div class="source-entry" id="mongodb-administration--source-51">[51] <a href="https://www.mongodb.com/docs/v8.0/reference/operator/aggregation/currentOp">https://www.mongodb.com/docs/v8.0/reference/operator/aggregation/currentOp</a> — $currentOp (aggregation stage) - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-51-1" aria-label="Return to citation 51, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-administration--cite-51-2" aria-label="Return to citation 51, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-administration--source-53">[53] <a href="https://www.mongodb.com/docs/v8.0/reference/method/db.killOp">https://www.mongodb.com/docs/v8.0/reference/method/db.killOp</a> — Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-53-1" aria-label="Return to citation 53, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-administration--cite-53-2" aria-label="Return to citation 53, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-administration--source-54">[54] <a href="https://www.mongodb.com/docs/v8.0/reference/method/db.createCollection">https://www.mongodb.com/docs/v8.0/reference/method/db.createCollection</a> — Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-54-1" aria-label="Return to citation 54, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-administration--cite-54-2" aria-label="Return to citation 54, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-administration--cite-54-3" aria-label="Return to citation 54, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-administration--source-55">[55] <a href="https://www.mongodb.com/docs/v8.0/reference/command/collMod">https://www.mongodb.com/docs/v8.0/reference/command/collMod</a> — collMod (database command) - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-55-1" aria-label="Return to citation 55, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-administration--source-80">[80] <a href="https://www.mongodb.com/docs/v8.0/core/views">https://www.mongodb.com/docs/v8.0/core/views</a> — Views - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-80-1" aria-label="Return to citation 80, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-administration--source-85">[85] <a href="https://www.mongodb.com/docs/v8.0/reference/built-in-roles.md">https://www.mongodb.com/docs/v8.0/reference/built-in-roles.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-85-1" aria-label="Return to citation 85, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-administration--source-94">[94] <a href="https://www.mongodb.com/docs/mongodb-shell/reference/ejson/stringify.md">https://www.mongodb.com/docs/mongodb-shell/reference/ejson/stringify.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-94-1" aria-label="Return to citation 94, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-administration--source-99">[99] <a href="https://www.mongodb.com/docs/v8.0/core/security-users.md">https://www.mongodb.com/docs/v8.0/core/security-users.md</a><span class="citation-returns"><a class="citation-return" href="#mongodb-administration--cite-99-1" aria-label="Return to citation 99, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mongodb-instances.html"><span>Previous · MongoDB</span><strong>Troubleshooting and isolated instances</strong></a></div><div><a rel="next" href="mongodb-performance.html"><span>Next · MongoDB</span><strong>Auditing and performance</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/use.html">Explore Work with objects and access ↗</a><div class="current-group"><h2>In MongoDB</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mongodb-administration.html">Objects, users and administration</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></div><div><span>PostgreSQL</span><a href="postgresql-administration.html">Objects, roles and administration</a><a href="postgresql-joins.html">Joins: keep the rows you mean</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

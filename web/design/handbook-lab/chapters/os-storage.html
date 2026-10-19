@@ -1,0 +1,220 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Filesystems, RAID, directories and partitions — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="os-storage"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../operating-systems.html">Operating systems</a><a href="../operating-systems.html">Work on the host</a></nav>
+<header class="reader-head"><p class="reader-context">OS <span aria-hidden="true">/</span> Work on the host</p><h1>Filesystems, RAID, directories and partitions</h1></header>
+<div class="reader-controls"><a href="../operating-systems.html">← Work on the host</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="OS chapters"><ol class="chapter-list"><li><a  href="../chapters/os-processes.html">Processes and scheduling</a></li><li><a  href="../chapters/os-memory.html">Memory and virtual memory</a></li><li><a  href="../chapters/os-kernel-devices.html">Devices, kernel services and isolation</a></li><li><a  href="../chapters/os-boot.html">From power-on to login</a></li><li><a  href="../chapters/os-linux-foundations.html">Linux distributions, terminals and shells</a></li><li><a  href="../chapters/os-shell-files.html">Finding, editing and protecting files</a></li><li><a  href="../chapters/os-users-processes.html">Users, processes and resource monitoring</a></li><li><a  href="../chapters/os-services.html">Systemd service types</a></li><li><a aria-current="page" href="../chapters/os-storage.html">Filesystems, RAID, directories and partitions</a></li><li><a  href="../chapters/os-networking.html">Networking, SSH and file transfer</a></li><li><a  href="../chapters/os-access-security.html">Access control, passwords and recovery</a></li><li><a  href="../chapters/os-windows.html">Windows tools and licensing</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#os-storage--file-systems">Filesystems</a><a class="level-3" href="#os-storage--ext4">ext4 layout</a><a class="level-2" href="#os-storage--raid">RAID</a><a class="level-2" href="#os-storage--directory-structure">Directory structure</a><a class="level-2" href="#os-storage--section-1">Inspect and manage partitions</a><a class="level-2" href="#os-storage--section-2">Sources</a></nav></details></div>
+<article class="prose"><p><span id="os-b-0296" class="source-anchor"></span>
+<span id="os-b-0297" class="source-anchor"></span>
+<span id="os-b-0304" class="source-anchor"></span>
+<span id="os-b-0305" class="source-anchor"></span></p>
+
+<h2 id="os-storage--file-systems">Filesystems</h2>
+<p>RHEL 9’s usual local choices are <strong>XFS</strong> and <strong>ext4</strong>. Btrfs and OpenZFS below are cross-platform comparisons, not instructions to deploy unsupported RHEL filesystem packages. Features depend on format options, software version and storage layout.<a id="os-storage--cite-23-1" class="citation-ref" href="#os-storage--source-23" aria-label="Source 23">[23]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Filesystems, RAID, directories and partitions: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Filesystem</th>
+<th>Crash consistency</th>
+<th>Integrity checks</th>
+<th>Native snapshots</th>
+<th>Integrated multi-device/RAID</th>
+<th>Typical fit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ext4</td>
+<td>Journaling, with mode-dependent data handling</td>
+<td>Metadata checksums when enabled; no general file-data checksum</td>
+<td>No; lower layers such as LVM can snapshot</td>
+<td>No; use a separate storage layer</td>
+<td>General-purpose Linux filesystems</td>
+</tr>
+<tr>
+<td>Btrfs</td>
+<td>Copy-on-write</td>
+<td>Data and metadata checksums, with exceptions for configured modes such as NODATASUM</td>
+<td>Yes</td>
+<td>Yes; profiles have distinct limits and failure behavior</td>
+<td>Linux deployments needing subvolumes/snapshots and validated Btrfs support</td>
+</tr>
+<tr>
+<td>XFS</td>
+<td>Metadata journaling</td>
+<td>Metadata checksums on modern formats; not general file-data checksums</td>
+<td>No native volume snapshots; reflink file clones are different</td>
+<td>No; use a separate storage layer</td>
+<td>Scalable general/server storage; RHEL 9 default.<a id="os-storage--cite-133-1" class="citation-ref" href="#os-storage--source-133" aria-label="Source 133">[133]</a><a id="os-storage--cite-140-1" class="citation-ref" href="#os-storage--source-140" aria-label="Source 140">[140]</a></td>
+</tr>
+<tr>
+<td>OpenZFS</td>
+<td>Copy-on-write transactional storage</td>
+<td>Data and metadata checksums; some data checksum properties are configurable</td>
+<td>Yes</td>
+<td>Yes, through pool/vdev layouts including mirrors and RAIDZ</td>
+<td>Storage deployments that support and deliberately operate OpenZFS</td>
+</tr>
+</tbody>
+</table></div>
+<p>Btrfs checksum exceptions and OpenZFS pool/checksum properties must be read with their selected layout and property settings.<a id="os-storage--cite-70-1" class="citation-ref" href="#os-storage--source-70" aria-label="Source 70">[70]</a><a id="os-storage--cite-68-1" class="citation-ref" href="#os-storage--source-68" aria-label="Source 68">[68]</a><a id="os-storage--cite-69-1" class="citation-ref" href="#os-storage--source-69" aria-label="Source 69">[69]</a></p>
+<p>A checksum detects corruption; repair also needs a sound redundant copy. Neither journaling nor copy-on-write guarantees that every unflushed application write survives a power loss. Choose by supported workload and recovery requirements, not “small files versus big files” alone.<a id="os-storage--cite-59-1" class="citation-ref" href="#os-storage--source-59" aria-label="Source 59">[59]</a><a id="os-storage--cite-24-1" class="citation-ref" href="#os-storage--source-24" aria-label="Source 24">[24]</a><a id="os-storage--cite-44-1" class="citation-ref" href="#os-storage--source-44" aria-label="Source 44">[44]</a></p>
+
+<h3 id="os-storage--ext4">ext4 layout</h3>
+<p>A directory maps names to inode numbers. An inode describes a file’s metadata and data layout; regular-file data blocks hold its content. This is more precise than saying that every directory simply “points to data.” ext4 uses metadata checksums for supported structures; it does not generally checksum file contents.<a id="os-storage--cite-59-2" class="citation-ref" href="#os-storage--source-59" aria-label="Source 59">[59]</a><a id="os-storage--cite-67-1" class="citation-ref" href="#os-storage--source-67" aria-label="Source 67">[67]</a></p>
+<p><span id="os-b-0308" class="source-anchor"></span>
+<span id="os-b-0309" class="source-anchor"></span></p>
+
+<h2 id="os-storage--raid">RAID</h2>
+<p><strong>Redundant Array of Independent Disks</strong> describes families of layouts with different capacity, performance and failure tradeoffs. Hardware controllers, Linux software RAID and LVM RAID implement different management layers. RAID 0 stripes data without redundancy; other levels tolerate only specified failure patterns.<a id="os-storage--cite-83-1" class="citation-ref" href="#os-storage--source-83" aria-label="Source 83">[83]</a><a id="os-storage--cite-141-1" class="citation-ref" href="#os-storage--source-141" aria-label="Source 141">[141]</a></p>
+<p>RAID is <strong>not a backup</strong>. It does not independently protect against deletion, malicious changes, application corruption or loss of the whole host. A local snapshot is also not an independent backup. Keep restorable copies in a separate failure domain and verify recovery; after a disk failure, a rebuild is a period of additional risk, not proof the data is safe.<a id="os-storage--cite-23-2" class="citation-ref" href="#os-storage--source-23" aria-label="Source 23">[23]</a><a id="os-storage--cite-44-2" class="citation-ref" href="#os-storage--source-44" aria-label="Source 44">[44]</a></p>
+<p><span id="os-b-0317" class="source-anchor"></span>
+<span id="os-b-0318" class="source-anchor"></span></p>
+
+<h2 id="os-storage--directory-structure">Directory structure</h2>
+<p>The following is a systemd/Linux layout reference. RHEL 9 uses a merged <code>/usr</code> layout, so several traditional root directories are compatibility symlinks.<a id="os-storage--cite-14-1" class="citation-ref" href="#os-storage--source-14" aria-label="Source 14">[14]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Filesystems, RAID, directories and partitions: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/</code></td>
+<td>Root of the filesystem namespace</td>
+</tr>
+<tr>
+<td><code>/boot</code></td>
+<td>Kernel/initramfs and boot-related files; the ESP may be mounted at <code>/boot/efi</code></td>
+</tr>
+<tr>
+<td><code>/dev</code></td>
+<td>Device nodes and related interfaces</td>
+</tr>
+<tr>
+<td><code>/bin</code></td>
+<td>Traditional essential command path; commonly a symlink to <code>/usr/bin</code></td>
+</tr>
+<tr>
+<td><code>/sbin</code></td>
+<td>Traditional system-administration commands; commonly a symlink to <code>/usr/sbin</code></td>
+</tr>
+<tr>
+<td><code>/usr</code></td>
+<td>Installed userspace binaries, libraries and shareable data; not users’ home directories. Can be read-only in an appropriate deployment</td>
+</tr>
+<tr>
+<td><code>/opt</code></td>
+<td>Optional/add-on application trees</td>
+</tr>
+<tr>
+<td><code>/lib</code>, <code>/lib64</code></td>
+<td>Traditional library paths, commonly linked into <code>/usr</code>; kernel modules conventionally under <code>/lib/modules</code></td>
+</tr>
+<tr>
+<td><code>/home</code></td>
+<td>Ordinary users’ home directories</td>
+</tr>
+<tr>
+<td><code>/root</code></td>
+<td>Root user’s home</td>
+</tr>
+<tr>
+<td><code>/etc</code></td>
+<td>Host-specific configuration</td>
+</tr>
+<tr>
+<td><code>/var</code></td>
+<td>Variable persistent data such as logs, spool and application state; individual subpaths may have different retention</td>
+</tr>
+<tr>
+<td><code>/tmp</code></td>
+<td>Temporary files; may be cleared on boot or by age-based cleanup. Not guaranteed to last a session or survive reboot</td>
+</tr>
+<tr>
+<td><code>/var/tmp</code></td>
+<td>Temporary files normally retained across boots, but still subject to cleanup policy</td>
+</tr>
+<tr>
+<td><code>/mnt</code></td>
+<td>Conventional temporary mount location</td>
+</tr>
+<tr>
+<td><code>/proc</code></td>
+<td>Virtual process/kernel interface, including per-PID directories</td>
+</tr>
+<tr>
+<td><code>/sys</code></td>
+<td>Virtual interface to devices and other kernel objects</td>
+</tr>
+</tbody>
+</table></div>
+<p><span id="os-b-0511" class="source-anchor"></span></p>
+
+<h2 id="os-storage--section-1">Inspect and manage partitions</h2>
+<p>Inspection and creation are different operations. These examples target the <strong>RHEL 9 util-linux/e2fsprogs/GNU Parted tools</strong>; the first commands only inspect.<a id="os-storage--cite-100-1" class="citation-ref" href="#os-storage--source-100" aria-label="Source 100">[100]</a><a id="os-storage--cite-101-1" class="citation-ref" href="#os-storage--source-101" aria-label="Source 101">[101]</a><a id="os-storage--cite-26-1" class="citation-ref" href="#os-storage--source-26" aria-label="Source 26">[26]</a></p>
+<pre tabindex="0" role="region" aria-label="Filesystems, RAID, directories and partitions: code 1, horizontally scrollable"><code class="language-bash">lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS,MODEL,SERIAL
+findmnt
+sudo fdisk -l
+sudo parted --list
+</code></pre>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Filesystems, RAID, directories and partitions: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>parted</code></td>
+<td>Inspect/edit GPT or MBR partition tables; <code>print</code> is inspection, creating/deleting partitions writes metadata</td>
+</tr>
+<tr>
+<td><code>fdisk</code></td>
+<td>Interactive partition-table editor supporting <strong>GPT and MBR</strong>, not only legacy MBR; <code>-l</code> lists tables</td>
+</tr>
+<tr>
+<td><code>partprobe</code></td>
+<td>Requests that the kernel update its view of partition-table changes; busy devices can prevent a safe reread.<a id="os-storage--cite-137-1" class="citation-ref" href="#os-storage--source-137" aria-label="Source 137">[137]</a></td>
+</tr>
+<tr>
+<td><code>mkfs.ext4 DEVICE</code> or <code>mke2fs -t ext4 DEVICE</code></td>
+<td>Create an ext4 filesystem, overwriting filesystem metadata on the selected device</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Formatting destroys the selected filesystem.</strong> Use only an explicitly approved, expendable test partition or approved maintenance target with a verified backup. Identify it by capacity, serial/WWN and storage ownership—not by assuming <code>/dev/sda1</code> is spare. Confirm it is neither mounted nor swap and is not a live RAID/LVM member; stop dependent workloads and obtain console access before changing a boot/storage device.<a id="os-storage--cite-26-2" class="citation-ref" href="#os-storage--source-26" aria-label="Source 26">[26]</a><a id="os-storage--cite-27-1" class="citation-ref" href="#os-storage--source-27" aria-label="Source 27">[27]</a><a id="os-storage--cite-52-1" class="citation-ref" href="#os-storage--source-52" aria-label="Source 52">[52]</a></p>
+<p>Schematic alternatives—not a paste-ready device selection:</p>
+<pre tabindex="0" role="region" aria-label="Filesystems, RAID, directories and partitions: code 2, horizontally scrollable"><code class="language-text">mkfs.ext4 /dev/disk/by-id/VERIFIED-TEST-PARTITION
+# Equivalent filesystem choice, not a second required step:
+mke2fs -t ext4 /dev/disk/by-id/VERIFIED-TEST-PARTITION
+</code></pre>
+<p>After an authorized change, inspect <code>lsblk -f</code> and the partition layout, mount only at an approved empty test mount point, and verify access/ownership before allowing workloads onto it. Do not force a partition reread on a busy production disk. Formatting has no general “undo”; restore from backup if the wrong data was destroyed. For basic mounting, see <a href="os-shell-files.html#os-b-0365">file commands</a>.</p>
+
+<h2 id="os-storage--section-2">Sources</h2>
+<div class="source-list"><div class="source-entry" id="os-storage--source-14">[14] <a href="https://raw.githubusercontent.com/systemd/systemd/v252/man/file-hierarchy.xml">https://raw.githubusercontent.com/systemd/systemd/v252/man/file-hierarchy.xml</a> — systemd v252 pinned manual source
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-14-1" aria-label="Return to citation 14, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-23">[23] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/managing_file_systems/index">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/managing_file_systems/index</a> — RHEL 9
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-23-1" aria-label="Return to citation 23, occurrence 1">↩1</a><a class="citation-return" href="#os-storage--cite-23-2" aria-label="Return to citation 23, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-storage--source-24">[24] <a href="https://btrfs.readthedocs.io/en/latest/Introduction.html">https://btrfs.readthedocs.io/en/latest/Introduction.html</a> — Upstream Btrfs; comparison only, not RHEL-supported deployment
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-24-1" aria-label="Return to citation 24, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-26">[26] <a href="https://man7.org/linux/man-pages/man8/fdisk.8.html">https://man7.org/linux/man-pages/man8/fdisk.8.html</a> — util-linux manual; common GPT/MBR operations
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-26-1" aria-label="Return to citation 26, occurrence 1">↩1</a><a class="citation-return" href="#os-storage--cite-26-2" aria-label="Return to citation 26, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-storage--source-27">[27] <a href="https://man7.org/linux/man-pages/man8/mke2fs.8.html">https://man7.org/linux/man-pages/man8/mke2fs.8.html</a> — e2fsprogs manual; ext4 creation
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-27-1" aria-label="Return to citation 27, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-44">[44] <a href="https://raw.githubusercontent.com/openzfs/zfs/zfs-2.2.0/man/man7/zfsconcepts.7">https://raw.githubusercontent.com/openzfs/zfs/zfs-2.2.0/man/man7/zfsconcepts.7</a> — OpenZFS 2.2.0 concepts; comparison only
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-44-1" aria-label="Return to citation 44, occurrence 1">↩1</a><a class="citation-return" href="#os-storage--cite-44-2" aria-label="Return to citation 44, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-storage--source-52">[52] <a href="https://www.gnu.org/software/parted/manual/parted.html">https://www.gnu.org/software/parted/manual/parted.html</a> — GNU Parted manual
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-52-1" aria-label="Return to citation 52, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-59">[59] <a href="https://docs.kernel.org/filesystems/ext4/checksums.html">https://docs.kernel.org/filesystems/ext4/checksums.html</a> — Linux ext4 metadata checksums
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-59-1" aria-label="Return to citation 59, occurrence 1">↩1</a><a class="citation-return" href="#os-storage--cite-59-2" aria-label="Return to citation 59, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-storage--source-67">[67] <a href="https://docs.kernel.org/filesystems/ext4/directory.html">https://docs.kernel.org/filesystems/ext4/directory.html</a> — Linux ext4 directory format
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-67-1" aria-label="Return to citation 67, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-68">[68] <a href="https://raw.githubusercontent.com/openzfs/zfs/zfs-2.2.0/man/man7/zpoolconcepts.7">https://raw.githubusercontent.com/openzfs/zfs/zfs-2.2.0/man/man7/zpoolconcepts.7</a> — OpenZFS 2.2.0 pools
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-68-1" aria-label="Return to citation 68, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-69">[69] <a href="https://raw.githubusercontent.com/openzfs/zfs/zfs-2.2.0/man/man7/zfsprops.7">https://raw.githubusercontent.com/openzfs/zfs/zfs-2.2.0/man/man7/zfsprops.7</a> — OpenZFS 2.2.0 properties
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-69-1" aria-label="Return to citation 69, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-70">[70] <a href="https://btrfs.readthedocs.io/en/latest/Checksumming.html">https://btrfs.readthedocs.io/en/latest/Checksumming.html</a> — Upstream Btrfs checksumming
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-70-1" aria-label="Return to citation 70, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-83">[83] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/managing_storage_devices/index">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/managing_storage_devices/index</a> — RHEL 9 storage devices: RAID, LUKS and partitions
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-83-1" aria-label="Return to citation 83, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-100">[100] <a href="https://man7.org/linux/man-pages/man8/lsblk.8.html">https://man7.org/linux/man-pages/man8/lsblk.8.html</a> — util-linux lsblk
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-101">[101] <a href="https://man7.org/linux/man-pages/man8/findmnt.8.html">https://man7.org/linux/man-pages/man8/findmnt.8.html</a> — util-linux findmnt
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-101-1" aria-label="Return to citation 101, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-133">[133] <a href="https://docs.kernel.org/filesystems/xfs/xfs-self-describing-metadata.html">https://docs.kernel.org/filesystems/xfs/xfs-self-describing-metadata.html</a> — Linux XFS metadata CRCs
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-133-1" aria-label="Return to citation 133, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-137">[137] <a href="https://man7.org/linux/man-pages/man8/partprobe.8.html">https://man7.org/linux/man-pages/man8/partprobe.8.html</a> — GNU Parted partprobe: informing the kernel of partition changes
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-137-1" aria-label="Return to citation 137, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-140">[140] <a href="https://man7.org/linux/man-pages/man8/mkfs.xfs.8.html">https://man7.org/linux/man-pages/man8/mkfs.xfs.8.html</a> — XFS format metadata CRC option
+<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-140-1" aria-label="Return to citation 140, occurrence 1">↩</a></span></div><div class="source-entry" id="os-storage--source-141">[141] <a href="https://man7.org/linux/man-pages/man7/lvmraid.7.html">https://man7.org/linux/man-pages/man7/lvmraid.7.html</a> — LVM RAID administration and layouts<span class="citation-returns"><a class="citation-return" href="#os-storage--cite-141-1" aria-label="Return to citation 141, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="os-services.html"><span>Previous · OS</span><strong>Systemd service types</strong></a></div><div><a rel="next" href="os-networking.html"><span>Next · OS</span><strong>Networking, SSH and file transfer</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../operating-systems.html">Explore Work on the host ↗</a><div class="current-group"><h2>In this group</h2><ol class="chapter-list"><li><a  href="../chapters/os-linux-foundations.html">Linux distributions, terminals and shells</a></li><li><a  href="../chapters/os-shell-files.html">Finding, editing and protecting files</a></li><li><a  href="../chapters/os-users-processes.html">Users, processes and resource monitoring</a></li><li><a  href="../chapters/os-services.html">Systemd service types</a></li><li><a aria-current="page" href="../chapters/os-storage.html">Filesystems, RAID, directories and partitions</a></li><li><a  href="../chapters/os-networking.html">Networking, SSH and file transfer</a></li><li><a  href="../chapters/os-access-security.html">Access control, passwords and recovery</a></li></ol></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

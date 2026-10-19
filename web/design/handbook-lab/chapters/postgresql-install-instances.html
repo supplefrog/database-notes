@@ -1,0 +1,273 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Installation, services and instances — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="postgresql-install-instances"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/run.html">Get a server running</a></nav>
+<header class="reader-head"><p class="reader-context">PostgreSQL <span aria-hidden="true">/</span> Get a server running</p><h1>Installation, services and instances</h1></header>
+<div class="reader-controls"><a href="../tasks/run.html">← Get a server running</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="PostgreSQL chapters"><ol class="chapter-list"><li><a  href="../chapters/postgresql-foundations.html">PostgreSQL foundations and tools</a></li><li><a  href="../chapters/postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></li><li><a aria-current="page" href="../chapters/postgresql-install-instances.html">Installation, services and instances</a></li><li><a  href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a  href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li><li><a  href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a  href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li><li><a  href="../chapters/postgresql-backup-recovery.html">Backup and point-in-time recovery</a></li><li><a  href="../chapters/postgresql-replication-ha.html">Replication and high availability</a></li><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a  href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a  href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#packages">Install PostgreSQL 18 on RHEL 9</a><a class="level-3" href="#bootstrap">Initialize and enter through the local socket</a><a class="level-2" href="#service">Operate the named service</a><a class="level-3" href="#source-build">Consider a source build only when needed</a><a class="level-2" href="#troubleshooting">Diagnose before changing authentication or files</a><a class="level-2" href="#multiple">Run a second cluster without crossing wires</a><a class="level-3" href="#relocation">Relocate data during a clean outage</a><a class="level-2" href="#postgresql-install-instances--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-installation.html">Installing MySQL on Linux</a><a href="mysql-configuration.html">Configuration and systemd services</a><a href="mysql-troubleshooting.html">Startup, OS security and multiple instances</a><a href="mysql-client-storage.html">Client workflow and moving the data directory</a><p class="product-label">MongoDB</p><a href="mongodb-installation.html">Installation and first start</a><a href="mongodb-instances.html">Troubleshooting and isolated instances</a></nav></details></div>
+<article class="prose">
+<h2 id="packages">Install PostgreSQL 18 on RHEL 9</h2>
+<p>Use a new authorized <strong>RHEL 9.7 x86_64</strong> host, systemd, SELinux <strong>Enforcing</strong>, persistent storage and working DNS/time. The selected upstream <strong>PGDG RPM</strong> build is PostgreSQL <strong>18.6-1PGDG.rhel9.7</strong>, not Red Hat’s AppStream PostgreSQL. PGDG supports the last two RHEL minors and publishes minor-specific repositories because OpenSSL changes broke cross-minor dependencies. The inspected 9.7 repository contains this build; recheck the maintained-minor matrix before every installation/update. A RHEL EUS entitlement does not extend PGDG’s package-support window. If 9.7 is no longer maintained, stop and qualify the current RHEL minor, not a different OS.<a id="postgresql-install-instances--cite-93-1" class="citation-ref" href="#postgresql-install-instances--source-93" aria-label="Source 93">[93]</a><a id="postgresql-install-instances--cite-94-1" class="citation-ref" href="#postgresql-install-instances--source-94" aria-label="Source 94">[94]</a><a id="postgresql-install-instances--cite-98-1" class="citation-ref" href="#postgresql-install-instances--source-98" aria-label="Source 98">[98]</a></p>
+<p>Red Hat’s RHEL 9 guide documents its own <code>postgresql-server</code>/module streams, <code>postgresql-setup --initdb</code>, <code>/var/lib/pgsql/data</code> and <code>postgresql.service</code>. Those are <strong>not</strong> this PGDG 18 installation or a promise of Red Hat support for upstream RPMs. Obtain any required database support separately. Keep Red Hat BaseOS/AppStream for OS dependencies, but do not mix their PostgreSQL server stream with PGDG packages.<a id="postgresql-install-instances--cite-97-1" class="citation-ref" href="#postgresql-install-instances--source-97" aria-label="Source 97">[97]</a><a id="postgresql-install-instances--cite-100-1" class="citation-ref" href="#postgresql-install-instances--source-100" aria-label="Source 100">[100]</a></p>
+<ol>
+<li>Inspect <code>/etc/os-release</code>, <code>uname -m</code>, <code>subscription-manager release --show</code>, <code>dnf repolist</code>, <code>dnf module list postgresql</code>, <code>rpm -qa 'postgresql*'</code>, <code>systemctl list-unit-files 'postgresql*'</code> and <code>ss -ltn</code>. Confirm RHEL <strong>9.7</strong>, <strong>x86_64</strong>, valid subscribed OS repositories, free 5432 and no intended existing cluster. Inventory <code>/var/lib/pgsql</code> and existing units/drop-ins. Keep inbound 5432 denied. These bootstrap steps must not be applied to existing data.</li>
+<li>Use the official minor-specific repository RPM rather than pinning every OS repository through a global <code>releasever</code> override. Download its signing key separately, inspect its fingerprint and validate that fingerprint against the approved PGDG key record through the organization’s trust process <strong>before importing it</strong>. The commands below deliberately do not auto-approve a new key.<a id="postgresql-install-instances--cite-94-2" class="citation-ref" href="#postgresql-install-instances--source-94" aria-label="Source 94">[94]</a><a id="postgresql-install-instances--cite-96-1" class="citation-ref" href="#postgresql-install-instances--source-96" aria-label="Source 96">[96]</a><a id="postgresql-install-instances--cite-99-1" class="citation-ref" href="#postgresql-install-instances--source-99" aria-label="Source 99">[99]</a></li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 1, horizontally scrollable"><code class="language-bash"># In an administrator-owned staging directory:
+sudo dnf install curl ca-certificates gnupg2
+curl --fail --show-error --location -o PGDG-RPM-GPG-KEY-RHEL \
+  https://yum.postgresql.org/keys/PGDG-RPM-GPG-KEY-RHEL
+curl --fail --show-error --location -o pgdg-redhat-repo.rpm \
+  https://download.postgresql.org/pub/repos/yum/reporpms/EL-9.7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+gpg --show-keys --with-fingerprint ./PGDG-RPM-GPG-KEY-RHEL
+# Stop here until the displayed fingerprint is independently approved.
+sudo rpm --import ./PGDG-RPM-GPG-KEY-RHEL
+rpmkeys --checksig --verbose ./pgdg-redhat-repo.rpm
+sudo dnf --setopt=localpkg_gpgcheck=1 install ./pgdg-redhat-repo.rpm
+</code></pre>
+<p>Require a valid signature from the approved key, not <code>NOKEY</code> or merely an HTTPS download. Never use <code>--nogpgcheck</code>. The inspected repository RPM is <code>42.0-66.rhel9.7PGDG</code>: its <code>pgdg18</code> and <code>pgdg-common</code> URLs explicitly contain <code>rhel-9.7-$basearch</code>, with <code>gpgcheck=1</code>, <code>repo_gpgcheck=1</code> and the RHEL PGDG key. Review <code>/etc/yum.repos.d/pgdg-redhat-all.repo</code>, enabled repositories and candidate origins; leave testing/extras/non-free disabled unless separately approved. Preserve both package and metadata verification for these PGDG repositories; inspect other repositories separately rather than assuming identical policy.<a id="postgresql-install-instances--cite-99-2" class="citation-ref" href="#postgresql-install-instances--source-99" aria-label="Source 99">[99]</a></p>
+<ol start="3">
+<li>On this clean host disable the distribution’s PostgreSQL module to prevent modular filtering/package mixing. Review the transaction; do not reset/switch a production module as a migration technique. PGDG documents EPEL dependencies for some packages and CodeReady Builder for GIS/development dependencies. Enable those only through approved repository/key procedures when the selected packages need them; never solve dependency errors using another RHEL minor’s RPMs or <code>--skip-broken</code>.<a id="postgresql-install-instances--cite-94-3" class="citation-ref" href="#postgresql-install-instances--source-94" aria-label="Source 94">[94]</a><a id="postgresql-install-instances--cite-95-1" class="citation-ref" href="#postgresql-install-instances--source-95" aria-label="Source 95">[95]</a></li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 2, horizontally scrollable"><code class="language-bash">sudo dnf module disable postgresql
+sudo dnf install policycoreutils-python-utils
+sudo dnf --refresh list --showduplicates postgresql18 postgresql18-server postgresql18-contrib
+sudo dnf install postgresql18 postgresql18-server postgresql18-contrib
+rpm -q postgresql18 postgresql18-server postgresql18-libs postgresql18-contrib pgdg-redhat-repo
+/usr/pgsql-18/bin/postgres --version
+/usr/pgsql-18/bin/psql --version
+sudo systemctl cat postgresql-18.service
+</code></pre>
+<p><code>postgresql18</code> supplies clients; <code>postgresql18-server</code> supplies the server/setup/unit; <code>postgresql18-contrib</code> supplies modules including <code>pg_stat_statements</code>, <code>amcheck</code>, <code>pgcrypto</code> and <code>basic_archive</code>. pgAudit is separate: <code>pgaudit_18</code>. Record exact package NEVRAs/origins and review the whole DNF transaction before accepting it. Install a maintained approved 18.x, not an unversioned server package.<a id="postgresql-install-instances--cite-100-2" class="citation-ref" href="#postgresql-install-instances--source-100" aria-label="Source 100">[100]</a><a id="postgresql-install-instances--cite-101-1" class="citation-ref" href="#postgresql-install-instances--source-101" aria-label="Source 101">[101]</a><a id="postgresql-install-instances--cite-105-1" class="citation-ref" href="#postgresql-install-instances--source-105" aria-label="Source 105">[105]</a><a id="postgresql-install-instances--cite-106-1" class="citation-ref" href="#postgresql-install-instances--source-106" aria-label="Source 106">[106]</a></p>
+
+<h3 id="bootstrap">Initialize and enter through the local socket</h3>
+<p>RPM installation does not initialize a database. The inspected PGDG setup script reads <code>PGDATA</code> from the named systemd unit, then calls major-18 <code>initdb</code> as <code>postgres</code>; it does not use a separate distribution cluster registry. Its current auth defaults are SCRAM with local peer, but set them explicitly. The documentation’s HOWTO contains an inconsistent major-17 path in its 18 example; use the actual packaged <strong><code>/usr/pgsql-18/bin/postgresql-18-setup</code></strong>. Check an empty target and available <code>C.utf8</code> locale (<code>locale -a</code>) before running:[11]<a id="postgresql-install-instances--cite-95-2" class="citation-ref" href="#postgresql-install-instances--source-95" aria-label="Source 95">[95]</a><a id="postgresql-install-instances--cite-100-3" class="citation-ref" href="#postgresql-install-instances--source-100" aria-label="Source 100">[100]</a></p>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 3, horizontally scrollable"><code class="language-bash">sudo env PGSETUP_INITDB_OPTIONS='--encoding=UTF8 --locale=C.utf8 --data-checksums --auth-local=peer --auth-host=scram-sha-256' \
+  /usr/pgsql-18/bin/postgresql-18-setup initdb
+</code></pre>
+<p><code>initdb</code> creates a cluster, not merely a database; never run upstream <code>initdb</code> as root. The service account owns <code>/var/lib/pgsql/18/data</code> mode 0700. PostgreSQL 18 enables checksums by default; the option makes the choice explicit. Inspect <code>/var/lib/pgsql/18/initdb.log</code>, <code>PG_VERSION</code> and generated configuration before first start. The wrapper creates <code>PGDATA/log</code>; PostgreSQL logs and WAL are different.<a id="postgresql-install-instances--cite-11-1" class="citation-ref" href="#postgresql-install-instances--source-11" aria-label="Source 11">[11]</a><a id="postgresql-install-instances--cite-100-4" class="citation-ref" href="#postgresql-install-instances--source-100" aria-label="Source 100">[100]</a></p>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 4, horizontally scrollable"><code class="language-ini"># /var/lib/pgsql/18/data/postgresql.conf
+# memory/connection values are examples for a small host
+listen_addresses = 'localhost'
+port = 5432
+unix_socket_directories = '/run/postgresql'
+shared_buffers = '128MB'
+max_connections = 50
+password_encryption = 'scram-sha-256'
+fsync = on
+full_page_writes = on
+logging_collector = on
+log_directory = 'log'
+</code></pre>
+<p>Before first service startup, inspect <code>matchpathcon /usr/pgsql-18/bin/postgres</code> and <code>ls -lZ /usr/pgsql-18/bin/postgres</code>. Upstream RPM paths are not proof that the installed RHEL policy labels the executable correctly. If it lacks the required <code>postgresql_exec_t</code> label, have the SELinux policy owner verify that type/domain transition, add a narrow persistent mapping with <code>semanage fcontext -a -t postgresql_exec_t '/usr/pgsql-18/bin/postgres'</code> (only if no conflicting local record), then <code>restorecon -v /usr/pgsql-18/bin/postgres</code>. Do not proceed if the running service remains unconfined; keep enforcing mode and resolve the installed policy explicitly. Repeat this gate for any other major’s executable.<a id="postgresql-install-instances--cite-102-1" class="citation-ref" href="#postgresql-install-instances--source-102" aria-label="Source 102">[102]</a></p>
+<p>Set the socket directory explicitly instead of relying on a compiled default that may include <code>/tmp</code>. PGDG’s tmpfiles rule recreates <code>/run/postgresql</code> as <code>postgres:postgres</code> mode 0755 at boot. Different ports have different socket filenames; socket permissions and peer identity remain separate controls.<a id="postgresql-install-instances--cite-100-5" class="citation-ref" href="#postgresql-install-instances--source-100" aria-label="Source 100">[100]</a></p>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 5, horizontally scrollable"><code class="language-text"># /var/lib/pgsql/18/data/pg_hba.conf, ordered initial policy
+local   all          postgres                         peer
+local   all          all                              peer
+host    all          all        127.0.0.1/32          scram-sha-256
+host    all          all        ::1/128               scram-sha-256
+local   replication  postgres                         peer
+</code></pre>
+<p>Keep local peer administration and local replication for backups. Do not add remote access until <a href="postgresql-hardening.html#tls">TLS and firewalld</a> are ready. No trust rule or database-superuser network password is needed.<a id="postgresql-install-instances--cite-14-1" class="citation-ref" href="#postgresql-install-instances--source-14" aria-label="Source 14">[14]</a><a id="postgresql-install-instances--cite-15-1" class="citation-ref" href="#postgresql-install-instances--source-15" aria-label="Source 15">[15]</a></p>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 6, horizontally scrollable"><code class="language-bash">sudo systemd-tmpfiles --create /usr/lib/tmpfiles.d/postgresql-18.conf
+sudo restorecon -Rv /var/lib/pgsql/18 /run/postgresql
+getenforce
+sudo systemctl start postgresql-18.service
+/usr/pgsql-18/bin/pg_isready -h /run/postgresql -p 5432
+sudo -u postgres /usr/pgsql-18/bin/psql -X -v ON_ERROR_STOP=1 \
+  -h /run/postgresql -p 5432 -d postgres
+</code></pre>
+<p>In psql inspect <code>SELECT version();</code>, <code>SHOW data_directory;</code>, <code>SHOW config_file;</code>, <code>SHOW unix_socket_directories;</code>, <code>SHOW data_checksums;</code> and <code>\conninfo</code>. Verify the intended cluster, not only “accepting connections”. Check <code>ps -eZ</code> shows the server’s confined <code>postgresql_t</code> domain and no relevant AVC denials. Then create the <a href="postgresql-administration.html#roles">bounded roles/fixture</a>. Only after acceptance run <code>sudo systemctl enable postgresql-18.service</code>; enablement is a separate boot decision.<a id="postgresql-install-instances--cite-73-1" class="citation-ref" href="#postgresql-install-instances--source-73" aria-label="Source 73">[73]</a><a id="postgresql-install-instances--cite-100-6" class="citation-ref" href="#postgresql-install-instances--source-100" aria-label="Source 100">[100]</a><a id="postgresql-install-instances--cite-102-2" class="citation-ref" href="#postgresql-install-instances--source-102" aria-label="Source 102">[102]</a></p>
+
+<h2 id="service">Operate the named service</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Installation, services and instances: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Effect / interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sudo systemctl show postgresql-18 -p Environment -p FragmentPath -p DropInPaths</code></td>
+<td>Resolve effective PGDATA, vendor unit and local overrides.</td>
+</tr>
+<tr>
+<td><code>sudo systemctl status postgresql-18.service</code></td>
+<td>Exact default-major unit; verify SQL identity too.</td>
+</tr>
+<tr>
+<td><code>sudo systemctl reload postgresql-18.service</code></td>
+<td>HUP reload; inspect parse errors and actual values.</td>
+</tr>
+<tr>
+<td><code>sudo systemctl restart postgresql-18.service</code></td>
+<td>Disconnects clients; scheduled restart for startup settings.</td>
+</tr>
+<tr>
+<td><code>sudo systemctl stop postgresql-18.service</code></td>
+<td>Packaged SIGINT fast shutdown aborts active transactions cleanly.</td>
+</tr>
+<tr>
+<td><code>sudo journalctl -u postgresql-18.service --since '1 hour ago'</code></td>
+<td>Startup/service diagnostics; also inspect <code>pg_current_logfile()</code>/collector logs.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The inspected unit uses <code>Type=notify</code>, OS <code>postgres</code>, a PGDATA guard, direct <code>postgres -D ${PGDATA}</code>, <code>KillMode=mixed</code>, <code>KillSignal=SIGINT</code>, restart-on-failure, unlimited startup time and a one-hour stop timeout. Do not run <code>pg_ctl</code> alongside systemd for the same cluster or routinely kill processes. Use <code>systemctl edit</code> drop-ins, not edits to <code>/usr/lib/systemd/system</code>. RPM update scriptlets call <code>try-restart</code> for the default unit; updates therefore need a controlled outage and explicit validation of every separately named instance.<a id="postgresql-install-instances--cite-100-7" class="citation-ref" href="#postgresql-install-instances--source-100" aria-label="Source 100">[100]</a></p>
+
+<h3 id="source-build">Consider a source build only when needed</h3>
+<p>A source build is an alternative when approved RPMs cannot meet a requirement, not this production baseline. Obtain the official 18.x archive and verify the published checksum/signature; install documented compiler/library prerequisites. In the extracted source tree, as an unprivileged build account:[53]</p>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 7, horizontally scrollable"><code class="language-bash">./configure --prefix=/opt/postgresql/18 --with-ssl=openssl
+make
+make check
+# Only after real test success and approval of this separate prefix:
+sudo make install
+</code></pre>
+<p><code>make check</code> starts temporary servers and must not run as root. Keep actual results. A source install supplies neither PGDG’s unit/setup script nor automatic SELinux integration; qualify executable labels/domain transitions, service supervision, extensions, patching and recovery separately before production. Never overwrite RPM-managed files or claim this alternative was tested here.<a id="postgresql-install-instances--cite-11-2" class="citation-ref" href="#postgresql-install-instances--source-11" aria-label="Source 11">[11]</a><a id="postgresql-install-instances--cite-53-1" class="citation-ref" href="#postgresql-install-instances--source-53" aria-label="Source 53">[53]</a><a id="postgresql-install-instances--cite-102-3" class="citation-ref" href="#postgresql-install-instances--source-102" aria-label="Source 102">[102]</a></p>
+
+<h2 id="troubleshooting">Diagnose before changing authentication or files</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Installation, services and instances: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Inspect</th>
+<th>Safe action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Service fails</td>
+<td>Journal, <code>PGDATA/log</code>, mounts/free bytes/inodes, unit/drop-ins</td>
+<td>Revert last change; never initialize over existing data.</td>
+</tr>
+<tr>
+<td>Address in use</td>
+<td><code>ss -ltnp</code>, socket files, unit inventory and SQL identity</td>
+<td>Find the exact competing instance, not all postgres processes.</td>
+</tr>
+<tr>
+<td>Peer failure</td>
+<td>OS user, socket path, first local HBA match</td>
+<td>A database password does not repair OS identity.</td>
+</tr>
+<tr>
+<td>No HBA entry</td>
+<td>Database/user/source/TLS and ordered rules</td>
+<td>Add only the intended rule, not network trust.</td>
+</tr>
+<tr>
+<td>Permission denied</td>
+<td><code>namei -l PATH</code>, <code>ls -ldZ PATH</code>, <code>matchpathcon -V PATH</code>, <code>ausearch -m AVC,USER_AVC -ts recent</code></td>
+<td>Correct DAC/labels/mount access; keep SELinux enforcing.</td>
+</tr>
+<tr>
+<td>Timeout</td>
+<td>Route, listener, active firewalld zone/provider ACL, DNS</td>
+<td>HBA cannot permit packets not reaching PostgreSQL.</td>
+</tr>
+<tr>
+<td>Connection/memory pressure</td>
+<td>Pool budget, idle transactions, work_mem, other instances</td>
+<td>Reduce pressure before raising limits.</td>
+</tr>
+<tr>
+<td>WAL growth</td>
+<td>Slots, archive failure, write rate</td>
+<td>Repair retention/consumer; never delete live WAL.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Use <code>getenforce</code>, <code>sestatus</code>, <code>ps -eZ</code>, <code>semanage fcontext -l</code> and <code>semanage port -l</code> on the actual RHEL host. <code>policycoreutils-python-utils</code> supplies <code>semanage</code>. Persistent mappings require <strong>both</strong> <code>semanage fcontext</code> and <code>restorecon</code>; <code>chcon</code> alone is not durable. Investigate AVC causes instead of disabling SELinux or generating an unrestricted <code>audit2allow</code> policy. Red Hat’s older PostgreSQL example establishes the data-label concept, not proof of this host’s current policy; inspect the installed RHEL 9 types and labels before applying custom mappings.<a id="postgresql-install-instances--cite-102-4" class="citation-ref" href="#postgresql-install-instances--source-102" aria-label="Source 102">[102]</a><a id="postgresql-install-instances--cite-104-1" class="citation-ref" href="#postgresql-install-instances--source-104" aria-label="Source 104">[104]</a></p>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 8, horizontally scrollable"><code class="language-sql">SELECT sourcefile, sourceline, name, setting, applied, error
+FROM pg_file_settings WHERE error IS NOT NULL;
+SELECT line_number, type, database, user_name, address, auth_method, error
+FROM pg_hba_file_rules ORDER BY line_number;
+SELECT name, setting, source, sourcefile, pending_restart
+FROM pg_settings WHERE name IN ('port','listen_addresses','shared_buffers');
+</code></pre>
+<p>A clean parse is not proof a restart setting is active. Keep local admin access while changing HBA; reload, test new allowed and denied sessions, and revert the recorded prior file if needed.<a id="postgresql-install-instances--cite-12-1" class="citation-ref" href="#postgresql-install-instances--source-12" aria-label="Source 12">[12]</a><a id="postgresql-install-instances--cite-14-2" class="citation-ref" href="#postgresql-install-instances--source-14" aria-label="Source 14">[14]</a><a id="postgresql-install-instances--cite-58-1" class="citation-ref" href="#postgresql-install-instances--source-58" aria-label="Source 58">[58]</a></p>
+
+<h2 id="multiple">Run a second cluster without crossing wires</h2>
+<p>PGDG ships one default unit per major, <strong>not</strong> an instance template or cluster-name registry. Create an explicitly named local unit for each additional instance. This example uses <code>postgresql-18-lab2.service</code>, <code>/var/lib/pgsql/18/lab2</code>, port <strong>5542</strong>, shared <code>/run/postgresql</code> and its own <code>PGDATA/log</code>. The socket directory can be shared because port-specific filenames differ; PGDATA must never be shared.<a id="postgresql-install-instances--cite-100-8" class="citation-ref" href="#postgresql-install-instances--source-100" aria-label="Source 100">[100]</a></p>
+<ol>
+<li>Verify the path is empty, unit name unused and port free. Copy the inspected vendor unit to a <strong>new</strong> local name, preserving its notify/shutdown/user behavior, then override its data path. Do not copy an already customized primary unit inadvertently:</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 9, horizontally scrollable"><code class="language-bash">sudo cp /usr/lib/systemd/system/postgresql-18.service \
+  /etc/systemd/system/postgresql-18-lab2.service
+sudo systemctl daemon-reload
+sudo systemctl edit postgresql-18-lab2.service
+</code></pre>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 10, horizontally scrollable"><code class="language-ini">[Unit]
+Description=PostgreSQL 18 isolated lab2
+RequiresMountsFor=/var/lib/pgsql/18/lab2
+[Service]
+Environment=PGDATA=/var/lib/pgsql/18/lab2
+</code></pre>
+<ol start="2">
+<li>Run <code>sudo systemctl daemon-reload</code>, inspect <code>systemctl cat</code> and <code>systemctl show ... -p Environment</code>, then initialize this <strong>empty</strong> target with the same explicit options as bootstrap, passing the service name as the setup script’s second argument:</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 11, horizontally scrollable"><code class="language-bash">sudo env PGSETUP_INITDB_OPTIONS='--encoding=UTF8 --locale=C.utf8 --data-checksums --auth-local=peer --auth-host=scram-sha-256' \
+  /usr/pgsql-18/bin/postgresql-18-setup initdb postgresql-18-lab2
+</code></pre>
+<ol start="3">
+<li>Edit this target’s config/HBA, not the primary’s: use the bootstrap policy, <code>port = 5542</code>, <code>listen_addresses = 'localhost'</code>, <code>unix_socket_directories = '/run/postgresql'</code>, <code>logging_collector = on</code>, <code>log_directory = 'log'</code>. Inspect SELinux’s port inventory; if 5542 is not allocated, add it as below. If another type owns it, select a different port or review that service before modifying policy. A label permits a bind; it does not open firewalld.<a id="postgresql-install-instances--cite-102-5" class="citation-ref" href="#postgresql-install-instances--source-102" aria-label="Source 102">[102]</a></li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 12, horizontally scrollable"><code class="language-bash">sudo semanage port -l
+# Only after confirming 5542 is available and not already labeled correctly:
+sudo semanage port -a -t postgresql_port_t -p tcp 5542
+sudo restorecon -Rv /var/lib/pgsql/18/lab2
+sudo systemctl start postgresql-18-lab2.service
+sudo -u postgres /usr/pgsql-18/bin/psql -X -h /run/postgresql -p 5542 -d postgres
+</code></pre>
+<p>Verify <code>SHOW data_directory</code>, port, system identifier, effective paths and <code>ps -eZ</code>; test clean stop/start. Do not enable a drill at boot or open its firewall. Stop <code>postgresql-18-lab2</code> afterward; deleting data is a separate decision. New copied units do not automatically inherit later vendor-unit fixes: compare them after package updates and restart <strong>each</strong> instance in its approved window. Reuse this registration pattern for restore/upgrade/standby names, substituting all paths/ports; <strong>never run initdb on restored data</strong>.<a id="postgresql-install-instances--cite-100-9" class="citation-ref" href="#postgresql-install-instances--source-100" aria-label="Source 100">[100]</a></p>
+<p>Distinct clusters isolate SQL namespaces and restart schedules, <strong>not CPU, disk or memory</strong>. Budget aggregate connections/buffers/workers and use resource controls/volumes as needed. A shared OS account can access all those files; use separate accounts/hosts for stronger isolation, with separately reviewed policy.</p>
+
+<h3 id="relocation">Relocate data during a clean outage</h3>
+<p>This is a stopped same-host move, not a live-copy backup. Take a verified backup; record system identifier, effective <code>PGDATA</code>, <code>data_directory</code>, config/HBA paths, external tablespaces and mounts. The destination <code>/srv/pgsql/18/data</code> must be empty/persistent and must not belong to another cluster.<a id="postgresql-install-instances--cite-6-1" class="citation-ref" href="#postgresql-install-instances--source-6" aria-label="Source 6">[6]</a><a id="postgresql-install-instances--cite-22-1" class="citation-ref" href="#postgresql-install-instances--source-22" aria-label="Source 22">[22]</a></p>
+<ol>
+<li>Drain clients; <code>sudo systemctl stop postgresql-18.service</code>; verify no process owns the source. Create the destination with <code>postgres:postgres</code>, mode 0700 and traversable protected parents.</li>
+<li>Copy <strong>all</strong> of stopped PGDATA, including hidden files/configs: <code>sudo rsync -aH /var/lib/pgsql/18/data/ /srv/pgsql/18/data/</code>. External tablespace symlinks remain references: inventory/migrate their storage separately. Compare with <code>sudo rsync -aHn --checksum /var/lib/pgsql/18/data/ /srv/pgsql/18/data/</code> and investigate differences.</li>
+<li>Preserve the data/log label distinctions with a persistent equivalence mapping, after checking no conflicting local mapping exists:[102]<a id="postgresql-install-instances--cite-104-2" class="citation-ref" href="#postgresql-install-instances--source-104" aria-label="Source 104">[104]</a></li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 13, horizontally scrollable"><code class="language-bash">sudo semanage fcontext -a -e /var/lib/pgsql/18/data /srv/pgsql/18/data
+sudo restorecon -Rv /srv/pgsql/18/data
+sudo systemctl edit postgresql-18.service
+</code></pre>
+<pre tabindex="0" role="region" aria-label="Installation, services and instances: code 14, horizontally scrollable"><code class="language-ini">[Unit]
+RequiresMountsFor=/srv/pgsql/18/data
+[Service]
+Environment=PGDATA=/srv/pgsql/18/data
+</code></pre>
+<ol start="4">
+<li>Configuration moved with PGDATA. Review absolute <code>data_directory</code>, HBA/includes, TLS, archive, socket and log references in <strong>both</strong> <code>postgresql.conf</code> and <code>postgresql.auto.conf</code>; they must not redirect to the old copy. Do not add a split config layout by accident. Run <code>daemon-reload</code>, inspect effective unit/environment, ownership, mount and <code>matchpathcon -V</code> labels; start only this unit.</li>
+<li>Verify SQL identity/paths, <code>pg_current_logfile()</code>, confined domain/no AVC denials, representative reads/writes and backup jobs before clients return. Before new writes, rollback can stop this unit and restore its prior drop-in/configs. <strong>After new writes, the old copy is stale</strong>; reconcile or perform another clean copy-back. Never start both.</li>
+</ol>
+<p>Retain the original securely through the rollback window. Apply the same custom-path checks to archive/restore/tablespace directories: PostgreSQL-written data needs reviewed <code>postgresql_db_t</code>, external collector logs <code>postgresql_log_t</code>, sockets <code>postgresql_var_run_t</code>; validate available types on the installed policy. Persistent mappings alone do not create directories or grant Unix permissions. Keep backup-only exports accessible only to their tool accounts, not globally labeled writable by every database process.<a id="postgresql-install-instances--cite-102-6" class="citation-ref" href="#postgresql-install-instances--source-102" aria-label="Source 102">[102]</a><a id="postgresql-install-instances--cite-104-3" class="citation-ref" href="#postgresql-install-instances--source-104" aria-label="Source 104">[104]</a></p>
+
+<h2 id="postgresql-install-instances--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="postgresql-install-instances--source-6">[6] <a href="https://www.postgresql.org/docs/18/storage-file-layout.html">PostgreSQL: Documentation: 18: 66.1.&nbsp;Database File Layout</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-6-1" aria-label="Return to citation 6, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-11">[11] <a href="https://www.postgresql.org/docs/18/app-initdb.html">PostgreSQL: Documentation: 18: initdb</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-11-1" aria-label="Return to citation 11, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-install-instances--cite-11-2" aria-label="Return to citation 11, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-install-instances--source-12">[12] <a href="https://www.postgresql.org/docs/18/config-setting.html">PostgreSQL: Documentation: 18: 19.1.&nbsp;Setting Parameters</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-12-1" aria-label="Return to citation 12, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-14">[14] <a href="https://www.postgresql.org/docs/18/auth-pg-hba-conf.html">PostgreSQL: Documentation: 18: 20.1.&nbsp;The pg_hba.conf File</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-14-1" aria-label="Return to citation 14, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-install-instances--cite-14-2" aria-label="Return to citation 14, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-install-instances--source-15">[15] <a href="https://www.postgresql.org/docs/18/auth-password.html">PostgreSQL: Documentation: 18: 20.5.&nbsp;Password Authentication</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-15-1" aria-label="Return to citation 15, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-22">[22] <a href="https://www.postgresql.org/docs/18/manage-ag-tablespaces.html">PostgreSQL: Documentation: 18: 22.6.&nbsp;Tablespaces</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-22-1" aria-label="Return to citation 22, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-53">[53] <a href="https://www.postgresql.org/docs/18/install-make.html">PostgreSQL: Documentation: 18: 17.3.&nbsp;Building and Installation with Autoconf and Make</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-53-1" aria-label="Return to citation 53, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-58">[58] <a href="https://www.postgresql.org/docs/18/view-pg-settings.html">PostgreSQL: Documentation: 18: 53.25.&nbsp;pg_settings</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-58-1" aria-label="Return to citation 58, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-73">[73] <a href="https://www.postgresql.org/docs/18/app-pg-isready.html">PostgreSQL: Documentation: 18: pg_isready</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-73-1" aria-label="Return to citation 73, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-93">[93] <a href="https://www.postgresql.org/download/linux/redhat">PostgreSQL: Linux downloads (Red Hat family)</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-93-1" aria-label="Return to citation 93, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-94">[94] <a href="https://yum.postgresql.org/news/postgresql-rpms-multiple-rhel-minor-versions">PostgreSQL RPM repository now supports multiple RHEL minor versions - PostgreSQL YUM Repository</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-94-1" aria-label="Return to citation 94, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-install-instances--cite-94-2" aria-label="Return to citation 94, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-install-instances--cite-94-3" aria-label="Return to citation 94, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-install-instances--source-95">[95] <a href="https://yum.postgresql.org/howto">Howto - PostgreSQL YUM Repository</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-95-1" aria-label="Return to citation 95, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-install-instances--cite-95-2" aria-label="Return to citation 95, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-install-instances--source-96">[96] <a href="https://yum.postgresql.org/keys">rhel-keys</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-96-1" aria-label="Return to citation 96, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-97">[97] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_and_using_database_servers/using-postgresql_configuring-and-using-database-servers">Chapter&nbsp;4.&nbsp;Using PostgreSQL | Configuring and using database servers | Red Hat Enterprise Linux | 9 | Red Hat Documentation</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-97-1" aria-label="Return to citation 97, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-98">[98] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64">Index of /pub/repos/yum/18/redhat/rhel-9.7-x86_64/</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-98-1" aria-label="Return to citation 98, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-99">[99] <a href="https://download.postgresql.org/pub/repos/yum/reporpms/EL-9.7-x86_64/pgdg-redhat-repo-42.0-66.rhel9.7PGDG.noarch.rpm">PGDG RPM pgdg-redhat-repo 42.0-66.rhel9.7PGDG</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-99-1" aria-label="Return to citation 99, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-install-instances--cite-99-2" aria-label="Return to citation 99, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-install-instances--source-100">[100] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-server-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18-server 18.6-1PGDG.rhel9.7</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-install-instances--cite-100-2" aria-label="Return to citation 100, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-install-instances--cite-100-3" aria-label="Return to citation 100, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-install-instances--cite-100-4" aria-label="Return to citation 100, occurrence 4">↩4</a><a class="citation-return" href="#postgresql-install-instances--cite-100-5" aria-label="Return to citation 100, occurrence 5">↩5</a><a class="citation-return" href="#postgresql-install-instances--cite-100-6" aria-label="Return to citation 100, occurrence 6">↩6</a><a class="citation-return" href="#postgresql-install-instances--cite-100-7" aria-label="Return to citation 100, occurrence 7">↩7</a><a class="citation-return" href="#postgresql-install-instances--cite-100-8" aria-label="Return to citation 100, occurrence 8">↩8</a><a class="citation-return" href="#postgresql-install-instances--cite-100-9" aria-label="Return to citation 100, occurrence 9">↩9</a></span></div><div class="source-entry" id="postgresql-install-instances--source-101">[101] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-contrib-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18-contrib 18.6-1PGDG.rhel9.7</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-101-1" aria-label="Return to citation 101, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-102">[102] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/using_selinux/troubleshooting-problems-related-to-selinux_using-selinux">Chapter&nbsp;5.&nbsp;Troubleshooting problems related to SELinux | Using SELinux | Red Hat Enterprise Linux | 9 | Red Hat Documentation</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-102-1" aria-label="Return to citation 102, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-install-instances--cite-102-2" aria-label="Return to citation 102, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-install-instances--cite-102-3" aria-label="Return to citation 102, occurrence 3">↩3</a><a class="citation-return" href="#postgresql-install-instances--cite-102-4" aria-label="Return to citation 102, occurrence 4">↩4</a><a class="citation-return" href="#postgresql-install-instances--cite-102-5" aria-label="Return to citation 102, occurrence 5">↩5</a><a class="citation-return" href="#postgresql-install-instances--cite-102-6" aria-label="Return to citation 102, occurrence 6">↩6</a></span></div><div class="source-entry" id="postgresql-install-instances--source-104">[104] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/7/html/selinux_users_and_administrators_guide/sect-managing_confined_services-postgresql-configuration_examples">21.4.&nbsp;Configuration Examples | SELinux User’s and Administrator’s Guide | Red Hat Enterprise Linux | 7 | Red Hat Documentation</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-104-1" aria-label="Return to citation 104, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-install-instances--cite-104-2" aria-label="Return to citation 104, occurrence 2">↩2</a><a class="citation-return" href="#postgresql-install-instances--cite-104-3" aria-label="Return to citation 104, occurrence 3">↩3</a></span></div><div class="source-entry" id="postgresql-install-instances--source-105">[105] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18 18.6-1PGDG.rhel9.7</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-105-1" aria-label="Return to citation 105, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-install-instances--source-106">[106] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/pgaudit_18-18.0-1PGDG.rhel9.x86_64.rpm">PGDG RPM pgaudit_18 18.0-1PGDG.rhel9</a><span class="citation-returns"><a class="citation-return" href="#postgresql-install-instances--cite-106-1" aria-label="Return to citation 106, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="postgresql-storage-transactions.html"><span>Previous · PostgreSQL</span><strong>Storage, transactions and tablespaces</strong></a></div><div><a rel="next" href="postgresql-administration.html"><span>Next · PostgreSQL</span><strong>Objects, roles and administration</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/run.html">Explore Get a server running ↗</a><div class="current-group"><h2>In PostgreSQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/postgresql-install-instances.html">Installation, services and instances</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-installation.html">Installing MySQL on Linux</a><a href="mysql-configuration.html">Configuration and systemd services</a><a href="mysql-troubleshooting.html">Startup, OS security and multiple instances</a><a href="mysql-client-storage.html">Client workflow and moving the data directory</a></div><div><span>MongoDB</span><a href="mongodb-installation.html">Installation and first start</a><a href="mongodb-instances.html">Troubleshooting and isolated instances</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

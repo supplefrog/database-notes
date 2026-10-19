@@ -1,0 +1,144 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Installing MySQL on Linux — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-installation"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/run.html">Get a server running</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Get a server running</p><h1>Installing MySQL on Linux</h1></header>
+<div class="reader-controls"><a href="../tasks/run.html">← Get a server running</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a aria-current="page" href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-0395">Installation</a><a class="level-2" href="#mysql-b-0451">Choose one installation method</a><a class="level-3" href="#mysql-installation--section-1">Repository installation and GPG trust</a><a class="level-3" href="#mysql-installation--section-2">Local RPM packages</a><a class="level-3" href="#mysql-installation--section-3">Generic Linux archive</a><a class="level-3" href="#mysql-installation--section-4">RHEL package origin and support contract</a><a class="level-3" href="#mysql-installation--section-5">Complete the trust and first-start sequence</a><a class="level-2" href="#mysql-installation--section-6">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-install-instances.html">Installation, services and instances</a><p class="product-label">MongoDB</p><a href="mongodb-installation.html">Installation and first start</a><a href="mongodb-instances.html">Troubleshooting and isolated instances</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-installation; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-installation--cite-1-1" class="citation-ref" href="#mysql-installation--source-1" aria-label="Source 1">[1]</a><a id="mysql-installation--cite-72-1" class="citation-ref" href="#mysql-installation--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-installation--installation" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0395">Installation</h2>
+<p><span id="mysql-installation--1-using-yum-repository" class="source-anchor"></span>
+<span id="mysql-installation--2-using-packages" class="source-anchor"></span>
+<span id="mysql-installation--dependency-tree" class="source-anchor"></span>
+<span id="mysql-installation--3-generic-linux-tarball" class="source-anchor"></span>
+<span id="mysql-b-0397" class="source-anchor"></span>
+<span id="mysql-b-0398" class="source-anchor"></span>
+<span id="mysql-b-0404" class="source-anchor"></span>
+<span id="mysql-b-0405" class="source-anchor"></span>
+<span id="mysql-b-0407" class="source-anchor"></span>
+<span id="mysql-b-0410" class="source-anchor"></span>
+<span id="mysql-b-0411" class="source-anchor"></span>
+<span id="mysql-b-0415" class="source-anchor"></span>
+<span id="mysql-b-0417" class="source-anchor"></span>
+<span id="mysql-b-0420" class="source-anchor"></span>
+<span id="mysql-b-0423" class="source-anchor"></span>
+<span id="mysql-b-0425" class="source-anchor"></span>
+<span id="mysql-b-0427" class="source-anchor"></span>
+<span id="mysql-b-0429" class="source-anchor"></span>
+<span id="mysql-b-0431" class="source-anchor"></span>
+<span id="mysql-b-0432" class="source-anchor"></span>
+<span id="mysql-b-0437" class="source-anchor"></span>
+<span id="mysql-b-0444" class="source-anchor"></span>
+<span id="mysql-b-0446" class="source-anchor"></span>
+<span id="mysql-b-0448" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0451">Choose one installation method</h2>
+<p>These package/service notes target <strong>RHEL 9, x86-64, Oracle MySQL Community 8.4 LTS RPMs</strong>. They are not Ubuntu/Debian or Windows commands. Enterprise packages require the corresponding entitlement/download source. Before installing, inventory existing MySQL/MariaDB packages, data and services; replacing an existing server is an upgrade/migration, not a fresh install.</p>
+
+<h3 id="mysql-installation--section-1">Repository installation and GPG trust</h3>
+<ol>
+<li>Obtain the current EL9 repository-configuration RPM from the official MySQL Yum download page linked by the installation manual. Its filename/build and signing key change; do not copy the old EL8 release-RPM URL or import every historical key.</li>
+<li>Verify the package signature and the signing-key fingerprint through the official download/signature instructions. Keep <code>gpgcheck=1</code>; a missing/expired key is not a reason to disable verification. <code>rpm -K downloaded-package.rpm</code> checks a downloaded RPM against trusted keys; a key imported from an unverified source does not prove authenticity.</li>
+<li>Install that verified repository package using <code>dnf</code>. Inspect <code>/etc/yum.repos.d/mysql-community.repo</code> and enable the <strong>8.4 LTS</strong> server channel, with other server-series channels disabled. Verify the repository’s actual IDs; current guidance names <code>mysql-8.4-lts-community</code>.</li>
+<li>Inspect the transaction before accepting installation of <code>mysql-community-server</code>. DNF resolves dependencies. EL8’s module-disable step is specific to EL8 and must not be copied unconditionally to EL9.</li>
+</ol>
+<p>Read-only inventory examples and the install command after those prerequisites:</p>
+<pre tabindex="0" role="region" aria-label="Installing MySQL on Linux: code 1, horizontally scrollable"><code class="language-bash">dnf repolist enabled
+rpm -qa 'mysql*' 'mariadb*'
+sudo dnf install mysql-community-server
+</code></pre>
+<p>Do not add <code>-y</code> until the selected repository, architecture and package transaction have been reviewed. The RPM unit initializes an empty data directory on first start; confirm this is a deliberately new instance and that required storage is mounted. Start/manage it with the vendor systemd unit, then use the initial-password mechanism documented for that package and secure the root account. Do not copy initial passwords into scripts or notes.</p>
+
+<h3 id="mysql-installation--section-2">Local RPM packages</h3>
+<p>Download matching 8.4 builds for EL9 from official distribution/archives, verify signatures, and use DNF on the complete selected local package set. Do not force RPM dependencies or mix EL8/EL9, Community/Enterprise or server-series packages.</p>
+<pre tabindex="0" role="region" aria-label="Installing MySQL on Linux: code 2, horizontally scrollable"><code class="language-text">mysql-community-server
+  client and common runtime requirements
+    mysql-community-client
+    mysql-community-libs
+    mysql-community-client-plugins
+    mysql-community-common
+</code></pre>
+<p>This is a functional dependency sketch, not a fixed resolver graph: use package metadata for the exact selected build.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Installing MySQL on Linux: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Optional package/data class</th>
+<th>Purpose and qualification</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ICU data</td>
+<td>Unicode support where the selected package split requires it.</td>
+</tr>
+<tr>
+<td>Test</td>
+<td>Test programs/data; not required to run production workloads.</td>
+</tr>
+<tr>
+<td>Debuginfo</td>
+<td>Symbols and source locations for diagnosis; normally separated to reduce installed size, not to secure secret internals.</td>
+</tr>
+<tr>
+<td>Devel</td>
+<td>Headers/libraries for building against client APIs.</td>
+</tr>
+<tr>
+<td>Libs-compat</td>
+<td>Older client ABI compatibility, only where offered and required; not a reason to mix arbitrary packages.</td>
+</tr>
+</tbody>
+</table></div>
+
+<h3 id="mysql-installation--section-3">Generic Linux archive</h3>
+<p>A generic tarball contains a prebuilt server/client layout, libraries, documentation and support files, not every host dependency or a guaranteed systemd unit. Match architecture/glibc and required libraries to the selected build. Verify the download, create a dedicated OS account, choose a new empty datadir, initialize with the selected server binary as documented, and secure the generated administrative account. Preserve package-managed installations separately. Supplied SysV examples are not modern systemd integration.</p>
+<p>Use the <a href="mysql-configuration.html">configuration chapter</a> for paths and a service decision checklist. Do not place downloaded configuration files directly over <code>/etc/my.cnf</code>.</p>
+
+<h3 id="mysql-installation--section-4">RHEL package origin and support contract</h3>
+<p><strong>The production baseline is RHEL 9 x86_64 with Oracle MySQL Community 8.4 LTS RPMs from Oracle’s MySQL Yum repository.</strong> Use a maintained RHEL 9 minor release and an approved current 8.4 maintenance build. Oracle’s platform matrix includes this OS/architecture. This is not a claim that a RHEL subscription supports Oracle’s independently supplied database RPMs; confirm the required vendor support entitlement separately.</p>
+<p>RHEL also supplies MySQL through <strong>AppStream</strong>, with its own packaging and lifecycle: Red Hat documents 8.0 as the initial RHEL 9 stream and 8.4 from RHEL 9.6. Its <code>mysql-server</code> / <code>dnf module install mysql:8.4/server</code> route is an <strong>alternative</strong>, not a prerequisite to the selected <code>mysql-community-server</code> route. Both use a <code>mysqld</code> service name, which does not make their helper scripts, multiple-instance support or upgrade procedures interchangeable. Do not mix Red Hat and Oracle server packages or run AppStream module switching against this Oracle-RPM installation. Red Hat documents containers for its multiple-instance route; the named vendor template in these notes is the Oracle-RPM route.</p>
+<p>Before approving a host, record <code>/etc/redhat-release</code>, <code>uname -m</code>, the enabled repository IDs, full installed package versions/vendor, and the installed unit/config file list. Resolve existing MariaDB/MySQL packages or enabled competing streams as a migration decision; do not force replacement or erase their data.</p>
+
+<h3 id="mysql-installation--section-5">Complete the trust and first-start sequence</h3>
+<ol>
+<li>Download the <strong>EL9</strong> repository RPM and corresponding current public signing key through Oracle’s official HTTPS download/signature pages. Compare the full fingerprint/key material and validity to the vendor publication for the selected package; a familiar filename, short key ID or keyserver response alone is not trust. The GPG manual documents changing signing-key release boundaries, so no perpetual key-year URL is assumed here.</li>
+<li>After that independent check, import the reviewed key into the <strong>RPM</strong> keyring (a personal GPG keyring is not the same store). Check the repository RPM’s embedded signature before installation. In this example <code>REPO_RPM</code> must be set to the exact downloaded EL9 repository RPM, and <code>mysql_pubkey.asc</code> is the independently verified downloaded public key:</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Installing MySQL on Linux: code 3, horizontally scrollable"><code class="language-bash">: "${REPO_RPM:?Set the exact verified EL9 repository RPM path}"
+sudo rpm --import ./mysql_pubkey.asc
+rpm --checksig "$REPO_RPM"
+</code></pre>
+<p>Stop unless the output confirms valid <strong>digests and signatures</strong> under the intended key; do not proceed on NOKEY, NOT OK, expiry or digest-only success. Only then install that file with <code>sudo dnf install "$REPO_RPM"</code>. Inspect the installed repository configuration, keep <code>gpgcheck=1</code>, and enable only the intended 8.4 server series. Review available packages with <code>dnf list --showduplicates mysql-community-server</code> and the selected transaction/repository; record the approved full version. Do not disable signatures to work around a repository/key problem.</p>
+<ol start="3">
+<li>Install <code>mysql-community-server</code> from the selected channel as described above. Inspect <code>rpm -ql mysql-community-server</code>, <code>systemctl cat mysqld.service</code> and effective option files. Before first start, deliberately keep classic connections local with <code>bind_address=127.0.0.1</code>; if X Protocol is not needed, configure <code>mysqlx=OFF</code> in the intended <code>[mysqld]</code> group. This avoids assuming that the classic bind also confines X Protocol. Confirm the intended empty datadir is on the required mounted storage; <strong>do not initialize an existing database</strong>.</li>
+<li>Validate options, then start <strong>without implicitly enabling boot startup</strong>:</li>
+</ol>
+<pre tabindex="0" role="region" aria-label="Installing MySQL on Linux: code 4, horizontally scrollable"><code class="language-bash">sudo /usr/sbin/mysqld --validate-config
+sudo systemctl start mysqld.service
+systemctl status mysqld.service
+sudo journalctl -u mysqld.service -b
+</code></pre>
+<p>The Oracle RPM helper initializes a deliberately empty datadir and writes the temporary root password to <code>/var/log/mysqld.log</code>. Read it privately with privileged access, never in shared transcripts. Run <code>mysql_secure_installation</code> interactively using that temporary password, review each prompt, set the required root credential, remove unnecessary anonymous/test access and prevent unwanted remote root access. Do not put the password in arguments, a SQL example or a recorded shell session.</p>
+<ol start="5">
+<li>Reconnect with <code>mysql --protocol=SOCKET --socket=/var/lib/mysql/mysql.sock --user=root --password</code> and inspect <code>SELECT VERSION(), @@version_comment, @@datadir, @@socket, @@port, @@server_uuid;</code>. Confirm <code>ss -ltn</code>/<code>ss -lx</code> show only intended listeners; check logs, ownership and enforcing SELinux. Provision least-privilege application access, verified TLS and source-restricted firewall rules <strong>before</strong> changing the bind to a remote interface. Only after successful checks enable boot startup with <code>sudo systemctl enable mysqld.service</code> and rehearse the required mount/boot ordering.</li>
+</ol>
+<p>For an already initialized production instance, review the package’s documented <code>NO_INIT=true</code> in <code>/etc/sysconfig/mysql</code> and required mount dependencies to prevent an absent mount being silently initialized. This is a shared package environment file: account for every named instance and its initial-provisioning workflow before changing it.</p>
+<p><a id="mysql-installation--cite-17-1" class="citation-ref" href="#mysql-installation--source-17" aria-label="Source 17">[17]</a><a id="mysql-installation--cite-18-1" class="citation-ref" href="#mysql-installation--source-18" aria-label="Source 18">[18]</a><a id="mysql-installation--cite-19-1" class="citation-ref" href="#mysql-installation--source-19" aria-label="Source 19">[19]</a><a id="mysql-installation--cite-72-2" class="citation-ref" href="#mysql-installation--source-72" aria-label="Source 72">[72]</a><a id="mysql-installation--cite-88-1" class="citation-ref" href="#mysql-installation--source-88" aria-label="Source 88">[88]</a><a id="mysql-installation--cite-158-1" class="citation-ref" href="#mysql-installation--source-158" aria-label="Source 158">[158]</a><a id="mysql-installation--cite-159-1" class="citation-ref" href="#mysql-installation--source-159" aria-label="Source 159">[159]</a><a id="mysql-installation--cite-160-1" class="citation-ref" href="#mysql-installation--source-160" aria-label="Source 160">[160]</a><a id="mysql-installation--cite-21-1" class="citation-ref" href="#mysql-installation--source-21" aria-label="Source 21">[21]</a></p>
+
+<h2 id="mysql-installation--section-6">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-installation--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-installation--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-installation--source-17">[17] <a href="https://dev.mysql.com/doc/refman/8.4/en/linux-installation-yum-repo.html">https://dev.mysql.com/doc/refman/8.4/en/linux-installation-yum-repo.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.5.1 Installing MySQL on Linux Using the MySQL Yum Repository
+<span class="citation-returns"><a class="citation-return" href="#mysql-installation--cite-17-1" aria-label="Return to citation 17, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-installation--source-18">[18] <a href="https://dev.mysql.com/doc/refman/8.4/en/linux-installation-rpm.html">https://dev.mysql.com/doc/refman/8.4/en/linux-installation-rpm.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.5.4 Installing MySQL on Linux Using RPM Packages from Oracle
+<span class="citation-returns"><a class="citation-return" href="#mysql-installation--cite-18-1" aria-label="Return to citation 18, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-installation--source-19">[19] <a href="https://dev.mysql.com/doc/refman/8.4/en/using-systemd.html">https://dev.mysql.com/doc/refman/8.4/en/using-systemd.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.5.9 Managing MySQL Server with systemd
+<span class="citation-returns"><a class="citation-return" href="#mysql-installation--cite-19-1" aria-label="Return to citation 19, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-installation--source-21">[21] <a href="https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html">https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 7.1.8 Server System Variables
+<span class="citation-returns"><a class="citation-return" href="#mysql-installation--cite-21-1" aria-label="Return to citation 21, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-installation--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-installation--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩1</a><a class="citation-return" href="#mysql-installation--cite-72-2" aria-label="Return to citation 72, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-installation--source-88">[88] <a href="https://dev.mysql.com/doc/refman/8.4/en/binary-installation.html">https://dev.mysql.com/doc/refman/8.4/en/binary-installation.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.2 Installing MySQL on Unix/Linux Using Generic Binaries
+<span class="citation-returns"><a class="citation-return" href="#mysql-installation--cite-88-1" aria-label="Return to citation 88, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-installation--source-158">[158] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_and_using_database_servers/assembly_using-mysql_configuring-and-using-database-servers">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_and_using_database_servers/assembly_using-mysql_configuring-and-using-database-servers</a> — Chapter&nbsp;3.&nbsp;Using MySQL | Configuring and using database servers | Red Hat Enterprise Linux | 9 | Red Hat Documentation
+<span class="citation-returns"><a class="citation-return" href="#mysql-installation--cite-158-1" aria-label="Return to citation 158, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-installation--source-159">[159] <a href="https://dev.mysql.com/doc/refman/8.4/en/checking-gpg-signature.html">https://dev.mysql.com/doc/refman/8.4/en/checking-gpg-signature.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.1.4.2 Signature Checking Using GnuPG
+<span class="citation-returns"><a class="citation-return" href="#mysql-installation--cite-159-1" aria-label="Return to citation 159, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-installation--source-160">[160] <a href="https://dev.mysql.com/doc/refman/8.4/en/checking-rpm-signature.html">https://dev.mysql.com/doc/refman/8.4/en/checking-rpm-signature.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.1.4.4 Signature Checking Using RPM<span class="citation-returns"><a class="citation-return" href="#mysql-installation--cite-160-1" aria-label="Return to citation 160, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-objects.html"><span>Previous · MySQL</span><strong>Objects, sessions and table management</strong></a></div><div><a rel="next" href="mysql-configuration.html"><span>Next · MySQL</span><strong>Configuration and systemd services</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/run.html">Explore Get a server running ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-install-instances.html">Installation, services and instances</a></div><div><span>MongoDB</span><a href="mongodb-installation.html">Installation and first start</a><a href="mongodb-instances.html">Troubleshooting and isolated instances</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

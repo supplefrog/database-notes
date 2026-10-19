@@ -1,0 +1,204 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Architecture, editions and tools — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mongodb-architecture"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/understand.html">Understand the moving parts</a></nav>
+<header class="reader-head"><p class="reader-context">MongoDB <span aria-hidden="true">/</span> Understand the moving parts</p><h1>Architecture, editions and tools</h1></header>
+<div class="reader-controls"><a href="../tasks/understand.html">← Understand the moving parts</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MongoDB chapters"><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mongodb-architecture.html">Architecture, editions and tools</a></li><li><a  href="../chapters/mongodb-storage.html">WiredTiger, transactions and consistency</a></li><li><a  href="../chapters/mongodb-modeling.html">Document modeling and BSON types</a></li><li><a  href="../chapters/mongodb-installation.html">Installation and first start</a></li><li><a  href="../chapters/mongodb-instances.html">Troubleshooting and isolated instances</a></li><li><a  href="../chapters/mongodb-administration.html">Objects, users and administration</a></li><li><a  href="../chapters/mongodb-performance.html">Auditing and performance</a></li><li><a  href="../chapters/mongodb-backup.html">Backup and recovery</a></li><li><a  href="../chapters/mongodb-replication.html">Replica sets and high availability</a></li><li><a  href="../chapters/mongodb-sharding.html">Sharding and resharding</a></li><li><a  href="../chapters/mongodb-security.html">Hardening, TLS and key rotation</a></li><li><a  href="../chapters/mongodb-upgrades.html">Upgrades and feature compatibility</a></li><li><a  href="../chapters/mongodb-migration.html">Relational-to-document migration</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#baseline">Choose the server, not the hosting product</a><a class="level-2" href="#tools">Executables and clients</a><a class="level-2" href="#request-path">Follow a request</a><a class="level-2" href="#files">Files are not collections you can copy independently</a><a class="level-2" href="#configuration">Configuration and identity</a><a class="level-2" href="#mongodb-architecture--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-overview.html">Database vocabulary, editions and tools</a><a href="mysql-connections.html">Connections and query execution</a><a href="mysql-layout.html">Executables, schemas and server files</a><p class="product-label">PostgreSQL</p><a href="postgresql-foundations.html">PostgreSQL foundations and tools</a></nav></details></div>
+<article class="prose">
+<h2 id="baseline">Choose the server, not the hosting product</h2>
+<p>These notes use self-managed <strong>MongoDB Community 8.0</strong>, WiredTiger, <strong>RHEL 9 x86_64</strong>, SELinux enforcing and systemd, using MongoDB vendor RPMs (not Red Hat AppStream). The concrete package baseline is <strong>8.0.29</strong>; shell <strong>mongosh 2.10.0</strong>; Database Tools <strong>100.17.0</strong>. Tools and shell have their own release numbers: neither is “MongoDB Tools 8.0.” Examples below are independent snippets, not one script to paste end-to-end. Use a fresh shell or a local block when repeating snippets that declare <code>const</code> bindings. These are pinned documentation targets, not a promise that a mutable repository still retains every package. Check package availability before changing a host.<a id="mongodb-architecture--cite-4-1" class="citation-ref" href="#mongodb-architecture--source-4" aria-label="Source 4">[4]</a><a id="mongodb-architecture--cite-5-1" class="citation-ref" href="#mongodb-architecture--source-5" aria-label="Source 5">[5]</a><a id="mongodb-architecture--cite-48-1" class="citation-ref" href="#mongodb-architecture--source-48" aria-label="Source 48">[48]</a></p>
+<p>8.0 is a major release supported for on-premises use. The published Server lifecycle lists October 31, 2029 as 8.0 end-of-life under Enterprise Advanced; that date is not an entitlement to commercial support for a Community installation. RHEL 9 x86_64 is explicitly in the Community 8.0 installation matrix. Review advisories and supported OS/kernel combinations before adopting any pinned patch.<a id="mongodb-architecture--cite-4-2" class="citation-ref" href="#mongodb-architecture--source-4" aria-label="Source 4">[4]</a><a id="mongodb-architecture--cite-104-1" class="citation-ref" href="#mongodb-architecture--source-104" aria-label="Source 104">[104]</a><a id="mongodb-architecture--cite-50-1" class="citation-ref" href="#mongodb-architecture--source-50" aria-label="Source 50">[50]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Architecture, editions and tools: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Choice</th>
+<th>What it supplies</th>
+<th>What not to assume</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Community</td>
+<td>Self-managed server, replication, sharding, transactions, authorization, TLS</td>
+<td>No Enterprise audit or encrypted storage engine</td>
+</tr>
+<tr>
+<td>Enterprise Advanced</td>
+<td>Commercial distribution and subscription features</td>
+<td>Installation alone does not configure backup, auditing or key custody</td>
+</tr>
+<tr>
+<td>Atlas</td>
+<td>Managed service, tier-dependent backup/security features</td>
+<td>Not the procedure or free substitute used here</td>
+</tr>
+<tr>
+<td>Community SSPL</td>
+<td>Source available under Server Side Public License</td>
+<td>Not an OSI-approved open-source license; offering it as a service requires license review</td>
+</tr>
+</tbody>
+</table></div>
+<p>Feature and license boundaries matter more than the download label. Community logs/profiling are not a security audit trail. Community can use host/volume encryption, but it has no <code>security.enableEncryption</code> equivalent to Enterprise’s encrypted storage engine.<a id="mongodb-architecture--cite-11-1" class="citation-ref" href="#mongodb-architecture--source-11" aria-label="Source 11">[11]</a><a id="mongodb-architecture--cite-15-1" class="citation-ref" href="#mongodb-architecture--source-15" aria-label="Source 15">[15]</a><a id="mongodb-architecture--cite-47-1" class="citation-ref" href="#mongodb-architecture--source-47" aria-label="Source 47">[47]</a></p>
+
+<h2 id="tools">Executables and clients</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Architecture, editions and tools: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Program</th>
+<th>Runs where</th>
+<th>Job</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mongod</code></td>
+<td>Each data-bearing host</td>
+<td>Stores documents/indexes; runs replication and query execution</td>
+</tr>
+<tr>
+<td><code>mongos</code></td>
+<td>Router host(s)</td>
+<td>Routes requests to shards; no application <code>dbPath</code></td>
+</tr>
+<tr>
+<td><code>mongosh</code></td>
+<td>Administrator workstation or DB host</td>
+<td>JavaScript/BSON shell; separately packaged</td>
+</tr>
+<tr>
+<td>Driver</td>
+<td>Application</td>
+<td>Authentication, server discovery, pooling, read preference, retries</td>
+</tr>
+<tr>
+<td><code>mongodump</code> / <code>mongorestore</code></td>
+<td>Backup worker</td>
+<td>BSON logical dump/restore, metadata and index definitions</td>
+</tr>
+<tr>
+<td><code>mongoexport</code> / <code>mongoimport</code></td>
+<td>Migration worker</td>
+<td>JSON/CSV interchange; not a complete backup</td>
+</tr>
+<tr>
+<td><code>mongostat</code> / <code>mongotop</code></td>
+<td>Monitor</td>
+<td>Server activity and collection time samples</td>
+</tr>
+<tr>
+<td><code>bsondump</code></td>
+<td>Operator workstation</td>
+<td>Inspect BSON offline; can expose sensitive contents</td>
+</tr>
+</tbody>
+</table></div>
+<p>The vendor RPM repository and Red Hat OS repositories have separate provenance/support responsibilities. <code>mongodb-org-server</code>, <code>mongodb-org-mongos</code>, <code>mongodb-mongosh</code> and <code>mongodb-database-tools</code> have different contents; a tarball does not create the package’s service user/configuration.<a id="mongodb-architecture--cite-105-1" class="citation-ref" href="#mongodb-architecture--source-105" aria-label="Source 105">[105]</a><a id="mongodb-architecture--cite-104-2" class="citation-ref" href="#mongodb-architecture--source-104" aria-label="Source 104">[104]</a></p>
+
+<h2 id="request-path">Follow a request</h2>
+<pre tabindex="0" role="region" aria-label="Architecture, editions and tools: code 1, horizontally scrollable"><code class="language-text">application -&gt; driver pool -&gt; TLS handshake -&gt; authentication
+                                      -&gt; authorization per operation
+  standalone: mongod -&gt; plan/execution -&gt; WiredTiger
+  replica set: driver discovers rs0 -&gt; primary (writes)
+                                  -&gt; eligible member (reads)
+  sharded: driver -&gt; mongos -&gt; config metadata/routing cache
+                           -&gt; shard replica-set primary/eligible reader
+                           -&gt; merge results -&gt; client
+</code></pre>
+<p>Authentication establishes the user and authentication database; authorization checks roles against the target database/collection. TLS protects and authenticates the transport peer, not the user’s object privileges. A session is not a new authenticated socket for every operation: drivers pool connections and carry session identifiers across operations.<a id="mongodb-architecture--cite-18-1" class="citation-ref" href="#mongodb-architecture--source-18" aria-label="Source 18">[18]</a><a id="mongodb-architecture--cite-40-1" class="citation-ref" href="#mongodb-architecture--source-40" aria-label="Source 40">[40]</a><a id="mongodb-architecture--cite-95-1" class="citation-ref" href="#mongodb-architecture--source-95" aria-label="Source 95">[95]</a></p>
+<p>The server matches a query shape to candidate access plans. Index scans may still fetch full documents; a collection scan is not automatically a bug on a tiny collection. <code>explain</code> distinguishes planning from measured execution, while the profiler records completed work. See <a href="mongodb-performance.html#explain">measure an access path</a>.<a id="mongodb-architecture--cite-24-1" class="citation-ref" href="#mongodb-architecture--source-24" aria-label="Source 24">[24]</a></p>
+<p>A replica set keeps copies of the same dataset and elects a primary. Sharding partitions data across replica sets; <code>mongos</code> uses the shard key and routing metadata to target requests. Adding secondaries does not distribute writes to one unsharded collection. Adding shards does not rescue a poor shard key.<a id="mongodb-architecture--cite-30-1" class="citation-ref" href="#mongodb-architecture--source-30" aria-label="Source 30">[30]</a><a id="mongodb-architecture--cite-32-1" class="citation-ref" href="#mongodb-architecture--source-32" aria-label="Source 32">[32]</a><a id="mongodb-architecture--cite-34-1" class="citation-ref" href="#mongodb-architecture--source-34" aria-label="Source 34">[34]</a></p>
+
+<h2 id="files">Files are not collections you can copy independently</h2>
+<p>RPM defaults for this target are established by the versioned package specification, configuration and unit, not generic installation-page defaults:[100]<a id="mongodb-architecture--cite-101-1" class="citation-ref" href="#mongodb-architecture--source-101" aria-label="Source 101">[101]</a><a id="mongodb-architecture--cite-102-1" class="citation-ref" href="#mongodb-architecture--source-102" aria-label="Source 102">[102]</a></p>
+<pre tabindex="0" role="region" aria-label="Architecture, editions and tools: code 2, horizontally scrollable"><code class="language-text">/usr/bin/                    mongod, mongos; separately packaged clients
+/etc/mongod.conf             YAML startup configuration
+/usr/lib/systemd/system/mongod.service  vendor unit
+/etc/sysconfig/mongod        optional unit environment overrides
+/run/mongodb/               vendor unit runtime directory
+/var/log/mongodb/mongod.log   diagnostic log
+/var/lib/mongo/            storage.dbPath
+  WiredTiger*                engine metadata and supporting files
+  _mdb_catalog.wt            catalog metadata (implementation detail)
+  collection-*.wt            collection storage
+  index-*.wt                 index storage
+  WiredTigerHS.wt            history store
+  journal/                   WiredTiger write-ahead journal
+  diagnostic.data/           diagnostic samples
+  mongod.lock                process/storage locking information
+</code></pre>
+<p>Names are illustrative, not an API or recovery recipe. Do not rename, remove or mix <code>.wt</code> files. A secondary index is a separate structure; ordinary <code>_id</code> indexing does not mean every collection is physically clustered like InnoDB. Back up the coherent instance, not selected engine files.<a id="mongodb-architecture--cite-10-1" class="citation-ref" href="#mongodb-architecture--source-10" aria-label="Source 10">[10]</a><a id="mongodb-architecture--cite-21-1" class="citation-ref" href="#mongodb-architecture--source-21" aria-label="Source 21">[21]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Architecture, editions and tools: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Logical database</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>admin</code></td>
+<td>Administrative commands and users commonly authenticated against <code>admin</code></td>
+</tr>
+<tr>
+<td><code>local</code></td>
+<td>Node-local replication data, including replica configuration/oplog; not ordinary replicated app data</td>
+</tr>
+<tr>
+<td><code>config</code></td>
+<td>Internal metadata, especially sharded cluster placement; never hand-edit routing records</td>
+</tr>
+<tr>
+<td><code>shop</code></td>
+<td>Dataset used throughout these notes: <code>orders</code>, later <code>customers</code> and <code>inventory</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>The RPM service runs as <strong>mongod:mongod</strong>, not a login/application user. Give the service user exclusive write access to its data/log directories. Separate databases inside one <code>mongod</code> still share storage, cache, CPU and failure domain. Use <a href="mongodb-instances.html#isolation">isolated instances</a> when independent process/configuration boundaries are required; use separate hosts for real failure-domain separation.<a id="mongodb-architecture--cite-6-1" class="citation-ref" href="#mongodb-architecture--source-6" aria-label="Source 6">[6]</a><a id="mongodb-architecture--cite-31-1" class="citation-ref" href="#mongodb-architecture--source-31" aria-label="Source 31">[31]</a></p>
+
+<h2 id="configuration">Configuration and identity</h2>
+<p>The service’s <code>ExecStart</code> determines which config file is read. Explicit command-line values override corresponding YAML values (for example <code>--bind_ip</code> overrides <code>net.bindIp</code>).<a id="mongodb-architecture--cite-86-1" class="citation-ref" href="#mongodb-architecture--source-86" aria-label="Source 86">[86]</a><a id="mongodb-architecture--cite-89-1" class="citation-ref" href="#mongodb-architecture--source-89" aria-label="Source 89">[89]</a> Inspect the unit and parsed options rather than trusting the file’s name. Most startup configuration edits need a restart; <code>setParameter</code> changes only documented dynamic parameters and is not a persistent settings file.<a id="mongodb-architecture--cite-6-2" class="citation-ref" href="#mongodb-architecture--source-6" aria-label="Source 6">[6]</a><a id="mongodb-architecture--cite-16-1" class="citation-ref" href="#mongodb-architecture--source-16" aria-label="Source 16">[16]</a></p>
+<pre tabindex="0" role="region" aria-label="Architecture, editions and tools: code 3, horizontally scrollable"><code class="language-javascript">// mongosh; clusterMonitor or another role allowing these inspections
+const admin = db.getSiblingDB("admin");
+admin.runCommand({getCmdLineOpts: 1});
+admin.runCommand({buildInfo: 1});
+admin.runCommand({hello: 1});
+// FCV is inspected on a mongod, not on mongos:
+if (admin.runCommand({hello: 1}).msg !== "isdbgrid") {
+  admin.runCommand({getParameter: 1, featureCompatibilityVersion: 1});
+}
+</code></pre>
+<p>Record binary version, FCV, <code>dbPath</code>, listener, replica-set name and host list before disruptive work. <code>hello</code> identifies a replica-set primary/secondary or <code>mongos</code> (<code>msg: "isdbgrid"</code>); connecting to the wrong endpoint can otherwise make a valid command dangerously wrong.<a id="mongodb-architecture--cite-6-3" class="citation-ref" href="#mongodb-architecture--source-6" aria-label="Source 6">[6]</a><a id="mongodb-architecture--cite-28-1" class="citation-ref" href="#mongodb-architecture--source-28" aria-label="Source 28">[28]</a><a id="mongodb-architecture--cite-34-2" class="citation-ref" href="#mongodb-architecture--source-34" aria-label="Source 34">[34]</a></p>
+
+<h2 id="mongodb-architecture--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mongodb-architecture--source-4">[4] <a href="https://www.mongodb.com/docs/v8.0/release-notes/8.0">https://www.mongodb.com/docs/v8.0/release-notes/8.0</a> — Release Notes for MongoDB 8.0
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-4-1" aria-label="Return to citation 4, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-architecture--cite-4-2" aria-label="Return to citation 4, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-architecture--source-5">[5] <a href="https://www.mongodb.com/docs/mongodb-shell/changelog">https://www.mongodb.com/docs/mongodb-shell/changelog</a> — Release Notes - mongosh - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-5-1" aria-label="Return to citation 5, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-6">[6] <a href="https://www.mongodb.com/docs/v8.0/reference/configuration-options">https://www.mongodb.com/docs/v8.0/reference/configuration-options</a> — Self-Managed Configuration File Options - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-6-1" aria-label="Return to citation 6, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-architecture--cite-6-2" aria-label="Return to citation 6, occurrence 2">↩2</a><a class="citation-return" href="#mongodb-architecture--cite-6-3" aria-label="Return to citation 6, occurrence 3">↩3</a></span></div><div class="source-entry" id="mongodb-architecture--source-10">[10] <a href="https://www.mongodb.com/docs/v8.0/core/wiredtiger">https://www.mongodb.com/docs/v8.0/core/wiredtiger</a> — WiredTiger Storage Engine - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-10-1" aria-label="Return to citation 10, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-11">[11] <a href="https://www.mongodb.com/docs/v8.0/core/security-encryption-at-rest">https://www.mongodb.com/docs/v8.0/core/security-encryption-at-rest</a> — Encryption at Rest - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-11-1" aria-label="Return to citation 11, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-15">[15] <a href="https://www.mongodb.com/docs/v8.0/core/auditing">https://www.mongodb.com/docs/v8.0/core/auditing</a> — Auditing - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-15-1" aria-label="Return to citation 15, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-16">[16] <a href="https://www.mongodb.com/docs/v8.0/reference/command/setParameter">https://www.mongodb.com/docs/v8.0/reference/command/setParameter</a> — setParameter (database command) - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-16-1" aria-label="Return to citation 16, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-18">[18] <a href="https://www.mongodb.com/docs/v8.0/tutorial/manage-users-and-roles">https://www.mongodb.com/docs/v8.0/tutorial/manage-users-and-roles</a> — Manage Users and Roles on Self-Managed Deployments - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-18-1" aria-label="Return to citation 18, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-21">[21] <a href="https://www.mongodb.com/docs/v8.0/tutorial/backup-with-filesystem-snapshots">https://www.mongodb.com/docs/v8.0/tutorial/backup-with-filesystem-snapshots</a> — Back Up a Self-Managed Deployment with Filesystem Snapshots - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-21-1" aria-label="Return to citation 21, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-24">[24] <a href="https://www.mongodb.com/docs/v8.0/reference/explain-results">https://www.mongodb.com/docs/v8.0/reference/explain-results</a> — Explain Results - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-24-1" aria-label="Return to citation 24, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-28">[28] <a href="https://www.mongodb.com/docs/v8.0/reference/command/setFeatureCompatibilityVersion">https://www.mongodb.com/docs/v8.0/reference/command/setFeatureCompatibilityVersion</a> — setFeatureCompatibilityVersion (database command) - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-28-1" aria-label="Return to citation 28, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-30">[30] <a href="https://www.mongodb.com/docs/v8.0/core/replica-set-elections">https://www.mongodb.com/docs/v8.0/core/replica-set-elections</a> — Replica Set Elections - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-30-1" aria-label="Return to citation 30, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-31">[31] <a href="https://www.mongodb.com/docs/v8.0/core/replica-set-oplog">https://www.mongodb.com/docs/v8.0/core/replica-set-oplog</a> — Replica Set Oplog - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-31-1" aria-label="Return to citation 31, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-32">[32] <a href="https://www.mongodb.com/docs/v8.0/core/sharding-choose-a-shard-key">https://www.mongodb.com/docs/v8.0/core/sharding-choose-a-shard-key</a> — Choose a Shard Key - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-32-1" aria-label="Return to citation 32, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-34">[34] <a href="https://www.mongodb.com/docs/v8.0/tutorial/deploy-shard-cluster">https://www.mongodb.com/docs/v8.0/tutorial/deploy-shard-cluster</a> — Deploy a Self-Managed Sharded Cluster - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-34-1" aria-label="Return to citation 34, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-architecture--cite-34-2" aria-label="Return to citation 34, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-architecture--source-40">[40] <a href="https://www.mongodb.com/docs/v8.0/core/transactions">https://www.mongodb.com/docs/v8.0/core/transactions</a> — Transactions - Database Manual v8.0 - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-40-1" aria-label="Return to citation 40, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-47">[47] <a href="https://www.mongodb.com/licensing/server-side-public-license/faq">https://www.mongodb.com/licensing/server-side-public-license/faq</a> — Server Side Public License FAQ | MongoDB
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-47-1" aria-label="Return to citation 47, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-48">[48] <a href="https://www.mongodb.com/docs/database-tools/release-notes/dbtools-100.17.0-changelog">https://www.mongodb.com/docs/database-tools/release-notes/dbtools-100.17.0-changelog</a> — Database Tools - MongoDB Docs
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-48-1" aria-label="Return to citation 48, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-50">[50] <a href="https://www.mongodb.com/legal/support-policy/lifecycles">https://www.mongodb.com/legal/support-policy/lifecycles</a> — MongoDB Software Lifecycle Schedules
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-50-1" aria-label="Return to citation 50, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-86">[86] <a href="https://www.mongodb.com/docs/v8.0/reference/configuration-options.md">https://www.mongodb.com/docs/v8.0/reference/configuration-options.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-86-1" aria-label="Return to citation 86, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-89">[89] <a href="https://www.mongodb.com/docs/v8.0/reference/program/mongod.md">https://www.mongodb.com/docs/v8.0/reference/program/mongod.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-89-1" aria-label="Return to citation 89, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-95">[95] <a href="https://www.mongodb.com/docs/drivers/node/current/connect/connection-options/connection-pools.md">https://www.mongodb.com/docs/drivers/node/current/connect/connection-options/connection-pools.md</a>
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-95-1" aria-label="Return to citation 95, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-100">[100] <a href="https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongodb-org.spec">https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongodb-org.spec</a> — MongoDB r8.0.29 RPM specification
+</div><div class="source-entry" id="mongodb-architecture--source-101">[101] <a href="https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongod.service">https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongod.service</a> — MongoDB r8.0.29 RPM systemd unit
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-101-1" aria-label="Return to citation 101, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-102">[102] <a href="https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongod.conf">https://raw.githubusercontent.com/mongodb/mongo/r8.0.29/rpm/mongod.conf</a> — MongoDB r8.0.29 RPM configuration
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-102-1" aria-label="Return to citation 102, occurrence 1">↩</a></span></div><div class="source-entry" id="mongodb-architecture--source-104">[104] <a href="https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-red-hat.md">https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-red-hat.md</a> — MongoDB 8.0 RHEL install manual (mixed-platform passages flagged)
+<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-104-1" aria-label="Return to citation 104, occurrence 1">↩1</a><a class="citation-return" href="#mongodb-architecture--cite-104-2" aria-label="Return to citation 104, occurrence 2">↩2</a></span></div><div class="source-entry" id="mongodb-architecture--source-105">[105] <a href="https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-red-hat-tarball.md">https://www.mongodb.com/docs/v8.0/tutorial/install-mongodb-on-red-hat-tarball.md</a> — MongoDB 8.0 RHEL tarball and custom SELinux guidance<span class="citation-returns"><a class="citation-return" href="#mongodb-architecture--cite-105-1" aria-label="Return to citation 105, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div></div><div><a rel="next" href="mongodb-storage.html"><span>Next · MongoDB</span><strong>WiredTiger, transactions and consistency</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/understand.html">Explore Understand the moving parts ↗</a><div class="current-group"><h2>In MongoDB</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mongodb-architecture.html">Architecture, editions and tools</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-overview.html">Database vocabulary, editions and tools</a><a href="mysql-connections.html">Connections and query execution</a><a href="mysql-layout.html">Executables, schemas and server files</a></div><div><span>PostgreSQL</span><a href="postgresql-foundations.html">PostgreSQL foundations and tools</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

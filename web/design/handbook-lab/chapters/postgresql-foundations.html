@@ -1,0 +1,201 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>PostgreSQL foundations and tools — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="postgresql-foundations"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/understand.html">Understand the moving parts</a></nav>
+<header class="reader-head"><p class="reader-context">PostgreSQL <span aria-hidden="true">/</span> Understand the moving parts</p><h1>PostgreSQL foundations and tools</h1></header>
+<div class="reader-controls"><a href="../tasks/understand.html">← Understand the moving parts</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="PostgreSQL chapters"><ol class="chapter-list"><li><a aria-current="page" href="../chapters/postgresql-foundations.html">PostgreSQL foundations and tools</a></li><li><a  href="../chapters/postgresql-storage-transactions.html">Storage, transactions and tablespaces</a></li><li><a  href="../chapters/postgresql-install-instances.html">Installation, services and instances</a></li><li><a  href="../chapters/postgresql-administration.html">Objects, roles and administration</a></li><li><a  href="../chapters/postgresql-joins.html">Joins: keep the rows you mean</a></li><li><a  href="../chapters/postgresql-vacuum.html">Vacuum, freezing and bloat</a></li><li><a  href="../chapters/postgresql-audit-performance.html">Audit, statistics and performance</a></li><li><a  href="../chapters/postgresql-backup-recovery.html">Backup and point-in-time recovery</a></li><li><a  href="../chapters/postgresql-replication-ha.html">Replication and high availability</a></li><li><a  href="../chapters/postgresql-hardening.html">Authentication, TLS and hardening</a></li><li><a  href="../chapters/postgresql-upgrades.html">Minor and major upgrades</a></li><li><a  href="../chapters/postgresql-migration.html">Migrating to PostgreSQL</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#scope">Choose the server, not just the name</a><a class="level-3" href="#tools">Use the right utility</a><a class="level-2" href="#connection-path">Follow one connection</a><a class="level-3" href="#sessions-pooling">Sessions and pooling</a><a class="level-2" href="#postgresql-foundations--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">MySQL</p><a href="mysql-overview.html">Database vocabulary, editions and tools</a><a href="mysql-connections.html">Connections and query execution</a><a href="mysql-layout.html">Executables, schemas and server files</a><p class="product-label">MongoDB</p><a href="mongodb-architecture.html">Architecture, editions and tools</a></nav></details></div>
+<article class="prose">
+<h2 id="scope">Choose the server, not just the name</h2>
+<p>These notes target <strong>community PostgreSQL 18</strong>, with server and bundled command-line tools <strong>18.6</strong> as the documentation-review baseline. The official support table lists major 18 through <strong>14 November 2030</strong>. Install the maintained 18.x security/bug-fix release available from your approved repository, not an unqualified <code>latest</code> image; record its exact package revision before a change.<a id="postgresql-foundations--cite-1-1" class="citation-ref" href="#postgresql-foundations--source-1" aria-label="Source 1">[1]</a></p>
+<p>Linux procedures use <strong>RHEL 9.7 x86_64, systemd, SELinux enforcing, PGDG PostgreSQL 18 RPMs</strong>. The inspected server/client build is <code>18.6-1PGDG.rhel9.7</code> and repository RPM <code>42.0-66.rhel9.7PGDG</code>. PGDG’s last-two-minors policy is distinct from Red Hat’s RHEL/EUS lifecycle: revalidate the maintained minor and repository dependency match before deployment. These upstream packages are not Red Hat AppStream PostgreSQL or automatically covered by Red Hat database support.<a id="postgresql-foundations--cite-93-1" class="citation-ref" href="#postgresql-foundations--source-93" aria-label="Source 93">[93]</a><a id="postgresql-foundations--cite-94-1" class="citation-ref" href="#postgresql-foundations--source-94" aria-label="Source 94">[94]</a><a id="postgresql-foundations--cite-97-1" class="citation-ref" href="#postgresql-foundations--source-97" aria-label="Source 97">[97]</a> Shell blocks are Bash on that server, not Windows commands. <code>sudo</code> denotes OS administration; <code>sudo -u postgres</code> switches to the database service account. SQL blocks run in <code>psql</code> against the named cluster. The default unit <code>postgresql-18.service</code> manages <code>/var/lib/pgsql/18/data</code> on port 5432; a separate restore drill uses 5543. Paths, addresses and capacity settings called out as examples must be changed for the actual host. Never point a restore drill at the live data directory.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="PostgreSQL foundations and tools: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Component</th>
+<th>What it provides</th>
+<th>Boundary</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PostgreSQL core</td>
+<td>Server, SQL, roles, WAL, logical/physical backup and replication</td>
+<td>Open-source PostgreSQL License; no paid core edition is required for these tasks.<a id="postgresql-foundations--cite-65-1" class="citation-ref" href="#postgresql-foundations--source-65" aria-label="Source 65">[65]</a></td>
+</tr>
+<tr>
+<td>PGDG packages</td>
+<td>Versioned binaries and integration with distro packaging</td>
+<td>Upstream RPMs, separate from Red Hat’s <code>postgresql-server</code> module/support contract; do not mix service/setup conventions.<a id="postgresql-foundations--cite-97-2" class="citation-ref" href="#postgresql-foundations--source-97" aria-label="Source 97">[97]</a><a id="postgresql-foundations--cite-100-1" class="citation-ref" href="#postgresql-foundations--source-100" aria-label="Source 100">[100]</a></td>
+</tr>
+<tr>
+<td>Extensions</td>
+<td>Additional SQL objects, modules or background workers</td>
+<td>Availability depends on packages, server major and privileges; <code>CREATE EXTENSION</code> does not download software.<a id="postgresql-foundations--cite-54-1" class="citation-ref" href="#postgresql-foundations--source-54" aria-label="Source 54">[54]</a></td>
+</tr>
+<tr>
+<td>Commercial distributions/tools</td>
+<td>Vendor support or additional features</td>
+<td>Verify that vendor’s license, compatibility and recovery path; not assumed here.</td>
+</tr>
+<tr>
+<td>Managed services</td>
+<td>Provider-operated machines, backups and failover</td>
+<td>OS access, superuser and supported extensions may differ; these self-hosted procedures are not cloud-console instructions.</td>
+</tr>
+</tbody>
+</table></div>
+
+<h3 id="tools">Use the right utility</h3>
+<p>Call <code>/usr/pgsql-18/bin/&amp;lt;tool&amp;gt;</code> where more than one major is installed. PGDG versioned RPMs place binaries here; <code>postgresql18</code> supplies clients and <code>postgresql18-server</code> supplies server/setup/unit. Avoid PATH/alternatives ambiguity, especially across majors. A source build commonly uses <code>/usr/local/pgsql</code>; inspect rather than mix trees.<a id="postgresql-foundations--cite-100-2" class="citation-ref" href="#postgresql-foundations--source-100" aria-label="Source 100">[100]</a><a id="postgresql-foundations--cite-105-1" class="citation-ref" href="#postgresql-foundations--source-105" aria-label="Source 105">[105]</a><a id="postgresql-foundations--cite-53-1" class="citation-ref" href="#postgresql-foundations--source-53" aria-label="Source 53">[53]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="PostgreSQL foundations and tools: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Utility</th>
+<th>Task</th>
+<th>Important limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>psql -X -v ON_ERROR_STOP=1 -d adminlab</code></td>
+<td>Run SQL or a reviewed script without user startup customizations</td>
+<td>Default interactive error handling is not a fail-fast migration runner.<a id="postgresql-foundations--cite-13-1" class="citation-ref" href="#postgresql-foundations--source-13" aria-label="Source 13">[13]</a></td>
+</tr>
+<tr>
+<td><code>pg_isready -h /run/postgresql -p 5432</code></td>
+<td>Check whether the endpoint accepts connections</td>
+<td>Readiness is not proof of application authentication, schema or recovery health.<a id="postgresql-foundations--cite-73-1" class="citation-ref" href="#postgresql-foundations--source-73" aria-label="Source 73">[73]</a></td>
+</tr>
+<tr>
+<td><code>pg_dump</code>, <code>pg_restore</code>, <code>pg_dumpall</code></td>
+<td>Logical archives, restore and cluster globals</td>
+<td>A database dump excludes cluster-wide roles/tablespaces; logical dumps cannot be replayed with WAL.<a id="postgresql-foundations--cite-29-1" class="citation-ref" href="#postgresql-foundations--source-29" aria-label="Source 29">[29]</a><a id="postgresql-foundations--cite-31-1" class="citation-ref" href="#postgresql-foundations--source-31" aria-label="Source 31">[31]</a><a id="postgresql-foundations--cite-33-1" class="citation-ref" href="#postgresql-foundations--source-33" aria-label="Source 33">[33]</a></td>
+</tr>
+<tr>
+<td><code>pg_basebackup</code>, <code>pg_verifybackup</code></td>
+<td>Copy a running cluster and check its manifest/WAL</td>
+<td>Validation is not a substitute for starting an isolated restore.<a id="postgresql-foundations--cite-32-1" class="citation-ref" href="#postgresql-foundations--source-32" aria-label="Source 32">[32]</a><a id="postgresql-foundations--cite-35-1" class="citation-ref" href="#postgresql-foundations--source-35" aria-label="Source 35">[35]</a></td>
+</tr>
+<tr>
+<td><code>pg_ctl</code>, <code>pg_controldata</code></td>
+<td>Control a directly managed server; inspect control metadata</td>
+<td>Do not run a second controller alongside the package service.<a id="postgresql-foundations--cite-91-1" class="citation-ref" href="#postgresql-foundations--source-91" aria-label="Source 91">[91]</a><a id="postgresql-foundations--cite-92-1" class="citation-ref" href="#postgresql-foundations--source-92" aria-label="Source 92">[92]</a></td>
+</tr>
+<tr>
+<td><code>pg_upgrade</code>, <code>pg_rewind</code></td>
+<td>Major-version conversion; rejoin a diverged physical copy</td>
+<td>Different operations, each with explicit prerequisites and rollback limits.<a id="postgresql-foundations--cite-36-1" class="citation-ref" href="#postgresql-foundations--source-36" aria-label="Source 36">[36]</a><a id="postgresql-foundations--cite-44-1" class="citation-ref" href="#postgresql-foundations--source-44" aria-label="Source 44">[44]</a></td>
+</tr>
+</tbody>
+</table></div>
+<p>Inspect versions with <code>psql --version</code>, <code>/usr/pgsql-18/bin/pg_dump --version</code>, and SQL <code>SELECT version();</code>. Client and server versions are separate facts. Check extension availability before scheduling a restart:</p>
+<pre tabindex="0" role="region" aria-label="PostgreSQL foundations and tools: code 1, horizontally scrollable"><code class="language-sql">SELECT name, default_version, installed_version
+FROM pg_available_extensions ORDER BY name;
+SELECT extname, extversion FROM pg_extension ORDER BY extname;
+</code></pre>
+<p>An extension’s files must be installed for this major on every relevant host, then its SQL objects installed in each required database. Superuser is normally required unless the extension is marked trusted; native extension code runs inside the server’s trust boundary.<a id="postgresql-foundations--cite-54-2" class="citation-ref" href="#postgresql-foundations--source-54" aria-label="Source 54">[54]</a></p>
+
+<h2 id="connection-path">Follow one connection</h2>
+<pre tabindex="0" role="region" aria-label="PostgreSQL foundations and tools: code 2, horizontally scrollable"><code class="language-text">client / driver / psql
+       | Unix socket OR TCP + TLS
+       v
+postgres supervisor (historically “postmaster”)
+       | matching pg_hba rule + role/database authorization
+       v
+one backend per connection
+       | parse -&gt; rewrite -&gt; plan -&gt; execute
+       v
+shared buffers / heap and index pages / WAL
+</code></pre>
+<p>The supervisor accepts connections and creates a backend for each; each backend consumes resources, so connection counts need a host budget. The parser checks syntax, rewrite expands views/rules, the planner estimates alternative paths, and the executor reads/modifies rows. Estimates depend on statistics, not only available indexes.<a id="postgresql-foundations--cite-5-1" class="citation-ref" href="#postgresql-foundations--source-5" aria-label="Source 5">[5]</a><a id="postgresql-foundations--cite-62-1" class="citation-ref" href="#postgresql-foundations--source-62" aria-label="Source 62">[62]</a></p>
+<p>Authentication answers <em>who connected</em>; database <code>CONNECT</code>, schema <code>USAGE</code>, table/routine privileges and possibly row security determine <em>what they can do</em>. A successful TCP connection does not grant SQL access. <code>pg_hba.conf</code> selects the first matching rule with no fallback after authentication failure. TLS supplies transport security; the client must verify server identity, not merely ask for encryption.<a id="postgresql-foundations--cite-14-1" class="citation-ref" href="#postgresql-foundations--source-14" aria-label="Source 14">[14]</a><a id="postgresql-foundations--cite-16-1" class="citation-ref" href="#postgresql-foundations--source-16" aria-label="Source 16">[16]</a><a id="postgresql-foundations--cite-19-1" class="citation-ref" href="#postgresql-foundations--source-19" aria-label="Source 19">[19]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="PostgreSQL foundations and tools: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Process</th>
+<th>Responsibility</th>
+<th>First place to investigate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Backend</td>
+<td>Session SQL, locks, snapshots, private working memory</td>
+<td><code>pg_stat_activity</code>, <code>pg_locks</code></td>
+</tr>
+<tr>
+<td>Checkpointer</td>
+<td>Establish recovery checkpoints and write dirty pages</td>
+<td><code>pg_stat_checkpointer</code>, storage latency</td>
+</tr>
+<tr>
+<td>Background writer / WAL writer</td>
+<td>Smooth page writes / WAL writes</td>
+<td><code>pg_stat_bgwriter</code>, <code>pg_stat_wal</code>, durability settings</td>
+</tr>
+<tr>
+<td>Autovacuum launcher/workers</td>
+<td>Schedule and perform vacuum/analyze</td>
+<td>Dead tuples, transaction age, maintenance progress</td>
+</tr>
+<tr>
+<td>WAL sender / WAL receiver</td>
+<td>Stream changes to/from physical replicas</td>
+<td><code>pg_stat_replication</code>, <code>pg_stat_wal_receiver</code></td>
+</tr>
+<tr>
+<td>Archiver</td>
+<td>Deliver completed WAL files to archive storage</td>
+<td><code>pg_stat_archiver</code>, archive destination</td>
+</tr>
+<tr>
+<td>Logical replication workers</td>
+<td>Copy/synchronize/apply published table changes</td>
+<td><code>pg_stat_subscription</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>These views expose different processes; one low CPU number does not establish health.<a id="postgresql-foundations--cite-25-1" class="citation-ref" href="#postgresql-foundations--source-25" aria-label="Source 25">[25]</a></p>
+
+<h3 id="sessions-pooling">Sessions and pooling</h3>
+<p>A session holds settings, prepared statements, temporary tables and possibly an open transaction. In transaction-pooling mode a proxy may assign the next transaction to a different backend: do not rely on session state surviving that boundary. Configure and test the chosen pooler separately; core PostgreSQL does not turn one backend into an automatic transaction pool. Limit connection counts against memory, parallel workers and workload, not a desired marketing concurrency number.<a id="postgresql-foundations--cite-5-2" class="citation-ref" href="#postgresql-foundations--source-5" aria-label="Source 5">[5]</a><a id="postgresql-foundations--cite-63-1" class="citation-ref" href="#postgresql-foundations--source-63" aria-label="Source 63">[63]</a></p>
+<pre tabindex="0" role="region" aria-label="PostgreSQL foundations and tools: code 3, horizontally scrollable"><code class="language-sql">SELECT current_database(), current_user, session_user, pg_backend_pid();
+SELECT datname, usename, state, count(*)
+FROM pg_stat_activity
+GROUP BY datname, usename, state ORDER BY count(*) DESC;
+</code></pre>
+<p><code>current_user</code> can change with <code>SET ROLE</code>; <code>session_user</code> records the original session identity. Inspect application errors as well as pool wait time: a pool saturated by idle transactions is not fixed by adding server connections. See <a href="postgresql-administration.html#sessions">session cancellation</a> and <a href="postgresql-audit-performance.html#resources">memory pressure</a>.</p>
+<p>Continue with <a href="postgresql-storage-transactions.html#layout">storage and transactions</a>, or <a href="postgresql-install-instances.html#packages">install a local-only instance</a>.</p>
+
+<h2 id="postgresql-foundations--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="postgresql-foundations--source-1">[1] <a href="https://www.postgresql.org/support/versioning">PostgreSQL: Versioning Policy</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-5">[5] <a href="https://www.postgresql.org/docs/18/tutorial-arch.html">PostgreSQL: Documentation: 18: 1.2.&nbsp;Architectural Fundamentals</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-5-1" aria-label="Return to citation 5, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-foundations--cite-5-2" aria-label="Return to citation 5, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-foundations--source-13">[13] <a href="https://www.postgresql.org/docs/18/app-psql.html">PostgreSQL: Documentation: 18: psql</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-13-1" aria-label="Return to citation 13, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-14">[14] <a href="https://www.postgresql.org/docs/18/auth-pg-hba-conf.html">PostgreSQL: Documentation: 18: 20.1.&nbsp;The pg_hba.conf File</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-14-1" aria-label="Return to citation 14, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-16">[16] <a href="https://www.postgresql.org/docs/18/ssl-tcp.html">PostgreSQL: Documentation: 18: 18.9.&nbsp;Secure TCP/IP Connections with SSL</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-16-1" aria-label="Return to citation 16, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-19">[19] <a href="https://www.postgresql.org/docs/18/sql-grant.html">PostgreSQL: Documentation: 18: GRANT</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-19-1" aria-label="Return to citation 19, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-25">[25] <a href="https://www.postgresql.org/docs/18/monitoring-stats.html">PostgreSQL: Documentation: 18: 27.2.&nbsp;The Cumulative Statistics System</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-25-1" aria-label="Return to citation 25, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-29">[29] <a href="https://www.postgresql.org/docs/18/app-pgdump.html">PostgreSQL: Documentation: 18: pg_dump</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-29-1" aria-label="Return to citation 29, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-31">[31] <a href="https://www.postgresql.org/docs/18/app-pg-dumpall.html">PostgreSQL: Documentation: 18: pg_dumpall</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-31-1" aria-label="Return to citation 31, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-32">[32] <a href="https://www.postgresql.org/docs/18/app-pgbasebackup.html">PostgreSQL: Documentation: 18: pg_basebackup</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-32-1" aria-label="Return to citation 32, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-33">[33] <a href="https://www.postgresql.org/docs/18/continuous-archiving.html">PostgreSQL: Documentation: 18: 25.3.&nbsp;Continuous Archiving and Point-in-Time Recovery (PITR)</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-33-1" aria-label="Return to citation 33, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-35">[35] <a href="https://www.postgresql.org/docs/18/app-pgverifybackup.html">PostgreSQL: Documentation: 18: pg_verifybackup</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-35-1" aria-label="Return to citation 35, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-36">[36] <a href="https://www.postgresql.org/docs/18/pgupgrade.html">PostgreSQL: Documentation: 18: pg_upgrade</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-36-1" aria-label="Return to citation 36, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-44">[44] <a href="https://www.postgresql.org/docs/18/app-pgrewind.html">PostgreSQL: Documentation: 18: pg_rewind</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-44-1" aria-label="Return to citation 44, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-53">[53] <a href="https://www.postgresql.org/docs/18/install-make.html">PostgreSQL: Documentation: 18: 17.3.&nbsp;Building and Installation with Autoconf and Make</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-53-1" aria-label="Return to citation 53, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-54">[54] <a href="https://www.postgresql.org/docs/18/extend-extensions.html">PostgreSQL: Documentation: 18: 36.17.&nbsp;Packaging Related Objects into an Extension</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-54-1" aria-label="Return to citation 54, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-foundations--cite-54-2" aria-label="Return to citation 54, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-foundations--source-62">[62] <a href="https://www.postgresql.org/docs/18/query-path.html">PostgreSQL: Documentation: 18: 51.1.&nbsp;The Path of a Query</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-62-1" aria-label="Return to citation 62, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-63">[63] <a href="https://www.postgresql.org/docs/18/runtime-config-resource.html">PostgreSQL: Documentation: 18: 19.4.&nbsp;Resource Consumption</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-63-1" aria-label="Return to citation 63, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-65">[65] <a href="https://www.postgresql.org/about/licence">PostgreSQL: License</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-65-1" aria-label="Return to citation 65, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-73">[73] <a href="https://www.postgresql.org/docs/18/app-pg-isready.html">PostgreSQL: Documentation: 18: pg_isready</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-73-1" aria-label="Return to citation 73, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-91">[91] <a href="https://www.postgresql.org/docs/18/app-pg-ctl.html">PostgreSQL: Documentation: 18: pg_ctl</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-91-1" aria-label="Return to citation 91, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-92">[92] <a href="https://www.postgresql.org/docs/18/app-pgcontroldata.html">PostgreSQL: Documentation: 18: pg_controldata</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-92-1" aria-label="Return to citation 92, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-93">[93] <a href="https://www.postgresql.org/download/linux/redhat">PostgreSQL: Linux downloads (Red Hat family)</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-93-1" aria-label="Return to citation 93, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-94">[94] <a href="https://yum.postgresql.org/news/postgresql-rpms-multiple-rhel-minor-versions">PostgreSQL RPM repository now supports multiple RHEL minor versions - PostgreSQL YUM Repository</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-94-1" aria-label="Return to citation 94, occurrence 1">↩</a></span></div><div class="source-entry" id="postgresql-foundations--source-97">[97] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_and_using_database_servers/using-postgresql_configuring-and-using-database-servers">Chapter&nbsp;4.&nbsp;Using PostgreSQL | Configuring and using database servers | Red Hat Enterprise Linux | 9 | Red Hat Documentation</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-97-1" aria-label="Return to citation 97, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-foundations--cite-97-2" aria-label="Return to citation 97, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-foundations--source-100">[100] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-server-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18-server 18.6-1PGDG.rhel9.7</a><br>
+<span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-100-1" aria-label="Return to citation 100, occurrence 1">↩1</a><a class="citation-return" href="#postgresql-foundations--cite-100-2" aria-label="Return to citation 100, occurrence 2">↩2</a></span></div><div class="source-entry" id="postgresql-foundations--source-105">[105] <a href="https://download.postgresql.org/pub/repos/yum/18/redhat/rhel-9.7-x86_64/postgresql18-18.6-1PGDG.rhel9.7.x86_64.rpm">PGDG RPM postgresql18 18.6-1PGDG.rhel9.7</a><span class="citation-returns"><a class="citation-return" href="#postgresql-foundations--cite-105-1" aria-label="Return to citation 105, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div></div><div><a rel="next" href="postgresql-storage-transactions.html"><span>Next · PostgreSQL</span><strong>Storage, transactions and tablespaces</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/understand.html">Explore Understand the moving parts ↗</a><div class="current-group"><h2>In PostgreSQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/postgresql-foundations.html">PostgreSQL foundations and tools</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>MySQL</span><a href="mysql-overview.html">Database vocabulary, editions and tools</a><a href="mysql-connections.html">Connections and query execution</a><a href="mysql-layout.html">Executables, schemas and server files</a></div><div><span>MongoDB</span><a href="mongodb-architecture.html">Architecture, editions and tools</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

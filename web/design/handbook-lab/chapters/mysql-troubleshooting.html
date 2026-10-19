@@ -1,0 +1,299 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Startup, OS security and multiple instances — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-troubleshooting"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/run.html">Get a server running</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Get a server running</p><h1>Startup, OS security and multiple instances</h1></header>
+<div class="reader-controls"><a href="../tasks/run.html">← Get a server running</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a aria-current="page" href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-0535">Diagnose startup in order</a><a class="level-2" href="#mysql-troubleshooting--section-1">OS security</a><a class="level-3" href="#mysql-troubleshooting--section-2">firewalld</a><a class="level-3" href="#mysql-troubleshooting--section-3">SELinux</a><a class="level-2" href="#mysql-troubleshooting--section-4">Background processes are not service management</a><a class="level-3" href="#mysql-troubleshooting--section-5">A source-restricted runtime rule with explicit acceptance</a><a class="level-2" href="#mysql-b-0538">Multiple instances versus multiple databases</a><a class="level-2" href="#mysql-troubleshooting--heading-section"></a><a class="level-2" href="#mysql-troubleshooting--section-6">Sources</a><a class="level-2" href="#mysql-instance-service-example--heading-mysqld-service">mysqld@.service</a><a class="level-2" href="#mysql-instance-service-example--section-1">Named instances on the RPM platform</a><a class="level-3" href="#mysql-instance-service-example--section-2">Instance expansion and path isolation</a><a class="level-3" href="#mysql-instance-service-example--section-3">Provision the named instance’s RHEL paths</a><a class="level-2" href="#mysql-instance-service-example--section-4">Historical source — do not deploy</a><a class="level-2" href="#mysql-instance-service-example--section-5">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-install-instances.html">Installation, services and instances</a><p class="product-label">MongoDB</p><a href="mongodb-installation.html">Installation and first start</a><a href="mongodb-instances.html">Troubleshooting and isolated instances</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-troubleshooting; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-troubleshooting--cite-1-1" class="citation-ref" href="#mysql-troubleshooting--source-1" aria-label="Source 1">[1]</a><a id="mysql-troubleshooting--cite-72-1" class="citation-ref" href="#mysql-troubleshooting--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-troubleshooting--troubleshoot" class="source-anchor"></span>
+<span id="mysql-troubleshooting--security-management" class="source-anchor"></span>
+<span id="mysql-troubleshooting--firewalld" class="source-anchor"></span>
+<span id="mysql-troubleshooting--selinux" class="source-anchor"></span>
+<span id="mysql-troubleshooting--start-background-process" class="source-anchor"></span>
+<span id="mysql-troubleshooting--daemonize-process" class="source-anchor"></span>
+<span id="mysql-b-0479" class="source-anchor"></span>
+<span id="mysql-b-0480" class="source-anchor"></span>
+<span id="mysql-b-0485" class="source-anchor"></span>
+<span id="mysql-b-0487" class="source-anchor"></span>
+<span id="mysql-b-0488" class="source-anchor"></span>
+<span id="mysql-b-0489" class="source-anchor"></span>
+<span id="mysql-b-0491" class="source-anchor"></span>
+<span id="mysql-b-0498" class="source-anchor"></span>
+<span id="mysql-b-0500" class="source-anchor"></span>
+<span id="mysql-b-0502" class="source-anchor"></span>
+<span id="mysql-b-0504" class="source-anchor"></span>
+<span id="mysql-b-0506" class="source-anchor"></span>
+<span id="mysql-b-0508" class="source-anchor"></span>
+<span id="mysql-b-0510" class="source-anchor"></span>
+<span id="mysql-b-0511" class="source-anchor"></span>
+<span id="mysql-b-0516" class="source-anchor"></span>
+<span id="mysql-b-0517" class="source-anchor"></span>
+<span id="mysql-b-0519" class="source-anchor"></span>
+<span id="mysql-b-0521" class="source-anchor"></span>
+<span id="mysql-b-0522" class="source-anchor"></span>
+<span id="mysql-b-0524" class="source-anchor"></span>
+<span id="mysql-b-0529" class="source-anchor"></span>
+<span id="mysql-b-0531" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0535">Diagnose startup in order</h2>
+<p>For the selected EL9 RPM service:</p>
+<pre tabindex="0" role="region" aria-label="Startup, OS security and multiple instances: code 1, horizontally scrollable"><code class="language-bash">systemctl status mysqld.service
+journalctl -u mysqld.service -b
+mysqld --verbose --help
+</code></pre>
+<p>Read the configured MySQL error log as well. Verify configuration syntax, port/socket conflicts, free space, mounted data/key directories, OS ownership and SELinux denials. <code>sudo systemctl reset-failed mysqld.service</code> clears the start-limit state <strong>after fixing the cause</strong>; it does not repair MySQL. Do not reinitialize a nonempty datadir to cure startup errors.</p>
+
+<h2 id="mysql-troubleshooting--section-1">OS security</h2>
+
+<h3 id="mysql-troubleshooting--section-2">firewalld</h3>
+<p>Firewalld zones/rich rules can constrain traffic by source address, service, port and protocol. Inspect the active interface’s zone first; the default zone may not be the one serving MySQL.</p>
+<pre tabindex="0" role="region" aria-label="Startup, OS security and multiple instances: code 2, horizontally scrollable"><code class="language-bash">firewall-cmd --get-active-zones
+firewall-cmd --zone=public --list-all
+</code></pre>
+<p>Choose the actual zone and approved application/replica source CIDRs. Prefer a source-restricted rich rule to opening <code>mysql</code> to an entire untrusted zone. <code>--add-service=mysql</code> refers to the service definition’s ports; a custom port uses <code>--add-port=3307/tcp</code>. These are alternatives, not requirements to expose both ports. Test a runtime rule, preserve console access and existing SSH rules, then persist only the approved rule. <code>--reload</code> applies permanent configuration and can discard temporary rules; review before doing so. Do not expose X Protocol or replication-internal ports merely because a classic-protocol client needs 3306.</p>
+
+<h3 id="mysql-troubleshooting--section-3">SELinux</h3>
+<p>Keep enforcement enabled. Inspect the installed policy and AVC denials; label the intended path/port, not every similarly named directory.</p>
+<pre tabindex="0" role="region" aria-label="Startup, OS security and multiple instances: code 3, horizontally scrollable"><code class="language-bash">semanage port -l | grep mysqld
+semanage fcontext -l | grep mysqld
+</code></pre>
+<p>For a deliberately selected new port 3307 that is not already assigned to another type, the policy operation is <code>semanage port -a -t mysqld_port_t -p tcp 3307</code>; an existing entry may need <code>-m</code> after inspection. Use <code>-d</code> only to remove a rule you intentionally own. For a moved standard datadir, follow the configuration chapter’s equivalence mapping and restorecon procedure; it preserves differentiated data/socket rules instead of labeling every object as database data. If an entry already exists, review/modification is required instead of repeating <code>-a</code>. Match log/socket/key paths to their appropriate policy types, and restore the previous mapping if rolling back. OS permissions and SELinux policy must both permit access.</p>
+
+<h2 id="mysql-troubleshooting--section-4">Background processes are not service management</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Startup, OS security and multiple instances: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Mechanism</th>
+<th>What it actually does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>processname &amp;</code></td>
+<td>Runs asynchronously in the shell’s job context; TTY/session/hangup behavior depends on shell and process. The TTY is not the parent process.</td>
+</tr>
+<tr>
+<td><code>nohup processname &amp;</code></td>
+<td>Ignores SIGHUP and conditionally redirects terminal streams; does not create a complete supervised service.</td>
+</tr>
+<tr>
+<td><code>setsid processname</code></td>
+<td>Starts a new session when possible; does not automatically close inherited descriptors, drop privileges, restart on failure or guarantee reparenting to PID 1.</td>
+</tr>
+<tr>
+<td>systemd unit</td>
+<td>Supervises a service with explicit identity, environment, lifecycle and resource controls. Use this for the RPM MySQL instance.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Historical <code>nohup mysqld --defaults-group-suffix=1 &amp;</code> / <code>setsid mysqld ...</code> examples demonstrated shell detachment, not a recommended way to bypass the installed unit. Starting a second server against the same datadir is unsafe. Use named units and unique datadirs/ports/sockets instead.</p>
+
+<h3 id="mysql-troubleshooting--section-5">A source-restricted runtime rule with explicit acceptance</h3>
+<p>Use this only after authorizing the interface, zone, source network and listener. Here <code>public</code> and <code>192.0.2.0/24</code> are <strong>documentation inputs to replace</strong>, not a production recommendation. Inspect both runtime and permanent zone settings first: a broader existing <code>mysql</code> service/port/rich rule or trusted source can already admit traffic, and adding a narrow allow rule does not revoke that access.</p>
+<pre tabindex="0" role="region" aria-label="Startup, OS security and multiple instances: code 4, horizontally scrollable"><code class="language-bash">sudo firewall-cmd --get-active-zones
+sudo firewall-cmd --zone=public --list-all
+sudo firewall-cmd --permanent --zone=public --list-all
+sudo firewall-cmd --zone=public --add-rich-rule='rule family="ipv4" source address="192.0.2.0/24" port port="3306" protocol="tcp" accept' --timeout=300
+</code></pre>
+<p>Test a new identity-verified TLS connection from an allowed host, rejection from a disallowed host, and a new SSH management connection before the temporary rule expires. IPv6 needs its own deliberately restricted policy; an IPv4 allow test does not validate IPv6. Preserve console access. If accepted, add the <strong>same exact rule</strong> with <code>--permanent</code> (without <code>--timeout</code>) and as a non-timed runtime rule after removing the timed copy if still present. Query both copies with <code>--query-rich-rule</code> and test again. Avoid <code>--runtime-to-permanent</code> when unrelated transient rules are present. A later planned reload/reboot must retain only the approved access. Rollback removes only this exact rule from runtime and permanent configuration with <code>--remove-rich-rule</code>; do not flush the zone or stop firewalld.</p>
+<p>A firewall opening cannot make an unbound or SELinux-denied listener work. For SELinux tooling on RHEL 9 install <code>policycoreutils-python-utils</code> through the approved Red Hat repositories if absent. Inspect <code>getenforce</code>, <code>ls -lZ</code>, <code>matchpathcon</code>, <code>ps -eZ</code> and <code>sudo ausearch -m AVC,USER_AVC -ts recent</code> to distinguish DAC/path labeling, port labeling and genuine policy needs. Repair the specific cause; do not use <code>setenforce 0</code>, disable SELinux, or blindly generate <code>audit2allow</code> policy as the operating solution.</p>
+<p><a id="mysql-troubleshooting--cite-19-1" class="citation-ref" href="#mysql-troubleshooting--source-19" aria-label="Source 19">[19]</a><a id="mysql-troubleshooting--cite-22-1" class="citation-ref" href="#mysql-troubleshooting--source-22" aria-label="Source 22">[22]</a><a id="mysql-troubleshooting--cite-106-1" class="citation-ref" href="#mysql-troubleshooting--source-106" aria-label="Source 106">[106]</a><a id="mysql-troubleshooting--cite-107-1" class="citation-ref" href="#mysql-troubleshooting--source-107" aria-label="Source 107">[107]</a><a id="mysql-troubleshooting--cite-117-1" class="citation-ref" href="#mysql-troubleshooting--source-117" aria-label="Source 117">[117]</a><a id="mysql-troubleshooting--cite-154-1" class="citation-ref" href="#mysql-troubleshooting--source-154" aria-label="Source 154">[154]</a><a id="mysql-troubleshooting--cite-157-1" class="citation-ref" href="#mysql-troubleshooting--source-157" aria-label="Source 157">[157]</a><a id="mysql-troubleshooting--cite-162-1" class="citation-ref" href="#mysql-troubleshooting--source-162" aria-label="Source 162">[162]</a></p>
+<p><span id="mysql-troubleshooting--multiple-instances" class="source-anchor"></span>
+<span id="mysql-b-0537" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0538">Multiple instances versus multiple databases</h2>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Startup, OS security and multiple instances: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Separate instances</th>
+<th>Multiple databases in one instance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Data integrity</td>
+<td>Separate dictionaries/storage; no cross-instance foreign-key enforcement. Never share one datadir between processes.</td>
+<td>Cross-schema relations can be supported within one server/engine.</td>
+</tr>
+<tr>
+<td>Availability</td>
+<td>Independent restart boundaries, but same-host instances share host/storage failure. HA requires a designed topology and failure domains.</td>
+<td>A server outage affects all schemas.</td>
+</tr>
+<tr>
+<td>Security</td>
+<td>Separate accounts/configs can reduce blast radius; same OS account/root access can defeat isolation. No automatic regulatory compliance guarantee.</td>
+<td>Grants/roles can restrict schemas, but share privileged administration and server resources.</td>
+</tr>
+<tr>
+<td>Backup/maintenance/recovery</td>
+<td>Each instance needs its own jobs, monitoring and restore plan; selective maintenance can spare others.</td>
+<td>Fewer server jobs, but consistency and restore scope need attention.</td>
+</tr>
+<tr>
+<td>Cost</td>
+<td>More operational/resource overhead; dedicated tenant instances may be justified.</td>
+<td>Simpler consolidation for workloads that can safely share limits.</td>
+</tr>
+<tr>
+<td>Performance</td>
+<td>Separate buffer pools and processes, <strong>not reserved CPU/RAM/I/O</strong> unless OS/cgroup/storage controls allocate them. Sum all budgets.</td>
+<td>Workloads contend within the same server; schema separation is not a resource governor.</td>
+</tr>
+<tr>
+<td>Scalability</td>
+<td>An instance can be moved/scaled independently after dependency review.</td>
+<td>Adding schemas is simple but does not remove instance limits.</td>
+</tr>
+</tbody>
+</table></div>
+<p>For RPM templates use <code>[mysqld@replica01]</code> with the matching <code>mysqld@replica01.service</code>. Give each instance a unique datadir, socket, classic/X ports where enabled, PID/error/relay/binlog paths and replication identity. The <a href="mysql-troubleshooting.html#mysql-instance-service-example">instance appendix</a> preserves and corrects the template. Never clone a datadir as a generic way to create independent server UUIDs.</p>
+<p><a id="mysql-troubleshooting--cite-19-2" class="citation-ref" href="#mysql-troubleshooting--source-19" aria-label="Source 19">[19]</a><a id="mysql-troubleshooting--cite-53-1" class="citation-ref" href="#mysql-troubleshooting--source-53" aria-label="Source 53">[53]</a></p>
+<h2 id="mysql-troubleshooting--heading-section"><span id="mysql-b-0548" class="source-anchor"></span></h2>
+
+<h2 id="mysql-troubleshooting--section-6">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-troubleshooting--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-troubleshooting--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-troubleshooting--source-19">[19] <a href="https://dev.mysql.com/doc/refman/8.4/en/using-systemd.html">https://dev.mysql.com/doc/refman/8.4/en/using-systemd.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.5.9 Managing MySQL Server with systemd
+<span class="citation-returns"><a class="citation-return" href="#mysql-troubleshooting--cite-19-1" aria-label="Return to citation 19, occurrence 1">↩1</a><a class="citation-return" href="#mysql-troubleshooting--cite-19-2" aria-label="Return to citation 19, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-troubleshooting--source-22">[22] <a href="https://dev.mysql.com/doc/refman/8.4/en/selinux.html">https://dev.mysql.com/doc/refman/8.4/en/selinux.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.7 SELinux
+<span class="citation-returns"><a class="citation-return" href="#mysql-troubleshooting--cite-22-1" aria-label="Return to citation 22, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-troubleshooting--source-53">[53] <a href="https://dev.mysql.com/doc/refman/8.4/en/replication-gtids-howto.html">https://dev.mysql.com/doc/refman/8.4/en/replication-gtids-howto.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 19.1.3.4 Setting Up Replication Using GTIDs
+<span class="citation-returns"><a class="citation-return" href="#mysql-troubleshooting--cite-53-1" aria-label="Return to citation 53, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-troubleshooting--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-troubleshooting--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-troubleshooting--source-106">[106] <a href="https://dev.mysql.com/doc/refman/8.4/en/selinux-file-context.html">https://dev.mysql.com/doc/refman/8.4/en/selinux-file-context.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.7.4 SELinux File Context
+<span class="citation-returns"><a class="citation-return" href="#mysql-troubleshooting--cite-106-1" aria-label="Return to citation 106, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-troubleshooting--source-107">[107] <a href="https://dev.mysql.com/doc/refman/8.4/en/selinux-context-tcp-port.html">https://dev.mysql.com/doc/refman/8.4/en/selinux-context-tcp-port.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.7.5 SELinux TCP Port Context
+<span class="citation-returns"><a class="citation-return" href="#mysql-troubleshooting--cite-107-1" aria-label="Return to citation 107, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-troubleshooting--source-117">[117] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_firewalls_and_packet_filters/using-and-configuring-firewalld_firewall-packet-filters">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/configuring_firewalls_and_packet_filters/using-and-configuring-firewalld_firewall-packet-filters</a> — Chapter&nbsp;1.&nbsp;Using and configuring firewalld | Configuring firewalls and packet filters | Red Hat Enterprise Linux | 9 | Red Hat Documentation
+<span class="citation-returns"><a class="citation-return" href="#mysql-troubleshooting--cite-117-1" aria-label="Return to citation 117, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-troubleshooting--source-154">[154] <a href="https://dev.mysql.com/doc/refman/8.4/en/server-configuration-validation.html">https://dev.mysql.com/doc/refman/8.4/en/server-configuration-validation.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 7.1.3 Server Configuration Validation
+<span class="citation-returns"><a class="citation-return" href="#mysql-troubleshooting--cite-154-1" aria-label="Return to citation 154, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-troubleshooting--source-157">[157] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/using_selinux/index">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/using_selinux/index</a> — Using SELinux | Red Hat Enterprise Linux | 9 | Red Hat Documentation
+<span class="citation-returns"><a class="citation-return" href="#mysql-troubleshooting--cite-157-1" aria-label="Return to citation 157, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-troubleshooting--source-162">[162] <a href="https://firewalld.org/documentation/man-pages/firewall-cmd.html">https://firewalld.org/documentation/man-pages/firewall-cmd.html</a> — Documentation - Manual Pages - firewall-cmd | firewalld<span class="citation-returns"><a class="citation-return" href="#mysql-troubleshooting--cite-162-1" aria-label="Return to citation 162, occurrence 1">↩</a></span></div></div>
+<section class="appendix" id="mysql-instance-service-example"><h2 id="mysql-instance-service-example--heading-mysqld-service">mysqld@.service</h2><p class="appendix-context">Historical source example for reading, not a tested procedure or executable download.</p><!-- reviewed-unit: mysql-instance-service-example; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-instance-service-example--cite-1-1" class="citation-ref" href="#mysql-instance-service-example--source-1" aria-label="Source 1">[1]</a><a id="mysql-instance-service-example--cite-72-1" class="citation-ref" href="#mysql-instance-service-example--source-72" aria-label="Source 72">[72]</a></p>
+
+<h2 id="mysql-instance-service-example--section-1">Named instances on the RPM platform</h2>
+<p>Target: RHEL 9 x86-64 Oracle MySQL 8.4 RPMs. Use the package-provided <code>mysqld@.service</code>; the original template below is historical, not a portable service download. See the <a href="mysql-configuration.html#mysql-service-example">single-instance appendix</a> for the common directive-by-directive review, including the incorrect <code>EnvironmentFile</code> assignment, notify/forking mismatch and deprecated identity control.</p>
+
+<h3 id="mysql-instance-service-example--section-2">Instance expansion and path isolation</h3>
+<p>The source’s <code>ExecStartPre=... %I</code> passes the unescaped instance name to the RPM helper. <code>--defaults-group-suffix=@%I</code> makes instance <code>replica01</code> read <code>[mysqld@replica01]</code> in addition to common groups. It does <strong>not</strong> read <code>[mysqld1]</code>. Verify the installed unit’s exact command rather than copying an ordering of <code>--defaults-file</code> and suffix options that the server will reject.</p>
+<p>A per-instance option-file illustration, after its distinct directory/ownership/mount/SELinux plan is prepared:</p>
+<pre tabindex="0" role="region" aria-label="mysqld@.service: code 1, horizontally scrollable"><code class="language-ini">[mysqld@replica01]
+datadir=/var/lib/mysql-replica01
+socket=/var/lib/mysql-replica01/mysql.sock
+port=3307
+log-error=/var/log/mysqld-replica01.log
+</code></pre>
+<p>This is not a complete replication configuration. Decide unique server IDs/UUIDs, binlog/relay-log locations, PID files and <strong>X Protocol listener/socket</strong> if enabled. A common inherited <code>pid-file</code>, <code>mysqlx_port</code> or log path can still collide even with separate classic ports. Sum memory budgets and use OS resource controls if resource isolation is required; shared-host instances do not provide host-failure HA.</p>
+<ol>
+<li>Inventory vendor/common settings and existing instances; ensure new paths are empty intentionally, not unmounted production data.</li>
+<li>Configure each unique suffix group, owned paths and security policy, then validate the selected configuration.</li>
+<li>Start the specific instance with <code>systemctl start mysqld@replica01.service</code>. Inspect that exact unit’s journal and error log; connect using its socket/port and verify <code>@@datadir</code>, <code>@@port</code>, server identity and intended objects.</li>
+<li>Only after verification, decide whether <code>systemctl enable mysqld@replica01.service</code> should make it start at boot. Test mount/order dependencies.</li>
+<li>On failure stop/repair only the intended instance. Keep prior config/data for rollback and do not run both units over the same datadir.</li>
+</ol>
+<p>All original template fields are retained in the historical text. Their common meanings are unchanged from the single-instance review except for <code>%I</code>, <code>@%I</code> and the need to avoid shared runtime/storage resources.</p>
+
+<h3 id="mysql-instance-service-example--section-3">Provision the named instance’s RHEL paths</h3>
+<p>Keep this second instance local initially: add <code>bind_address=127.0.0.1</code>, <code>mysqlx=OFF</code> (unless separately provisioned), <code>pid-file=/run/mysqld/replica01.pid</code> and a chosen unique nonzero <code>server_id</code> to <code>[mysqld@replica01]</code>. Retain the standard package-managed <code>/run/mysqld</code> runtime directory and verify the installed unit/tmpfiles setup recreates it at boot. Do not inherit the default instance’s PID/socket/log paths. The datadir below must be a deliberately <strong>new empty</strong> directory; creating it on top of missing storage is not acceptable.</p>
+<p>After reviewing existing SELinux local rules and approving this path:</p>
+<pre tabindex="0" role="region" aria-label="mysqld@.service: code 2, horizontally scrollable"><code class="language-bash">sudo install -d -o mysql -g mysql -m 0750 /var/lib/mysql-replica01
+sudo semanage fcontext -a -e /var/lib/mysql /var/lib/mysql-replica01
+sudo restorecon -Rv /var/lib/mysql-replica01
+matchpathcon /var/lib/mysql-replica01/mysql.sock
+matchpathcon /var/log/mysqld-replica01.log
+semanage port -l | grep mysqld
+</code></pre>
+<p>Confirm the socket’s expected type is <code>mysqld_var_run_t</code>; verify/restore the named error log’s <code>mysqld_log_t</code> after creation and inspect the PID label. The Oracle RPM helper only assists automatic error-log creation for its documented <code>/var/log/mysql*.log</code> pattern; an arbitrary new log directory is your provisioning responsibility. Register port 3307 as <code>mysqld_port_t</code> <strong>only if needed after inspecting the actual policy</strong>; do not reassign a port owned by another service. No firewall opening is needed for this loopback-only initial instance.</p>
+<p>Check all inherited groups and run <code>/usr/sbin/mysqld --defaults-group-suffix=@replica01 --validate-config</code> with appropriate config-read authority. If <code>NO_INIT=true</code> is already set for existing production units, do <strong>not</strong> turn it off globally just to create this one instance. After verifying the new empty paths/options, explicitly initialize only this instance using <code>sudo /usr/sbin/mysqld --defaults-group-suffix=@replica01 --initialize --user=mysql</code>; inspect its own protected error log for the temporary password. Otherwise the reviewed vendor helper may perform first initialization. These are alternative paths: never initialize twice or use <code>--initialize-insecure</code> to avoid credential handling.</p>
+<p>Start <code>mysqld@replica01.service</code>, complete its interactive account hardening against its explicit socket, and verify it with <code>mysql --protocol=SOCKET --socket=/var/lib/mysql-replica01/mysql.sock --user=root --password</code>. Compare both instances’ datadir, server UUID, ports, PID and logs; verify stopping the new unit leaves the original instance healthy. Add per-instance mount dependencies where needed and test restart before boot enablement. Remote exposure then follows the TLS/SELinux/firewall procedure for <strong>3307</strong>, not a copied 3306 service rule. All instances share one installed server binary/package update: separate units do not provide independent MySQL versions or rolling binary upgrades on one host.</p>
+<p><a id="mysql-instance-service-example--cite-19-1" class="citation-ref" href="#mysql-instance-service-example--source-19" aria-label="Source 19">[19]</a><a id="mysql-instance-service-example--cite-20-1" class="citation-ref" href="#mysql-instance-service-example--source-20" aria-label="Source 20">[20]</a><a id="mysql-instance-service-example--cite-53-1" class="citation-ref" href="#mysql-instance-service-example--source-53" aria-label="Source 53">[53]</a><a id="mysql-instance-service-example--cite-105-1" class="citation-ref" href="#mysql-instance-service-example--source-105" aria-label="Source 105">[105]</a><a id="mysql-instance-service-example--cite-106-1" class="citation-ref" href="#mysql-instance-service-example--source-106" aria-label="Source 106">[106]</a><a id="mysql-instance-service-example--cite-107-1" class="citation-ref" href="#mysql-instance-service-example--source-107" aria-label="Source 107">[107]</a><a id="mysql-instance-service-example--cite-157-1" class="citation-ref" href="#mysql-instance-service-example--source-157" aria-label="Source 157">[157]</a><a id="mysql-instance-service-example--cite-163-1" class="citation-ref" href="#mysql-instance-service-example--source-163" aria-label="Source 163">[163]</a><a id="mysql-instance-service-example--cite-18-1" class="citation-ref" href="#mysql-instance-service-example--source-18" aria-label="Source 18">[18]</a><a id="mysql-instance-service-example--cite-58-1" class="citation-ref" href="#mysql-instance-service-example--source-58" aria-label="Source 58">[58]</a></p>
+<p><span id="mysqld-service-b-0001" class="source-anchor"></span>
+</p>
+<h2 id="mysql-instance-service-example--section-4">Historical source — do not deploy</h2>
+<p>The following is the complete sanitized original, preserved for comparison. Its exact defects and replacement decisions are explained above. This text is not a supported executable/configuration recipe.</p>
+<pre tabindex="0" role="region" aria-label="mysqld@.service: code 3, horizontally scrollable"><code class="language-text"># Copyright (c) 2016, 2025, Oracle and/or its affiliates.
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+# The lines above are intentionally left blank
+#
+# systemd service file for MySQL forking server
+#
+
+[Unit]
+Description=MySQL Server
+Documentation=man:mysqld(8)
+Documentation=http://dev.mysql.com/doc/refman/en/using-systemd.html
+After=network-online.target
+Wants=network-online.target
+After=syslog.target
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+User=mysql
+Group=mysql
+
+Type=notify
+
+# Disable service start and stop timeout logic of systemd for mysqld service.
+TimeoutSec=0
+
+# Execute pre and post scripts as root
+PermissionsStartOnly=true
+
+# Needed to create system tables
+ExecStartPre=/usr/bin/mysqld_pre_systemd %I
+
+# Start main service
+ExecStart=/usr/sbin/mysqld --defaults-group-suffix=@%I $MYSQLD_OPTS
+
+# Use this to switch malloc implementation
+# EnvironmentFile=-/etc/sysconfig/mysql
+EnvironmentFile="MYSQLD_OPTS=--defaults-file=/etc/my.cnf"
+
+# Sets open_files_limit
+LimitNOFILE = 10000
+
+Restart=on-failure
+
+RestartPreventExitStatus=1
+
+# Set enviroment variable MYSQLD_PARENT_PID. This is required for restart.
+Environment=MYSQLD_PARENT_PID=1
+
+PrivateTmp=false
+</code></pre>
+
+<h2 id="mysql-instance-service-example--section-5">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-instance-service-example--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-instance-service-example--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-instance-service-example--source-18">[18] <a href="https://dev.mysql.com/doc/refman/8.4/en/linux-installation-rpm.html">https://dev.mysql.com/doc/refman/8.4/en/linux-installation-rpm.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.5.4 Installing MySQL on Linux Using RPM Packages from Oracle
+<span class="citation-returns"><a class="citation-return" href="#mysql-instance-service-example--cite-18-1" aria-label="Return to citation 18, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-instance-service-example--source-19">[19] <a href="https://dev.mysql.com/doc/refman/8.4/en/using-systemd.html">https://dev.mysql.com/doc/refman/8.4/en/using-systemd.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.5.9 Managing MySQL Server with systemd
+<span class="citation-returns"><a class="citation-return" href="#mysql-instance-service-example--cite-19-1" aria-label="Return to citation 19, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-instance-service-example--source-20">[20] <a href="https://dev.mysql.com/doc/refman/8.4/en/option-files.html">https://dev.mysql.com/doc/refman/8.4/en/option-files.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.2.2.2 Using Option Files
+<span class="citation-returns"><a class="citation-return" href="#mysql-instance-service-example--cite-20-1" aria-label="Return to citation 20, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-instance-service-example--source-53">[53] <a href="https://dev.mysql.com/doc/refman/8.4/en/replication-gtids-howto.html">https://dev.mysql.com/doc/refman/8.4/en/replication-gtids-howto.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 19.1.3.4 Setting Up Replication Using GTIDs
+<span class="citation-returns"><a class="citation-return" href="#mysql-instance-service-example--cite-53-1" aria-label="Return to citation 53, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-instance-service-example--source-58">[58] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-requirements.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-requirements.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 20.3.1 Group Replication Requirements
+<span class="citation-returns"><a class="citation-return" href="#mysql-instance-service-example--cite-58-1" aria-label="Return to citation 58, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-instance-service-example--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-instance-service-example--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-instance-service-example--source-105">[105] <a href="https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html">https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html</a> — systemd.exec
+<span class="citation-returns"><a class="citation-return" href="#mysql-instance-service-example--cite-105-1" aria-label="Return to citation 105, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-instance-service-example--source-106">[106] <a href="https://dev.mysql.com/doc/refman/8.4/en/selinux-file-context.html">https://dev.mysql.com/doc/refman/8.4/en/selinux-file-context.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.7.4 SELinux File Context
+<span class="citation-returns"><a class="citation-return" href="#mysql-instance-service-example--cite-106-1" aria-label="Return to citation 106, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-instance-service-example--source-107">[107] <a href="https://dev.mysql.com/doc/refman/8.4/en/selinux-context-tcp-port.html">https://dev.mysql.com/doc/refman/8.4/en/selinux-context-tcp-port.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.7.5 SELinux TCP Port Context
+<span class="citation-returns"><a class="citation-return" href="#mysql-instance-service-example--cite-107-1" aria-label="Return to citation 107, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-instance-service-example--source-157">[157] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/using_selinux/index">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/using_selinux/index</a> — Using SELinux | Red Hat Enterprise Linux | 9 | Red Hat Documentation
+<span class="citation-returns"><a class="citation-return" href="#mysql-instance-service-example--cite-157-1" aria-label="Return to citation 157, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-instance-service-example--source-163">[163] <a href="https://www.freedesktop.org/software/systemd/man/252/systemd.unit.html">https://www.freedesktop.org/software/systemd/man/252/systemd.unit.html</a> — systemd.unit<span class="citation-returns"><a class="citation-return" href="#mysql-instance-service-example--cite-163-1" aria-label="Return to citation 163, occurrence 1">↩</a></span></div></div>
+</section></article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-configuration.html"><span>Previous · MySQL</span><strong>Configuration and systemd services</strong></a></div><div><a rel="next" href="mysql-client-storage.html"><span>Next · MySQL</span><strong>Client workflow and moving the data directory</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/run.html">Explore Get a server running ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a aria-current="page" href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-install-instances.html">Installation, services and instances</a></div><div><span>MongoDB</span><a href="mongodb-installation.html">Installation and first start</a><a href="mongodb-instances.html">Troubleshooting and isolated instances</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

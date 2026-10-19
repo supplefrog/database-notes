@@ -1,0 +1,69 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Database vocabulary, editions and tools — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-overview"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/understand.html">Understand the moving parts</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Understand the moving parts</p><h1>Database vocabulary, editions and tools</h1></header>
+<div class="reader-controls"><a href="../tasks/understand.html">← Understand the moving parts</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-0027">Vocabulary and editions</a><a class="level-2" href="#mysql-overview--section-1">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-foundations.html">PostgreSQL foundations and tools</a><p class="product-label">MongoDB</p><a href="mongodb-architecture.html">Architecture, editions and tools</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-overview; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-overview--cite-1-1" class="citation-ref" href="#mysql-overview--source-1" aria-label="Source 1">[1]</a><a id="mysql-overview--cite-72-1" class="citation-ref" href="#mysql-overview--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-overview--diction" class="source-anchor"></span>
+<span id="mysql-overview--mysql-enterprise" class="source-anchor"></span>
+<span id="mysql-b-0020" class="source-anchor"></span>
+<span id="mysql-b-0021" class="source-anchor"></span>
+<span id="mysql-b-0024" class="source-anchor"></span>
+<span id="mysql-b-0025" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0027">Vocabulary and editions</h2>
+<p>MySQL is an RDBMS. In MySQL, <strong>database</strong> and <strong>schema</strong> are synonyms for a namespace of tables and other objects. A table definition describes columns, types, indexes and constraints; a schema can also contain views, routines, triggers and events. Foreign keys express relationships where the storage engine supports them.</p>
+<p>Community and Enterprise are distributions/licensing offerings, not simply the same server with a fixed extra-utility list. Check the purchased edition and component package before planning a feature.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Database vocabulary, editions and tools: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Original category</th>
+<th>Availability and purpose in the 8.4 family</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mysqlbackup</code></td>
+<td>MySQL Enterprise Backup, separately versioned commercial physical-backup product.</td>
+</tr>
+<tr>
+<td><code>mysqlmonitoragent</code>, Enterprise Monitor</td>
+<td>Commercial monitoring product/agent, not a core <code>mysqld</code> executable; deployment and lifecycle are separate.</td>
+</tr>
+<tr>
+<td>MySQL Router</td>
+<td>Available with Community as well as commercial offerings; routes client connections and is not an Enterprise-only backup tool.</td>
+</tr>
+<tr>
+<td>Audit, Firewall, Thread Pool</td>
+<td>Enterprise features; they are not automatically installed or enabled merely because the server starts.</td>
+</tr>
+<tr>
+<td>PAM and LDAP authentication</td>
+<td>Enterprise authentication integrations; depend on platform, plugin and identity-service configuration.</td>
+</tr>
+<tr>
+<td>Keyring</td>
+<td>A framework with different implementations: <code>component_keyring_file</code> is available in Community; encrypted-file and external key-management choices have edition-specific availability. Loading a keyring does not encrypt tables.</td>
+</tr>
+<tr>
+<td>Connectors</td>
+<td>Separately versioned drivers with their own compatibility/support and licensing terms; “Advanced Connectors” is not a universal server feature switch.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Choose a supported 8.4 LTS maintenance release rather than assuming the first 8.4.0 build is the deployment target. The official release policy gives LTS a stable feature set and five years of Premier plus three years of Extended Support; entitlement terms and platform support still apply.</p>
+<p><a id="mysql-overview--cite-1-2" class="citation-ref" href="#mysql-overview--source-1" aria-label="Source 1">[1]</a><a id="mysql-overview--cite-72-2" class="citation-ref" href="#mysql-overview--source-72" aria-label="Source 72">[72]</a><a id="mysql-overview--cite-84-1" class="citation-ref" href="#mysql-overview--source-84" aria-label="Source 84">[84]</a><a id="mysql-overview--cite-93-1" class="citation-ref" href="#mysql-overview--source-93" aria-label="Source 93">[93]</a><a id="mysql-overview--cite-155-1" class="citation-ref" href="#mysql-overview--source-155" aria-label="Source 155">[155]</a></p>
+
+<h2 id="mysql-overview--section-1">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-overview--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-overview--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩1</a><a class="citation-return" href="#mysql-overview--cite-1-2" aria-label="Return to citation 1, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-overview--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-overview--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩1</a><a class="citation-return" href="#mysql-overview--cite-72-2" aria-label="Return to citation 72, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-overview--source-84">[84] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-enterprise.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-enterprise.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 32 MySQL Enterprise Edition
+<span class="citation-returns"><a class="citation-return" href="#mysql-overview--cite-84-1" aria-label="Return to citation 84, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-overview--source-93">[93] <a href="https://dev.mysql.com/doc/refman/8.4/en/keyring.html">https://dev.mysql.com/doc/refman/8.4/en/keyring.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.4 The MySQL Keyring
+<span class="citation-returns"><a class="citation-return" href="#mysql-overview--cite-93-1" aria-label="Return to citation 93, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-overview--source-155">[155] <a href="https://dev.mysql.com/doc/refman/8.4/en/create-database.html">https://dev.mysql.com/doc/refman/8.4/en/create-database.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.1.12 CREATE DATABASE Statement<span class="citation-returns"><a class="citation-return" href="#mysql-overview--cite-155-1" aria-label="Return to citation 155, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div></div><div><a rel="next" href="mysql-connections.html"><span>Next · MySQL</span><strong>Connections and query execution</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/understand.html">Explore Understand the moving parts ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-foundations.html">PostgreSQL foundations and tools</a></div><div><span>MongoDB</span><a href="mongodb-architecture.html">Architecture, editions and tools</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

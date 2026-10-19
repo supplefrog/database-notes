@@ -1,0 +1,386 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Logical backups, restore tests and point-in-time recovery — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-backup-logical"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/recover.html">Back up, then restore</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Back up, then restore</p><h1>Logical backups, restore tests and point-in-time recovery</h1></header>
+<div class="reader-controls"><a href="../tasks/recover.html">← Back up, then restore</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a aria-current="page" href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-0856">Backup and Restore</a><a class="level-3" href="#mysql-b-0884">Disaster recovery</a><a class="level-2" href="#mysql-backup-logical--section-1">Logical backups</a><a class="level-3" href="#mysql-b-0886">mysqldump</a><a class="level-3" href="#mysql-backup-logical--section-2">Historical mysqlpump</a><a class="level-3" href="#mysql-backup-logical--section-3">Validate a logical dump by restoring it</a><a class="level-3" href="#mysql-backup-logical--section-4">Point-in-time recovery with binary logs</a><a class="level-3" href="#mysql-backup-logical--section-5">Retention is not reset</a><a class="level-3" href="#mysql-backup-logical--section-6">mydumper / myloader</a><a class="level-3" href="#mysql-backup-logical--section-7">MySQL Shell 8.4 utilities</a><a class="level-2" href="#mysql-backup-logical--section-8">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-backup-recovery.html">Backup and point-in-time recovery</a><p class="product-label">MongoDB</p><a href="mongodb-backup.html">Backup and recovery</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-backup-logical; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-backup-logical--cite-1-1" class="citation-ref" href="#mysql-backup-logical--source-1" aria-label="Source 1">[1]</a><a id="mysql-backup-logical--cite-72-1" class="citation-ref" href="#mysql-backup-logical--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-backup-logical--backup-and-restore" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0856">Backup and Restore</h2>
+<p><span id="mysql-b-0858" class="source-anchor"></span>
+<span id="mysql-b-0864" class="source-anchor"></span></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Logical backups, restore tests and point-in-time recovery: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Meaning and caveat</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cold backup</td>
+<td>Server stopped cleanly while a consistent copy is taken; not merely a running database with locks.</td>
+</tr>
+<tr>
+<td>Warm backup</td>
+<td>Some activity blocked, such as writes/table access, during copying; define the exact locks and engines involved.</td>
+</tr>
+<tr>
+<td>Hot/online backup</td>
+<td>Server remains running; may still take brief locks or constrain DDL. “Hot” does not promise zero blocking.</td>
+</tr>
+<tr>
+<td>Restore</td>
+<td>Reconstruct files/objects/data from a backup into a selected instance.</td>
+</tr>
+<tr>
+<td>Recovery</td>
+<td>Apply the necessary redo/binlog or other recovery steps to reach a consistent state or chosen time; not only salvaging damaged files.</td>
+</tr>
+</tbody>
+</table></div>
+<p><a id="mysql-backup-logical--cite-43-1" class="citation-ref" href="#mysql-backup-logical--source-43" aria-label="Source 43">[43]</a><a id="mysql-backup-logical--cite-45-1" class="citation-ref" href="#mysql-backup-logical--source-45" aria-label="Source 45">[45]</a><a id="mysql-backup-logical--cite-78-1" class="citation-ref" href="#mysql-backup-logical--source-78" aria-label="Source 78">[78]</a><a id="mysql-backup-logical--cite-137-1" class="citation-ref" href="#mysql-backup-logical--source-137" aria-label="Source 137">[137]</a></p>
+<p><span id="mysql-backup-logical--disaster-recovery" class="source-anchor"></span>
+<span id="mysql-backup-logical--logical-2" class="source-anchor"></span>
+<span id="mysql-b-0869" class="source-anchor"></span>
+<span id="mysql-b-0870" class="source-anchor"></span>
+<span id="mysql-b-0877" class="source-anchor"></span>
+<span id="mysql-b-0882" class="source-anchor"></span>
+</p>
+<h3 id="mysql-b-0884">Disaster recovery</h3>
+<p>Choose a plan against explicit recovery-point (RPO) and recovery-time (RTO) objectives, failure domains, cost and operational complexity. Keep consistent full backups and supported incremental/log chains, protected off-host copies, recoverable keys, monitoring and a practiced incident runbook. Test isolated restores regularly and measure the achieved recovery point/time.</p>
+<p>A replica or cluster can improve availability but can also replicate deletion or corruption. It is not an independent historical backup. Managed services (the source named Amazon Aurora MySQL) have their own engine versions, backup/restore and regional failover contracts; this self-managed MySQL 8.4 guide does not certify them or promise simplified recovery. Verify the chosen service’s official documentation separately.</p>
+
+<h2 id="mysql-backup-logical--section-1">Logical backups</h2>
+<p>Logical backups preserve object definitions and/or data in logical form. A SQL dump contains SQL statements; CSV or other delimited data files are <strong>not</strong> SQL and need their own schema, encoding, NULL/escaping and loader contract. Neither is a physical copy of all server state.</p>
+<p><a id="mysql-backup-logical--cite-137-2" class="citation-ref" href="#mysql-backup-logical--source-137" aria-label="Source 137">[137]</a><a id="mysql-backup-logical--cite-138-1" class="citation-ref" href="#mysql-backup-logical--source-138" aria-label="Source 138">[138]</a><a id="mysql-backup-logical--cite-43-2" class="citation-ref" href="#mysql-backup-logical--source-43" aria-label="Source 43">[43]</a></p>
+<p><span id="mysql-backup-logical--mysqldump" class="source-anchor"></span>
+</p>
+<h3 id="mysql-b-0886">mysqldump</h3>
+<p><span id="mysql-backup-logical--mysqlpump" class="source-anchor"></span>
+<span id="mysql-backup-logical--prerequisites-to-restoring-on-production" class="source-anchor"></span>
+<span id="mysql-b-0888" class="source-anchor"></span>
+<span id="mysql-b-0909" class="source-anchor"></span>
+<span id="mysql-b-0911" class="source-anchor"></span>
+<span id="mysql-b-0920" class="source-anchor"></span>
+<span id="mysql-b-0922" class="source-anchor"></span>
+<span id="mysql-b-0924" class="source-anchor"></span>
+<span id="mysql-b-0928" class="source-anchor"></span>
+<span id="mysql-b-0930" class="source-anchor"></span>
+<span id="mysql-b-0935" class="source-anchor"></span>
+<span id="mysql-b-0938" class="source-anchor"></span>
+<span id="mysql-b-0940" class="source-anchor"></span>
+<span id="mysql-b-0946" class="source-anchor"></span>
+<span id="mysql-b-0948" class="source-anchor"></span>
+<span id="mysql-b-0950" class="source-anchor"></span>
+<span id="mysql-b-0958" class="source-anchor"></span>
+<span id="mysql-b-0961" class="source-anchor"></span></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Logical backups, restore tests and point-in-time recovery: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th><code>mysqldump</code> option</th>
+<th>Meaning in the 8.4 client</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-A</code>, <code>--all-databases</code></td>
+<td>Dumps selected server databases subject to tool exclusions/privileges; not a physical image of all server state or external keys/configuration.</td>
+</tr>
+<tr>
+<td><code>-B</code>, <code>--databases db1 db2</code></td>
+<td>Includes database-selection and creation statements for named databases.</td>
+</tr>
+<tr>
+<td><code>-R</code>, <code>--routines</code></td>
+<td>Include stored procedures/functions; inspect definers and required target privileges.</td>
+</tr>
+<tr>
+<td><code>-E</code>, <code>--events</code></td>
+<td>Include scheduled events; control event execution during restore validation.</td>
+</tr>
+<tr>
+<td><code>--triggers</code></td>
+<td>Include triggers (enabled by default); target version/privileges still matter.</td>
+</tr>
+<tr>
+<td><code>--single-transaction</code></td>
+<td>Starts a consistent transaction for transactional tables and disables <code>--lock-tables</code>; not consistent for changing MyISAM/MEMORY data. Avoid concurrent DDL such as ALTER/DROP/RENAME/TRUNCATE during the dump.</td>
+</tr>
+<tr>
+<td><code>--lock-all-tables</code></td>
+<td>Holds a global read lock across the dump; conflicts with <code>--single-transaction</code> and blocks writes. Plan an outage/lock window.</td>
+</tr>
+<tr>
+<td><code>--set-gtid-purged=OFF</code></td>
+<td>Omits the GTID-purged and related sql_log_bin manipulation. Whether restored changes receive GTIDs depends on target logging/GTID configuration; it does not simply “make a backup safe.”</td>
+</tr>
+<tr>
+<td><code>--ignore-table=db1.tb1</code></td>
+<td>Exclude exactly that qualified table; repeat the option for another table. No trailing comma or comma-separated list.</td>
+</tr>
+<tr>
+<td><code>--add-drop-database</code></td>
+<td>Adds destructive DROP DATABASE before CREATE statements where applicable. Avoid for merges/production imports; not inherently a replication requirement.</td>
+</tr>
+<tr>
+<td><code>--no-create-db</code></td>
+<td>Suppresses CREATE DATABASE statements normally added with <code>--databases</code> / <code>--all-databases</code>.</td>
+</tr>
+<tr>
+<td><code>--no-create-info</code></td>
+<td>Data without CREATE TABLE statements; not a complete independently restorable dump.</td>
+</tr>
+<tr>
+<td><code>--no-data</code></td>
+<td>Definitions without rows.</td>
+</tr>
+<tr>
+<td><code>--source-data=1</code> / <code>=2</code></td>
+<td>Records source file/position as an active <code>CHANGE REPLICATION SOURCE TO</code> statement or a comment. Can require a brief global read lock even with <code>--single-transaction</code>. Replaces historical <code>--master-data</code>.</td>
+</tr>
+<tr>
+<td><code>--compact</code></td>
+<td>Enables a set of reduced-output options, not just comment removal; inspect its effects on DROP/LOCK/charset statements.</td>
+</tr>
+<tr>
+<td>Pipe through <code>pv -trb</code></td>
+<td>Optional separate Unix utility reports elapsed time/rate/bytes, not database restore correctness.</td>
+</tr>
+<tr>
+<td>Pipe through <code>gzip</code></td>
+<td>Actually compresses the byte stream. A <code>.gz</code> filename alone does not compress it.</td>
+</tr>
+<tr>
+<td><code>&gt; file.sql</code></td>
+<td>Shell redirection overwrites a file. Use unique controlled filenames and restrictive permissions. A timestamp naming example should avoid colons when files cross platforms.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Example for an <strong>existing all-InnoDB <code>app</code> schema</strong>, a trusted TLS endpoint, no concurrent DDL, and a least-privilege dump account provisioned for the chosen flags. <code>db.example.com</code>, CA path and output path are site inputs. Bash/EL9 only:</p>
+<pre tabindex="0" role="region" aria-label="Logical backups, restore tests and point-in-time recovery: code 1, horizontally scrollable"><code class="language-bash">umask 077
+set -o pipefail
+mysqldump --host=db.example.com --user=backup --password \
+  --ssl-mode=VERIFY_IDENTITY --ssl-ca=/etc/mysql/trust/ca.pem \
+  --single-transaction --routines --events --triggers \
+  --set-gtid-purged=OFF --databases app \
+  | gzip &gt; "app-$(date +%Y%m%dT%H%M%S).sql.gz"
+</code></pre>
+<p>This example is for a logical application restore, <strong>not an automatic GTID replica seed</strong>. Record the command/options, server/client versions, object inventory, completion/exit status and checksums. A failed pipeline can leave a partial file; quarantine it. For replication/PITR, separately capture the matching snapshot coordinates/GTID set using the documented consistency procedure. Required privileges can include SELECT, SHOW VIEW, TRIGGER, EVENT, routine visibility, and others depending on tablespaces, locks and GTID options; do not grant ALL merely to suppress an error.</p>
+
+<h3 id="mysql-backup-logical--section-2">Historical mysqlpump</h3>
+<p><code>mysqlpump</code> was removed in MySQL 8.4. The original <code>mysqlpump -B db1 db2 &gt; pump.sql</code> and queue options are not 8.4 commands. <code>--parallel-schemas=4:db1,db2</code> historically selected a schema queue; <code>--default-parallelism=4</code> selected the default queue. Preserve that distinction when interpreting old jobs, but migrate them to a supported dump tool and retest restore format. Thread count should be benchmarked against source, network and destination capacity, not assumed equal to physical cores.</p>
+
+<h3 id="mysql-backup-logical--section-3">Validate a logical dump by restoring it</h3>
+<ol>
+<li>Verify file integrity, decompression, manifest and successful dump completion. Encryption keys, config and routine/account dependencies need separate retention.</li>
+<li>Restore into an <strong>isolated disposable server</strong>, normally using original schema names. <code>mysql --database=test &lt; dump.sql</code> does not redirect statements containing <code>CREATE DATABASE</code>, <code>USE</code>, fully-qualified names or DROP commands into <code>test</code>.</li>
+<li>Review the dump before import, isolate replication/events/outbound integrations, and authenticate with a prompted password and verified TLS where TCP is used. For a compressed SQL dump, decompress deliberately and check both decompressor and client exit statuses; use <code>pipefail</code> for pipelines.</li>
+<li>Check object definitions, definers, row counts/checksums where appropriate, constraints, routines and application business queries. <code>mysqlcheck --user=operator --password --databases app</code> checks supported table operations; it is not a proof of logical/business consistency.</li>
+<li>Record restore duration against RTO and recoverable point against RPO. Do not replace production until the rehearsed cutover is approved.</li>
+</ol>
+<p><code>mysqlbackup ... validate</code> validates an <strong>Enterprise Backup physical backup</strong>, not arbitrary SQL/CSV dumps. See the physical-backup chapter.</p>
+
+<h3 id="mysql-backup-logical--section-4">Point-in-time recovery with binary logs</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Logical backups, restore tests and point-in-time recovery: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Binlog format</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>STATEMENT</td>
+<td>Records SQL with replication context. Some statements are unsafe/nondeterministic; <code>NOW()</code> specifically has replication handling and is not by itself a valid blanket example of failure.</td>
+</tr>
+<tr>
+<td>ROW</td>
+<td>Records row-change events; default in 8.4. Generally avoids statement nondeterminism but volume depends on workload/row-image settings.</td>
+</tr>
+<tr>
+<td>MIXED</td>
+<td>Switches from statement to row events for cases classified unsafe; does not make arbitrary multi-source writes conflict-free.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Use <code>SHOW BINARY LOGS;</code> to inventory available logs and <code>SHOW BINARY LOG STATUS;</code> for current coordinates; neither guarantees a complete archived chain. A full backup plus <strong>every required binlog after its consistent boundary</strong> is needed. Archive securely off-host and retain source identity, checksums and encryption keys.</p>
+<ol>
+<li>Restore the base backup to an isolated target. Establish its exact snapshot coordinates/GTID state and which transactions already exist there.</li>
+<li>Inspect binlogs to identify the last complete transaction before the unwanted event. Time filters use the tool’s interpreted timestamps/timezone and are for locating events; pin validated event/transaction boundaries by file and position for final recovery.</li>
+<li>Generate a replay stream from all required files <strong>in original order</strong>. <code>mysqlbinlog --start-position=... --stop-position=...</code> applies the starting limit to the first file and the stopping limit to the last. Resolve these integers from actual logs; no universal numbers are supplied.</li>
+<li>Replay the normal executable output through <code>mysql</code> in a controlled session, checking both exit statuses and stopping on error. Test this exact boundary on the disposable target before production cutover. Do not add a database filter without understanding cross-database statements/row-event filtering.</li>
+<li>Reconcile resulting data, users/routines/events and application invariants, then plan cutover and retained rollback. Never replay the bad transaction merely to close a gap.</li>
+</ol>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Logical backups, restore tests and point-in-time recovery: table 4, horizontally scrollable"><table>
+<thead>
+<tr>
+<th><code>mysqlbinlog</code> option/topic</th>
+<th>Correct use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--start-datetime</code>, <code>--stop-datetime</code></td>
+<td>Locate an interval; establish timezone and complete transaction boundaries before accepting a recovery point.</td>
+</tr>
+<tr>
+<td><code>--start-position</code>, <code>--stop-position</code></td>
+<td>Byte/event positions, not transaction IDs; validate against named files.</td>
+</tr>
+<tr>
+<td><code>--read-from-remote-server</code></td>
+<td>Retrieve logs through the server, including encrypted logs the server can decrypt. Use authorized credentials and identity-verified TLS.</td>
+</tr>
+<tr>
+<td><code>--include-gtids</code>, <code>--exclude-gtids</code></td>
+<td>Filter GTID sets for applicable recovery/migration tasks, not “replication only.” Audit missing and duplicate transactions carefully. Existing GTID execution state influences replay.</td>
+</tr>
+<tr>
+<td><code>-v</code>, <code>--verbose</code></td>
+<td>Adds decoded row commentary for inspection.</td>
+</tr>
+<tr>
+<td><code>--base64-output=DECODE-ROWS</code></td>
+<td>Diagnostic pseudo-SQL comments, <strong>not a replay stream</strong> for row changes. Default AUTO retains executable BINLOG event payloads. NEVER also disables required row-event output.</td>
+</tr>
+<tr>
+<td><code>/*! ... */</code></td>
+<td>MySQL executable/version comments; do not strip them from a replay/dump assuming every comment is inert.</td>
+</tr>
+</tbody>
+</table></div>
+
+<h3 id="mysql-backup-logical--section-5">Retention is not reset</h3>
+<p><code>RESET BINARY LOGS AND GTIDS</code> destroys binlog history and clears GTID execution state; it is <strong>not</strong> part of routine backup, replica setup or error repair. Do not run it on a source needed by replicas/PITR. If rebuilding a deliberately disposable instance, follow its complete provisioning procedure instead.</p>
+<p><code>PURGE BINARY LOGS TO 'file'</code> removes logs before the named file; <code>BEFORE 'timestamp'</code> removes logs older than a cutoff. These are destructive retention operations, not recovery commands. Before choosing a boundary, verify archived copies and restore tests, all connected/disconnected replica needs, delayed replicas, backup coordinates and the recovery-retention policy. <code>NOW()</code> is not a safe generic cutoff. Use server-managed expiry aligned with these dependencies; never delete binary logs using filesystem commands.</p>
+<p><a id="mysql-backup-logical--cite-43-3" class="citation-ref" href="#mysql-backup-logical--source-43" aria-label="Source 43">[43]</a><a id="mysql-backup-logical--cite-44-1" class="citation-ref" href="#mysql-backup-logical--source-44" aria-label="Source 44">[44]</a><a id="mysql-backup-logical--cite-46-1" class="citation-ref" href="#mysql-backup-logical--source-46" aria-label="Source 46">[46]</a><a id="mysql-backup-logical--cite-47-1" class="citation-ref" href="#mysql-backup-logical--source-47" aria-label="Source 47">[47]</a><a id="mysql-backup-logical--cite-86-1" class="citation-ref" href="#mysql-backup-logical--source-86" aria-label="Source 86">[86]</a><a id="mysql-backup-logical--cite-92-1" class="citation-ref" href="#mysql-backup-logical--source-92" aria-label="Source 92">[92]</a><a id="mysql-backup-logical--cite-95-1" class="citation-ref" href="#mysql-backup-logical--source-95" aria-label="Source 95">[95]</a><a id="mysql-backup-logical--cite-96-1" class="citation-ref" href="#mysql-backup-logical--source-96" aria-label="Source 96">[96]</a><a id="mysql-backup-logical--cite-153-1" class="citation-ref" href="#mysql-backup-logical--source-153" aria-label="Source 153">[153]</a><a id="mysql-backup-logical--cite-156-1" class="citation-ref" href="#mysql-backup-logical--source-156" aria-label="Source 156">[156]</a></p>
+<p><span id="mysql-b-0972" class="source-anchor"></span>
+<span id="mysql-b-0974" class="source-anchor"></span>
+<span id="mysql-b-0979" class="source-anchor"></span>
+<span id="mysql-b-0981" class="source-anchor"></span>
+<span id="mysql-b-0983" class="source-anchor"></span>
+<span id="mysql-b-0991" class="source-anchor"></span>
+</p>
+<h3 id="mysql-backup-logical--section-6">mydumper / myloader</h3>
+<p>These are <strong>third-party</strong> parallel logical tools, not Oracle <code>mysqldump</code> aliases. Their own project documentation/release notes govern compatibility. Before deployment pin the exact MyDumper release, read its matching help, authenticate through a restricted configuration or documented prompt mechanism, and test dump/load with that same release. A versionless password-on-command-line recipe is intentionally not provided.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Logical backups, restore tests and point-in-time recovery: table 5, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Original option/task</th>
+<th>Review before using</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-u</code>, <code>--user</code></td>
+<td>Authentication identity; provide only needed dump/load privileges.</td>
+</tr>
+<tr>
+<td><code>-p</code>, <code>--password</code></td>
+<td>Tool-specific password handling; avoid literal command-line secrets and verify whether the selected version supports a prompt/config mechanism.</td>
+</tr>
+<tr>
+<td><code>-t</code>, <code>--threads</code></td>
+<td>Parallel workers; budget source locks/snapshot consistency and target I/O.</td>
+</tr>
+<tr>
+<td>mydumper <code>-B</code>, <code>--database</code></td>
+<td>Database selection; the original <code>-d</code> as database was wrong for current MyDumper.</td>
+</tr>
+<tr>
+<td>mydumper <code>-o</code>, <code>--outputdir</code></td>
+<td>New protected dump output directory.</td>
+</tr>
+<tr>
+<td>myloader <code>-d</code>, <code>--directory</code></td>
+<td>Input dump directory; not a database-selection flag.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Select snapshot/locking behavior for <strong>all</strong> table engines; a fast multi-threaded dump is not automatically a consistent one. Preserve metadata files and check both tools’ completion status, then restore/reconcile in isolation. See the project documentation rather than borrowing Shell or mysqlpump queue syntax.</p>
+
+<h3 id="mysql-backup-logical--section-7">MySQL Shell 8.4 utilities</h3>
+<p>MySQL Shell is a separately installed tool; these calls use its JavaScript mode (<code>\js</code>), not SQL in <code>mysql</code>. The pinned Oracle-hosted 8.4 manual is used because the public <code>/mysql-shell/8.4/</code> URLs now redirect to a newer manual. Use an 8.4 Shell maintenance build compatible with the source and destination and record its actual version.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Logical backups, restore tests and point-in-time recovery: table 6, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Task</th>
+<th>JavaScript call pattern</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Instance dump</td>
+<td><code>util.dumpInstance('/backup/instance', {threads:4, consistent:true})</code></td>
+</tr>
+<tr>
+<td>Schema dump</td>
+<td><code>util.dumpSchemas(['app'], '/backup/app', {threads:4, consistent:true})</code></td>
+</tr>
+<tr>
+<td>Table dump</td>
+<td><code>util.dumpTables('app', ['customers','orders'], '/backup/tables')</code></td>
+</tr>
+<tr>
+<td>HeatWave-targeted dump</td>
+<td><code>util.dumpInstance('/backup/heatwave', {threads:4, ocimds:true, consistent:true})</code> after checking HeatWave’s current migration requirements.</td>
+</tr>
+<tr>
+<td>Load Shell dump</td>
+<td><code>util.loadDump('/backup/app')</code> against the deliberately selected isolated destination. This does not load a <code>mysqldump</code> SQL file.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Use new/empty writable output directories and a properly authenticated Shell session. Do not put connection passwords in JS source. The loader creates objects and inserts data; establish target privileges, free space, existing-object/GTID policy and restore isolation first.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Logical backups, restore tests and point-in-time recovery: table 7, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ocimds</code></td>
+<td>Real 8.4 option for HeatWave compatibility checks/adjustments. Not required for ordinary MySQL-to-MySQL backup and not a generic “safer” switch.</td>
+</tr>
+<tr>
+<td><code>threads</code></td>
+<td>Total parallel worker connections (default 4); not mysqlpump’s per-schema queues.</td>
+</tr>
+<tr>
+<td><code>consistent</code></td>
+<td>Default true. Establishes synchronized consistent snapshots under initial read/table locks and uses a backup lock where available; does <strong>not</strong> normally hold all tables read-locked throughout the data copy. Engine/DDL/privilege restrictions still apply; false can create inconsistent dumps.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Inspect documented required privileges and consistency-check failures. Avoid <code>ignoreVersion</code> or compatibility transformations as unexplained workarounds; record every transformation and test the loaded result.</p>
+<p><a id="mysql-backup-logical--cite-95-2" class="citation-ref" href="#mysql-backup-logical--source-95" aria-label="Source 95">[95]</a><a id="mysql-backup-logical--cite-96-2" class="citation-ref" href="#mysql-backup-logical--source-96" aria-label="Source 96">[96]</a><a id="mysql-backup-logical--cite-101-1" class="citation-ref" href="#mysql-backup-logical--source-101" aria-label="Source 101">[101]</a><a id="mysql-backup-logical--cite-102-1" class="citation-ref" href="#mysql-backup-logical--source-102" aria-label="Source 102">[102]</a></p>
+
+<h2 id="mysql-backup-logical--section-8">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-backup-logical--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-43">[43] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysqldump.html">https://dev.mysql.com/doc/refman/8.4/en/mysqldump.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.5.4 mysqldump — A Database Backup Program
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-43-1" aria-label="Return to citation 43, occurrence 1">↩1</a><a class="citation-return" href="#mysql-backup-logical--cite-43-2" aria-label="Return to citation 43, occurrence 2">↩2</a><a class="citation-return" href="#mysql-backup-logical--cite-43-3" aria-label="Return to citation 43, occurrence 3">↩3</a></span></div><div class="source-entry" id="mysql-backup-logical--source-44">[44] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysqlbinlog.html">https://dev.mysql.com/doc/refman/8.4/en/mysqlbinlog.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.6.9 mysqlbinlog — Utility for Processing Binary Log Files
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-44-1" aria-label="Return to citation 44, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-45">[45] <a href="https://dev.mysql.com/doc/refman/8.4/en/point-in-time-recovery.html">https://dev.mysql.com/doc/refman/8.4/en/point-in-time-recovery.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 9.5 Point-in-Time (Incremental) Recovery
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-45-1" aria-label="Return to citation 45, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-46">[46] <a href="https://dev.mysql.com/doc/refman/8.4/en/reset-binary-logs-and-gtids.html">https://dev.mysql.com/doc/refman/8.4/en/reset-binary-logs-and-gtids.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.4.1.2 RESET BINARY LOGS AND GTIDS Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-46-1" aria-label="Return to citation 46, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-47">[47] <a href="https://dev.mysql.com/doc/refman/8.4/en/purge-binary-logs.html">https://dev.mysql.com/doc/refman/8.4/en/purge-binary-logs.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.4.1.1 PURGE BINARY LOGS Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-47-1" aria-label="Return to citation 47, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-78">[78] <a href="https://docs.percona.com/percona-xtrabackup/8.4/create-full-backup.html">https://docs.percona.com/percona-xtrabackup/8.4/create-full-backup.html</a> — Create a full backup - Percona XtraBackup
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-78-1" aria-label="Return to citation 78, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-86">[86] <a href="https://dev.mysql.com/doc/refman/8.4/en/added-deprecated-removed.html">https://dev.mysql.com/doc/refman/8.4/en/added-deprecated-removed.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.5 Server and Status Variables and Options Added, Deprecated, or Removed in
+MySQL 8.4 since 8.0
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-86-1" aria-label="Return to citation 86, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-92">[92] <a href="https://dev.mysql.com/doc/refman/8.4/en/point-in-time-recovery-binlog.html">https://dev.mysql.com/doc/refman/8.4/en/point-in-time-recovery-binlog.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 9.5.1 Point-in-Time Recovery Using Binary Log
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-92-1" aria-label="Return to citation 92, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-95">[95] <a href="https://docs.oracle.com/cd/E17952_01/mysql-shell-8.4-en/mysql-shell-utilities-dump-instance-schema.html">https://docs.oracle.com/cd/E17952_01/mysql-shell-8.4-en/mysql-shell-utilities-dump-instance-schema.html</a> — 11.5&nbsp;Instance Dump Utility, Schema Dump Utility, and Table Dump Utility
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-95-1" aria-label="Return to citation 95, occurrence 1">↩1</a><a class="citation-return" href="#mysql-backup-logical--cite-95-2" aria-label="Return to citation 95, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-backup-logical--source-96">[96] <a href="https://docs.oracle.com/cd/E17952_01/mysql-shell-8.4-en/mysql-shell-utilities-load-dump.html">https://docs.oracle.com/cd/E17952_01/mysql-shell-8.4-en/mysql-shell-utilities-load-dump.html</a> — 11.6&nbsp;Dump Loading Utility
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-96-1" aria-label="Return to citation 96, occurrence 1">↩1</a><a class="citation-return" href="#mysql-backup-logical--cite-96-2" aria-label="Return to citation 96, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-backup-logical--source-101">[101] <a href="https://mydumper.github.io/mydumper/docs/html/mydumper_usage.html">https://mydumper.github.io/mydumper/docs/html/mydumper_usage.html</a> — mydumper - MyDumper
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-101-1" aria-label="Return to citation 101, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-102">[102] <a href="https://mydumper.github.io/mydumper/docs/html/myloader_usage.html">https://mydumper.github.io/mydumper/docs/html/myloader_usage.html</a> — myloader - MyDumper
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-102-1" aria-label="Return to citation 102, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-137">[137] <a href="https://dev.mysql.com/doc/refman/8.4/en/backup-types.html">https://dev.mysql.com/doc/refman/8.4/en/backup-types.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 9.1 Backup and Recovery Types
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-137-1" aria-label="Return to citation 137, occurrence 1">↩1</a><a class="citation-return" href="#mysql-backup-logical--cite-137-2" aria-label="Return to citation 137, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-backup-logical--source-138">[138] <a href="https://dev.mysql.com/doc/refman/8.4/en/backup-policy.html">https://dev.mysql.com/doc/refman/8.4/en/backup-policy.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 9.3.1 Establishing a Backup Policy
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-138-1" aria-label="Return to citation 138, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-153">[153] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-nutshell.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-nutshell.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.4 What Is New in MySQL 8.4 since MySQL 8.0
+<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-153-1" aria-label="Return to citation 153, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-backup-logical--source-156">[156] <a href="https://dev.mysql.com/doc/refman/8.4/en/show-binary-log-status.html">https://dev.mysql.com/doc/refman/8.4/en/show-binary-log-status.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.7.7.1 SHOW BINARY LOG STATUS Statement<span class="citation-returns"><a class="citation-return" href="#mysql-backup-logical--cite-156-1" aria-label="Return to citation 156, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-performance.html"><span>Previous · MySQL</span><strong>Execution plans, indexes and diagnostics</strong></a></div><div><a rel="next" href="mysql-backup-physical.html"><span>Next · MySQL</span><strong>Physical backups, tablespace transfer and log rotation</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/recover.html">Explore Back up, then restore ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-backup-recovery.html">Backup and point-in-time recovery</a></div><div><span>MongoDB</span><a href="mongodb-backup.html">Backup and recovery</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

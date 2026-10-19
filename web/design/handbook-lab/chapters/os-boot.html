@@ -1,0 +1,193 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>From power-on to login — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="os-boot"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../operating-systems.html">Operating systems</a><a href="../operating-systems.html">Understand the machine</a></nav>
+<header class="reader-head"><p class="reader-context">OS <span aria-hidden="true">/</span> Understand the machine</p><h1>From power-on to login</h1></header>
+<div class="reader-controls"><a href="../operating-systems.html">← Understand the machine</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="OS chapters"><ol class="chapter-list"><li><a  href="../chapters/os-processes.html">Processes and scheduling</a></li><li><a  href="../chapters/os-memory.html">Memory and virtual memory</a></li><li><a  href="../chapters/os-kernel-devices.html">Devices, kernel services and isolation</a></li><li><a aria-current="page" href="../chapters/os-boot.html">From power-on to login</a></li><li><a  href="../chapters/os-linux-foundations.html">Linux distributions, terminals and shells</a></li><li><a  href="../chapters/os-shell-files.html">Finding, editing and protecting files</a></li><li><a  href="../chapters/os-users-processes.html">Users, processes and resource monitoring</a></li><li><a  href="../chapters/os-services.html">Systemd service types</a></li><li><a  href="../chapters/os-storage.html">Filesystems, RAID, directories and partitions</a></li><li><a  href="../chapters/os-networking.html">Networking, SSH and file transfer</a></li><li><a  href="../chapters/os-access-security.html">Access control, passwords and recovery</a></li><li><a  href="../chapters/os-windows.html">Windows tools and licensing</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#os-boot--boot-process">Boot process</a><a class="level-3" href="#os-boot--1-power-on">1. Power on</a><a class="level-3" href="#os-boot--2-firmware">2. Firmware</a><a class="level-3" href="#os-boot--3-bootloader">3. Bootloader</a><a class="level-3" href="#os-boot--4-kernel">4. Kernel and initramfs</a><a class="level-3" href="#os-boot--5-init-system">5. Init system</a><a class="level-3" href="#os-boot--section-1">Inspect or change the target</a><a class="level-3" href="#os-boot--6-user-login-session-management">6. Login and session management</a><a class="level-2" href="#os-boot--section-2">Sources</a></nav></details></div>
+<article class="prose"><p><span id="os-b-0159" class="source-anchor"></span>
+<span id="os-b-0160" class="source-anchor"></span>
+<span id="os-b-0161" class="source-anchor"></span>
+<span id="os-b-0163" class="source-anchor"></span>
+<span id="os-b-0165" class="source-anchor"></span>
+<span id="os-b-0166" class="source-anchor"></span></p>
+
+<h2 id="os-boot--boot-process">Boot process</h2>
+<p>This is an <strong>x86-64 PC overview</strong>, with <strong>RHEL 9, GRUB2 and systemd</strong> as the Linux example. Other architectures and firmware paths differ; BIOS versus UEFI is distinct from MBR versus GPT partitioning.</p><figure class="teaching-figure" id="tf-os-boot" data-after-heading="os-boot--boot-process" aria-labelledby="tf-os-boot-title" aria-describedby="tf-os-boot-caption"><div class="tf-heading"><span class="tf-label">x86-64 PC · RHEL 9 example</span><strong id="tf-os-boot-title">From firmware to the installed system</strong></div><div class="tf-columns"><div class="tf-lane"><p class="tf-lane-title">Firmware paths · alternatives</p><dl class="tf-alternatives"><dt>Legacy BIOS</dt><dd>Initializes hardware and, in a conventional disk boot, loads first-sector boot code that continues the loader chain.</dd><dt>UEFI</dt><dd>The boot manager selects an EFI application using boot options and device paths. On a typical installed GPT disk, boot files live in the EFI System Partition.</dd></dl><p class="tf-detail">Secure Boot verifies authorized images when enabled and configured; UEFI alone does not enable it. These are alternative entry paths, not consecutive stages.</p></div><div class="tf-lane"><p class="tf-lane-title">Typical GRUB2 / Linux continuation</p><ol class="tf-flow"><li><strong>Bootloader</strong><span>Loads the selected kernel and initramfs, passes the command line and transfers control.</span></li><li><strong>Kernel &amp; early userspace</strong><span>The kernel initializes and runs /init from the unpacked initramfs. Early userspace prepares and mounts the installed root.</span></li><li><strong>Switch root → systemd</strong><span>Control passes to the installed init system, normally systemd as PID 1. Unit dependencies allow independent startup work to run concurrently.</span></li><li><strong>Login &amp; session</strong><span>A getty/login path or display manager starts a user session. A graphical desktop is not simply a login shell.</span></li></ol></div></div><p class="tf-note"><strong>Two separate questions:</strong> BIOS/UEFI describes firmware; MBR/GPT describes partitioning. GRUB can boot a GPT disk on BIOS using a BIOS Boot Partition. GPT is not a bootloader.</p><figcaption id="tf-os-boot-caption">Teaching simplification of a conventional x86-64 PC boot, not an exact firmware schematic or universal sequence. The RHEL 9 example uses GRUB2 and systemd; alternative platforms and boot managers differ.<p class="tf-sources"><strong>Read the sources</strong> <a href="#os-boot--source-119" id="tf-os-boot-ref-1" class="figure-source-ref">BIOS + GPT [119]</a> · <a href="#os-boot--source-80" id="tf-os-boot-ref-2" class="figure-source-ref">UEFI boot manager [80]</a> · <a href="#os-boot--source-58" id="tf-os-boot-ref-3" class="figure-source-ref">Secure Boot [58]</a> · <a href="#os-boot--source-9" id="tf-os-boot-ref-4" class="figure-source-ref">RHEL kernel and boot [9]</a> · <a href="#os-boot--source-11" id="tf-os-boot-ref-5" class="figure-source-ref">Initramfs [11]</a> · <a href="#os-boot--source-99" id="tf-os-boot-ref-6" class="figure-source-ref">Unit dependencies [99]</a> · <a href="#os-boot--source-128" id="tf-os-boot-ref-7" class="figure-source-ref">Login [128]</a></p></figcaption></figure>
+
+<h3 id="os-boot--1-power-on">1. Power on</h3>
+<p>Power-on begins the platform firmware startup path. In a PI implementation, SEC is the initial code that takes control: it handles restart events, establishes temporary memory and passes control and platform information to PEI. The processor-specific details differ across architectures.<a id="os-boot--cite-129-1" class="citation-ref" href="#os-boot--source-129" aria-label="Source 129">[129]</a></p>
+
+<h3 id="os-boot--2-firmware">2. Firmware</h3>
+
+<h4 id="os-boot--2-a-bios">BIOS path</h4>
+<p>Legacy BIOS performs hardware initialization and power-on checks (POST), then selects a boot device. For a failed POST, consult the machine vendor’s diagnostics rather than assuming every reported error halts boot. In the conventional disk path, BIOS loads boot code from the first disk sector; that code continues the bootloader chain. It is not the only possible BIOS boot path.<a id="os-boot--cite-10-1" class="citation-ref" href="#os-boot--source-10" aria-label="Source 10">[10]</a><a id="os-boot--cite-119-1" class="citation-ref" href="#os-boot--source-119" aria-label="Source 119">[119]</a></p>
+<p><span id="os-b-0174" class="source-anchor"></span>
+<span id="os-b-0180" class="source-anchor"></span>
+<span id="os-b-0181" class="source-anchor"></span>
+<span id="os-b-0187" class="source-anchor"></span>
+<span id="os-b-0189" class="source-anchor"></span></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="From power-on to login: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Conventional MBR region</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bytes 0–445 (<code>0x0000–0x01BD</code>)</td>
+<td>Bootstrap area, including fields such as the disk signature; not necessarily 446 bytes of executable code</td>
+</tr>
+<tr>
+<td>Bytes 446–509 (<code>0x01BE–0x01FD</code>)</td>
+<td>Four 16-byte partition records. Traditional bootstrap code may select an active partition</td>
+</tr>
+<tr>
+<td>Bytes 510–511 (<code>0x01FE–0x01FF</code>)</td>
+<td>Bytes <code>55 AA</code>; little-endian 16-bit signature value <code>0xAA55</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>A GPT disk has a <strong>protective MBR</strong> at LBA 0, a primary GPT header at LBA 1, partition entries, and backup GPT structures near the end of the disk. GPT is not inherently incompatible with BIOS bootloaders: GRUB documents a BIOS Boot Partition on GPT.<a id="os-boot--cite-10-2" class="citation-ref" href="#os-boot--source-10" aria-label="Source 10">[10]</a><a id="os-boot--cite-119-2" class="citation-ref" href="#os-boot--source-119" aria-label="Source 119">[119]</a></p>
+
+<h4 id="os-boot--2-b-uefi">UEFI path</h4>
+<p>SEC (Security), PEI (Pre-EFI Initialization), DXE (Driver Execution Environment) and BDS (Boot Device Selection) describe common PI/EDK II firmware phases, not a requirement that every implementation expose identical steps to the user.<a id="os-boot--cite-118-1" class="citation-ref" href="#os-boot--source-118" aria-label="Source 118">[118]</a><a id="os-boot--cite-130-1" class="citation-ref" href="#os-boot--source-130" aria-label="Source 130">[130]</a></p><figure class="teaching-figure" id="tf-os-gpt" data-after-heading="os-boot--2-b-uefi" aria-labelledby="tf-os-gpt-title" aria-describedby="tf-os-gpt-caption"><div class="tf-heading"><span class="tf-label">Disk map · increasing logical block address</span><strong id="tf-os-gpt-title">GPT keeps metadata at both ends</strong></div><div class="tf-disk"><div class="tf-disk-region"><p class="tf-lane-title">Start of disk</p><ol class="tf-disk-blocks"><li><strong>Protective MBR</strong><span>LBA 0 · marks the disk for older MBR-aware tools.</span></li><li><strong>Primary GPT header</strong><span>LBA 1 · describes this GPT and points to its backup.</span></li><li><strong>Primary partition entries</strong><span>Describe partition types and locations.</span></li></ol></div><div class="tf-disk-region tf-disk-usable"><p class="tf-lane-title">Usable partition space</p><div class="tf-cell"><strong>Partitions &amp; possible free space</strong><span>An EFI System Partition may live here, alongside OS/data partitions. Their number, order and sizes are not fixed.</span></div><p class="tf-detail">ESP: a partition with an identifying type GUID and a FAT filesystem, normally FAT32 on fixed disks. Firmware does not look for the Linux mount path <code>/boot/efi</code>.</p></div><div class="tf-disk-region"><p class="tf-lane-title">End of disk</p><ol class="tf-disk-blocks"><li><strong>Backup partition entries</strong><span>Near the end, outside the usable partition range.</span></li><li><strong>Backup GPT header</strong><span>Final LBA · backup metadata, not another OS partition.</span></li></ol></div></div><p class="tf-note"><strong>Read this as a disk layout, not a boot sequence.</strong> Blocks are not drawn to scale. GPT headers and entry arrays are metadata; the ESP is a partition with files. GPT backup structures are not a backup of your files.</p><figcaption id="tf-os-gpt-caption">Teaching simplification of GPT’s spatial layout. The primary and backup metadata bracket the usable partition range; the exact addresses and sizes of entry arrays depend on the disk layout.<p class="tf-sources"><strong>Read the sources</strong> <a href="#os-boot--source-10" id="tf-os-gpt-ref-1" class="figure-source-ref">GPT specification [10]</a> · <a href="#os-boot--source-80" id="tf-os-gpt-ref-2" class="figure-source-ref">Boot selection [80]</a> · <a href="#os-boot--source-81" id="tf-os-gpt-ref-3" class="figure-source-ref">EFI filesystem access [81]</a> · <a href="#os-boot--source-119" id="tf-os-gpt-ref-4" class="figure-source-ref">BIOS boot on GPT [119]</a></p><p class="tf-external">External reference, not republished: <a href="https://uefi.org/specs/UEFI/2.10/_images/GUID_Partition_Table_Format-5.png">UEFI specification’s GPT image</a></p></figcaption></figure>
+<p>The UEFI boot manager uses boot options/device paths to select an EFI application. On a conventional installed GPT disk, the <strong>EFI System Partition (ESP)</strong> is identified by its partition type GUID and contains a FAT filesystem (normally FAT32 on fixed disks) with <code>.efi</code> applications. Linux commonly mounts it at <code>/boot/efi</code>; that mount point is an OS convention, not where firmware finds it.<a id="os-boot--cite-80-1" class="citation-ref" href="#os-boot--source-80" aria-label="Source 80">[80]</a><a id="os-boot--cite-81-1" class="citation-ref" href="#os-boot--source-81" aria-label="Source 81">[81]</a></p>
+<p>When <strong>Secure Boot is enabled and configured</strong>, firmware verifies images against its authorized/revoked signature databases. “Any signed executable is allowed” is false, and merely using UEFI does not mean Secure Boot is enabled.<a id="os-boot--cite-58-1" class="citation-ref" href="#os-boot--source-58" aria-label="Source 58">[58]</a></p>
+<p>Reference diagram: <a href="https://uefi.org/specs/UEFI/2.10/05_GUID_Partition_Table_Format.html">GPT disk layout in the UEFI 2.10 specification</a>. The original <a href="https://uefi.org/specs/UEFI/2.10/_images/GUID_Partition_Table_Format-5.png">GPT image</a> is linked, not embedded.</p>
+<p><span id="os-b-0194" class="source-anchor"></span>
+<span id="os-b-0195" class="source-anchor"></span>
+<span id="os-b-0196" class="source-anchor"></span>
+<span id="os-b-0203" class="source-anchor"></span>
+<span id="os-b-0204" class="source-anchor"></span></p>
+
+<h3 id="os-boot--3-bootloader">3. Bootloader</h3>
+
+<h4 id="os-boot--3-a-grub">GRUB2 on RHEL 9</h4>
+<p>GRUB presents a boot menu and selects the kernel, initial RAM filesystem and kernel command line. RHEL 9 uses <code>/boot/grub2/grub.cfg</code> as the main generated configuration and Boot Loader Specification entries under <code>/boot/loader/entries/</code>. On UEFI, <code>/boot/efi/EFI/redhat/grub.cfg</code> is a <strong>stub</strong>; do not replace it with a generated full configuration.<a id="os-boot--cite-9-1" class="citation-ref" href="#os-boot--source-9" aria-label="Source 9">[9]</a></p>
+<p>The loader places the kernel image (commonly named <code>vmlinuz-…</code>) and <code>initramfs-….img</code> into memory and transfers control. <code>vmlinuz</code> is a conventional compressed-kernel image name, not a switch that enables virtual memory.<a id="os-boot--cite-134-1" class="citation-ref" href="#os-boot--source-134" aria-label="Source 134">[134]</a></p>
+
+<h4 id="os-boot--3-b-systemd-boot">systemd-boot: an alternative</h4>
+<p>systemd-boot is a UEFI-only boot manager, not RHEL 9’s default GRUB path. An x86-64 installation may place it at <code>EFI/systemd/systemd-bootx64.efi</code> on the ESP. It can select EFI-stub Linux kernels with associated initrds or unified kernel images; its menu and supported layout differ from GRUB.<a id="os-boot--cite-13-1" class="citation-ref" href="#os-boot--source-13" aria-label="Source 13">[13]</a></p>
+<p><span id="os-b-0208" class="source-anchor"></span>
+<span id="os-b-0209" class="source-anchor"></span>
+<span id="os-b-0222" class="source-anchor"></span></p>
+
+<h3 id="os-boot--4-kernel">4. Kernel and initramfs</h3>
+<p>The conventional x86 compressed kernel image includes decompression/startup code. The kernel establishes CPU state, exception/interrupt handling, physical/virtual memory management and device support for controllers, network interfaces and other peripherals. Built-in drivers initialize as kernel code; loadable modules remain separate objects loaded when needed.<a id="os-boot--cite-134-2" class="citation-ref" href="#os-boot--source-134" aria-label="Source 134">[134]</a><a id="os-boot--cite-9-2" class="citation-ref" href="#os-boot--source-9" aria-label="Source 9">[9]</a></p>
+<p>The kernel unpacks the initramfs cpio archive into <strong>rootfs</strong> (ramfs or tmpfs-backed, depending on configuration) and runs its <code>/init</code> as the early userspace process. That environment locates and prepares the real root, potentially activating RAID/LVM, unlocking encrypted storage and loading additional modules. Early microcode loading is its own architecture-specific mechanism, not just another ordinary driver-module load.<a id="os-boot--cite-11-1" class="citation-ref" href="#os-boot--source-11" aria-label="Source 11">[11]</a><a id="os-boot--cite-135-1" class="citation-ref" href="#os-boot--source-135" aria-label="Source 135">[135]</a></p>
+<p>Early userspace mounts the installed root and uses a <strong>switch-root</strong> transition to hand control to the installed init system, normally systemd as PID 1 on RHEL 9. This is more than a plain <code>chroot</code>: the early root is replaced and the init process is handed off. Filesystem checking and read-only/read-write transitions depend on filesystem, initramfs and mount configuration; “mount, run fsck, remount” is not a universal sequence. Never repair an actively mounted filesystem by copying that shorthand.<a id="os-boot--cite-11-2" class="citation-ref" href="#os-boot--source-11" aria-label="Source 11">[11]</a><a id="os-boot--cite-9-3" class="citation-ref" href="#os-boot--source-9" aria-label="Source 9">[9]</a></p>
+<p><span id="os-b-0231" class="source-anchor"></span>
+<span id="os-b-0232" class="source-anchor"></span>
+<span id="os-b-0236" class="source-anchor"></span>
+<span id="os-b-0240" class="source-anchor"></span></p>
+
+<h3 id="os-boot--5-init-system">5. Init system</h3>
+<p><code>/etc/fstab</code> is data consumed by mount tooling and generators, not an executable script. Its fields are <code>Device Mount_point Filesystem Options Dump Pass</code>. systemd translates appropriate entries into mount/swap units. Unit files commonly come from <code>/usr/lib/systemd/system</code>; administrator overrides belong under <code>/etc/systemd/system</code>. Dependencies and ordering constraints govern startup, with independent work able to run concurrently.<a id="os-boot--cite-97-1" class="citation-ref" href="#os-boot--source-97" aria-label="Source 97">[97]</a><a id="os-boot--cite-98-1" class="citation-ref" href="#os-boot--source-98" aria-label="Source 98">[98]</a><a id="os-boot--cite-99-1" class="citation-ref" href="#os-boot--source-99" aria-label="Source 99">[99]</a></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="From power-on to login: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>SysV compatibility runlevel</th>
+<th>systemd target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><code>poweroff.target</code></td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>rescue.target</code> — maintenance environment, not merely a getty</td>
+</tr>
+<tr>
+<td>2, 3, 4</td>
+<td><code>multi-user.target</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>graphical.target</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>reboot.target</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Targets group units; several can be active simultaneously. The runlevel correspondence is a compatibility convention, not systemd’s full state model.<a id="os-boot--cite-8-1" class="citation-ref" href="#os-boot--source-8" aria-label="Source 8">[8]</a><a id="os-boot--cite-48-1" class="citation-ref" href="#os-boot--source-48" aria-label="Source 48">[48]</a></p>
+<p><span id="os-b-0248" class="source-anchor"></span>
+<span id="os-b-0250" class="source-anchor"></span>
+<span id="os-b-0252" class="source-anchor"></span>
+<span id="os-b-0254" class="source-anchor"></span>
+<span id="os-b-0256" class="source-anchor"></span>
+<span id="os-b-0258" class="source-anchor"></span>
+<span id="os-b-0260" class="source-anchor"></span>
+<span id="os-b-0262" class="source-anchor"></span>
+<span id="os-b-0264" class="source-anchor"></span></p>
+
+<h3 id="os-boot--section-1">Inspect or change the target</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="From power-on to login: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>List loaded active targets</td>
+<td><code>systemctl list-units --type=target</code></td>
+</tr>
+<tr>
+<td>Show boot default</td>
+<td><code>systemctl get-default</code></td>
+</tr>
+<tr>
+<td>Legacy compatibility view</td>
+<td><code>runlevel</code> (where installed); does not enumerate all active targets</td>
+</tr>
+<tr>
+<td>Switch this boot to text multi-user mode</td>
+<td><code>sudo systemctl isolate multi-user.target</code></td>
+</tr>
+<tr>
+<td>Set text multi-user mode for future boots</td>
+<td><code>sudo systemctl set-default multi-user.target</code></td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Changing targets is authorized maintenance:</strong> <code>isolate</code> can stop services and terminate the current desktop/session. Save work, verify what depends on the current target, record the prior default, and retain console access. <code>set-default</code> changes future boot selection, not the current running target. Verify active units/default afterward; restore the recorded target/default if required. Do not substitute <code>poweroff.target</code> or <code>reboot.target</code> as a harmless exercise.<a id="os-boot--cite-48-2" class="citation-ref" href="#os-boot--source-48" aria-label="Source 48">[48]</a></p>
+<p>Legacy <code>init N</code> compatibility requests a numbered runlevel; prefer the explicit systemd operation above on RHEL 9 rather than treating <code>init #</code> as literal syntax.</p>
+<p><span id="os-b-0266" class="source-anchor"></span>
+<span id="os-b-0267" class="source-anchor"></span>
+<span id="os-b-0269" class="source-anchor"></span></p>
+
+<h3 id="os-boot--6-user-login-session-management">6. Login and session management</h3>
+<p>A getty/login path or a display manager handles user login. A successful login creates the user’s session. A command-line shell reads the startup files appropriate to its invocation; a graphical session manager initializes the desktop and may launch terminal shells later. A GUI is not simply a login shell.<a id="os-boot--cite-128-1" class="citation-ref" href="#os-boot--source-128" aria-label="Source 128">[128]</a><a id="os-boot--cite-17-1" class="citation-ref" href="#os-boot--source-17" aria-label="Source 17">[17]</a></p>
+<p>See <a href="os-linux-foundations.html#os-linux-foundations--shell-2">shell startup files</a> and <a href="os-services.html#os-services--systemd-service-types">systemd service types</a>.</p>
+
+<h2 id="os-boot--section-2">Sources</h2>
+<div class="source-list"><div class="source-entry" id="os-boot--source-8">[8] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/configuring_basic_system_settings/index">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/configuring_basic_system_settings/index</a> — RHEL 9
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-8-1" aria-label="Return to citation 8, occurrence 1">↩</a></span></div><div class="source-entry" id="os-boot--source-9">[9] <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/managing_monitoring_and_updating_the_kernel/index">https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html-single/managing_monitoring_and_updating_the_kernel/index</a> — RHEL 9
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-9-1" aria-label="Return to citation 9, occurrence 1">↩1</a><a class="citation-return" href="#os-boot--cite-9-2" aria-label="Return to citation 9, occurrence 2">↩2</a><a class="citation-return" href="#os-boot--cite-9-3" aria-label="Return to citation 9, occurrence 3">↩3</a><a class="citation-return" href="#tf-os-boot-ref-4" aria-label="Return to figure: From firmware to the installed system">↩ Figure</a></span></div><div class="source-entry" id="os-boot--source-10">[10] <a href="https://uefi.org/specs/UEFI/2.10/05_GUID_Partition_Table_Format.html">https://uefi.org/specs/UEFI/2.10/05_GUID_Partition_Table_Format.html</a> — UEFI 2.10
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-10-1" aria-label="Return to citation 10, occurrence 1">↩1</a><a class="citation-return" href="#os-boot--cite-10-2" aria-label="Return to citation 10, occurrence 2">↩2</a><a class="citation-return" href="#tf-os-gpt-ref-1" aria-label="Return to figure: GPT keeps metadata at both ends">↩ Figure</a></span></div><div class="source-entry" id="os-boot--source-11">[11] <a href="https://docs.kernel.org/filesystems/ramfs-rootfs-initramfs.html">https://docs.kernel.org/filesystems/ramfs-rootfs-initramfs.html</a> — Linux initramfs
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-11-1" aria-label="Return to citation 11, occurrence 1">↩1</a><a class="citation-return" href="#os-boot--cite-11-2" aria-label="Return to citation 11, occurrence 2">↩2</a><a class="citation-return" href="#tf-os-boot-ref-5" aria-label="Return to figure: From firmware to the installed system">↩ Figure</a></span></div><div class="source-entry" id="os-boot--source-13">[13] <a href="https://raw.githubusercontent.com/systemd/systemd/v252/man/systemd-boot.xml">https://raw.githubusercontent.com/systemd/systemd/v252/man/systemd-boot.xml</a> — systemd v252 pinned manual source
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-13-1" aria-label="Return to citation 13, occurrence 1">↩</a></span></div><div class="source-entry" id="os-boot--source-17">[17] <a href="https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html">https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html</a> — GNU Bash startup file semantics
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-17-1" aria-label="Return to citation 17, occurrence 1">↩</a></span></div><div class="source-entry" id="os-boot--source-48">[48] <a href="https://raw.githubusercontent.com/systemd/systemd/v252/man/systemctl.xml">https://raw.githubusercontent.com/systemd/systemd/v252/man/systemctl.xml</a> — systemd v252 systemctl
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-48-1" aria-label="Return to citation 48, occurrence 1">↩1</a><a class="citation-return" href="#os-boot--cite-48-2" aria-label="Return to citation 48, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-boot--source-58">[58] <a href="https://uefi.org/specs/UEFI/2.10/32_Secure_Boot_and_Driver_Signing.html">https://uefi.org/specs/UEFI/2.10/32_Secure_Boot_and_Driver_Signing.html</a> — UEFI 2.10
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-58-1" aria-label="Return to citation 58, occurrence 1">↩</a><a class="citation-return" href="#tf-os-boot-ref-3" aria-label="Return to figure: From firmware to the installed system">↩ Figure</a></span></div><div class="source-entry" id="os-boot--source-80">[80] <a href="https://uefi.org/specs/UEFI/2.10/03_Boot_Manager.html">https://uefi.org/specs/UEFI/2.10/03_Boot_Manager.html</a> — UEFI 2.10 boot manager
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-80-1" aria-label="Return to citation 80, occurrence 1">↩</a><a class="citation-return" href="#tf-os-boot-ref-2" aria-label="Return to figure: From firmware to the installed system">↩ Figure</a><a class="citation-return" href="#tf-os-gpt-ref-2" aria-label="Return to figure: GPT keeps metadata at both ends">↩ Figure</a></span></div><div class="source-entry" id="os-boot--source-81">[81] <a href="https://uefi.org/specs/UEFI/2.10/13_Protocols_Media_Access.html">https://uefi.org/specs/UEFI/2.10/13_Protocols_Media_Access.html</a> — UEFI 2.10 media access
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-81-1" aria-label="Return to citation 81, occurrence 1">↩</a><a class="citation-return" href="#tf-os-gpt-ref-3" aria-label="Return to figure: GPT keeps metadata at both ends">↩ Figure</a></span></div><div class="source-entry" id="os-boot--source-97">[97] <a href="https://man7.org/linux/man-pages/man5/fstab.5.html">https://man7.org/linux/man-pages/man5/fstab.5.html</a> — util-linux fstab fields
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-97-1" aria-label="Return to citation 97, occurrence 1">↩</a></span></div><div class="source-entry" id="os-boot--source-98">[98] <a href="https://raw.githubusercontent.com/systemd/systemd/v252/man/systemd-fstab-generator.xml">https://raw.githubusercontent.com/systemd/systemd/v252/man/systemd-fstab-generator.xml</a> — systemd 252 fstab generator
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-98-1" aria-label="Return to citation 98, occurrence 1">↩</a></span></div><div class="source-entry" id="os-boot--source-99">[99] <a href="https://raw.githubusercontent.com/systemd/systemd/v252/man/systemd.unit.xml">https://raw.githubusercontent.com/systemd/systemd/v252/man/systemd.unit.xml</a> — systemd 252 unit dependencies
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-99-1" aria-label="Return to citation 99, occurrence 1">↩</a><a class="citation-return" href="#tf-os-boot-ref-6" aria-label="Return to figure: From firmware to the installed system">↩ Figure</a></span></div><div class="source-entry" id="os-boot--source-118">[118] <a href="https://uefi.org/specs/PI/1.8/V1_Overview.html">https://uefi.org/specs/PI/1.8/V1_Overview.html</a> — UEFI PI 1.8 boot-phase overview
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-118-1" aria-label="Return to citation 118, occurrence 1">↩</a></span></div><div class="source-entry" id="os-boot--source-119">[119] <a href="https://www.gnu.org/software/grub/manual/grub/html_node/BIOS-installation.html">https://www.gnu.org/software/grub/manual/grub/html_node/BIOS-installation.html</a> — GNU GRUB BIOS/GPT layout; conceptual not an installation recipe
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-119-1" aria-label="Return to citation 119, occurrence 1">↩1</a><a class="citation-return" href="#os-boot--cite-119-2" aria-label="Return to citation 119, occurrence 2">↩2</a><a class="citation-return" href="#tf-os-boot-ref-1" aria-label="Return to figure: From firmware to the installed system">↩ Figure</a><a class="citation-return" href="#tf-os-gpt-ref-4" aria-label="Return to figure: GPT keeps metadata at both ends">↩ Figure</a></span></div><div class="source-entry" id="os-boot--source-128">[128] <a href="https://man7.org/linux/man-pages/man1/login.1.html">https://man7.org/linux/man-pages/man1/login.1.html</a> — util-linux login
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-128-1" aria-label="Return to citation 128, occurrence 1">↩</a><a class="citation-return" href="#tf-os-boot-ref-7" aria-label="Return to figure: From firmware to the installed system">↩ Figure</a></span></div><div class="source-entry" id="os-boot--source-129">[129] <a href="https://uefi.org/specs/PI/1.8/V1_Security_SEC_Phase_Information.html">https://uefi.org/specs/PI/1.8/V1_Security_SEC_Phase_Information.html</a> — UEFI PI 1.8 SEC and reset entry
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-129-1" aria-label="Return to citation 129, occurrence 1">↩</a></span></div><div class="source-entry" id="os-boot--source-130">[130] <a href="https://uefi.org/specs/PI/1.8/V2_Overview.html">https://uefi.org/specs/PI/1.8/V2_Overview.html</a> — UEFI PI 1.8 DXE and BDS phases
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-130-1" aria-label="Return to citation 130, occurrence 1">↩</a></span></div><div class="source-entry" id="os-boot--source-134">[134] <a href="https://docs.kernel.org/arch/x86/boot.html">https://docs.kernel.org/arch/x86/boot.html</a> — Linux x86 boot protocol
+<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-134-1" aria-label="Return to citation 134, occurrence 1">↩1</a><a class="citation-return" href="#os-boot--cite-134-2" aria-label="Return to citation 134, occurrence 2">↩2</a></span></div><div class="source-entry" id="os-boot--source-135">[135] <a href="https://docs.kernel.org/arch/x86/microcode.html">https://docs.kernel.org/arch/x86/microcode.html</a> — Linux x86 microcode loading<span class="citation-returns"><a class="citation-return" href="#os-boot--cite-135-1" aria-label="Return to citation 135, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="os-kernel-devices.html"><span>Previous · OS</span><strong>Devices, kernel services and isolation</strong></a></div><div><a rel="next" href="os-linux-foundations.html"><span>Next · OS</span><strong>Linux distributions, terminals and shells</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../operating-systems.html">Explore Understand the machine ↗</a><div class="current-group"><h2>In this group</h2><ol class="chapter-list"><li><a  href="../chapters/os-processes.html">Processes and scheduling</a></li><li><a  href="../chapters/os-memory.html">Memory and virtual memory</a></li><li><a  href="../chapters/os-kernel-devices.html">Devices, kernel services and isolation</a></li><li><a aria-current="page" href="../chapters/os-boot.html">From power-on to login</a></li></ol></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

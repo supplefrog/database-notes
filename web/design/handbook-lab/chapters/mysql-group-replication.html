@@ -1,0 +1,246 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Group replication and failover — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-group-replication"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/replicate.html">Keep more than one copy</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Keep more than one copy</p><h1>Group replication and failover</h1></header>
+<div class="reader-controls"><a href="../tasks/replicate.html">← Keep more than one copy</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a aria-current="page" href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-1230">Consensus, certification and quorum</a><a class="level-3" href="#mysql-group-replication--section-1">Prepare every member</a><a class="level-3" href="#mysql-b-1278">Existing-server GTID transition</a><a class="level-3" href="#mysql-group-replication--section-2">Distributed recovery and clone</a><a class="level-3" href="#mysql-group-replication--section-3">Recovery accounts</a><a class="level-3" href="#mysql-group-replication--section-4">Bootstrap exactly once</a><a class="level-2" href="#mysql-b-1332">Joining member</a><a class="level-2" href="#mysql-group-replication--section-5">Inspect membership and recovery</a><a class="level-3" href="#mysql-group-replication--section-6">Keep three different kinds of keys separate</a><a class="level-2" href="#mysql-group-replication--section-7">Change primary mode deliberately</a><a class="level-2" href="#mysql-group-replication--section-8">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-replication-ha.html">Replication and high availability</a><p class="product-label">MongoDB</p><a href="mongodb-replication.html">Replica sets and high availability</a><a href="mongodb-sharding.html">Sharding and resharding</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-group-replication; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-group-replication--cite-1-1" class="citation-ref" href="#mysql-group-replication--source-1" aria-label="Source 1">[1]</a><a id="mysql-group-replication--cite-72-1" class="citation-ref" href="#mysql-group-replication--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-group-replication--group-replication" class="source-anchor"></span>
+<span id="mysql-group-replication--primary-member" class="source-anchor"></span>
+<span id="mysql-group-replication--1-set-hostnames-for-ips-for-correct-resolution" class="source-anchor"></span>
+<span id="mysql-group-replication--2-a-add-variables-to-my-cnf" class="source-anchor"></span>
+<span id="mysql-b-1217" class="source-anchor"></span>
+<span id="mysql-b-1218" class="source-anchor"></span>
+<span id="mysql-b-1220" class="source-anchor"></span>
+<span id="mysql-b-1222" class="source-anchor"></span>
+<span id="mysql-b-1223" class="source-anchor"></span>
+<span id="mysql-b-1224" class="source-anchor"></span>
+<span id="mysql-b-1229" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-1230">Consensus, certification and quorum</h2>
+<p>Group Replication orders/certifies transactions and manages membership; it is not “every replica synchronously applies every commit.” Remote apply can lag. Choose <code>group_replication_consistency</code> behavior for read-after-write/failover needs; in 8.4 its default is <code>BEFORE_ON_PRIMARY_FAILOVER</code>, not a universal linearizable-read guarantee. Single-primary normally routes writes to one member; multi-primary has additional workload restrictions and certification conflicts.</p>
+<p>Use <strong>at least three voting members in independent failure domains</strong> for tolerating one failure. A two-member group has no majority after losing either member. Three same-host instances are a functional lab, not host-failure HA. When quorum is lost, do not bootstrap another group or force membership until the old writers are fenced and the surviving authoritative history has been established.</p>
+
+<h3 id="mysql-group-replication--section-1">Prepare every member</h3>
+<ul>
+<li>Use compatible supported 8.4 versions, InnoDB tables with primary keys or equivalent non-null unique keys, binary logging/ROW format, GTIDs, unique server IDs/UUIDs and the documented Group Replication requirements. Check network latency/bandwidth and clock/DNS operations.</li>
+<li>Choose three controlled names such as <code>mysql1</code>, <code>mysql2</code>, <code>mysql3</code>; DNS or <code>/etc/hosts</code> must resolve consistently from every member. The source’s two host entries were a name-resolution illustration, not a fault-tolerant topology.</li>
+<li>Choose one communication stack. <strong>MYSQL</strong> uses server SQL networking/security; <strong>XCOM</strong> uses a separate group-communication listener, often example port 33061. That number is a convention, not a requirement. Both distributed recovery and group communication must have their own verified TLS/account/path configuration.</li>
+<li>Restrict ports to the participating members/application networks as appropriate. Never copy XCOM allowlist/port settings blindly to the MYSQL stack or assume the classic SQL port alone secures recovery.</li>
+</ul>
+<p>Configuration field checklist (not a universal complete <code>my.cnf</code>):</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Group replication and failover: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Field retained from source</th>
+<th>Required decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plugin_load_add=group_replication.so</code></td>
+<td>Load compatible Group Replication plugin without replacing other plugin-load entries.</td>
+</tr>
+<tr>
+<td><code>plugin_load_add=mysql_clone.so</code></td>
+<td>Optional Clone plugin on relevant members if clone recovery is chosen; cloning can overwrite the joining instance.</td>
+</tr>
+<tr>
+<td><code>group_replication_communication_stack=MYSQL</code></td>
+<td>Select the same intended stack throughout the group; connection/authentication and allowed local address rules depend on it.</td>
+</tr>
+<tr>
+<td><code>group_replication_group_name</code></td>
+<td>Generate and record a dedicated group UUID, consistent across members and distinct from server UUIDs; do not reuse an unrelated copied example UUID.</td>
+</tr>
+<tr>
+<td><code>group_replication_start_on_boot=OFF</code></td>
+<td>Controlled initial provisioning; only enable automatic joining once credentials, recovery and failure behavior are designed/tested.</td>
+</tr>
+<tr>
+<td><code>group_replication_local_address</code></td>
+<td>Address/port valid for that stack and that member; must be reachable by peers. MYSQL stack must use an appropriate server listening address/port.</td>
+</tr>
+<tr>
+<td><code>group_replication_group_seeds</code></td>
+<td>Reachable peer addresses for joining; include the planned group’s peers, not unrelated SQL endpoints.</td>
+</tr>
+<tr>
+<td><code>group_replication_bootstrap_group=OFF</code></td>
+<td>Keep OFF in persistent configuration; bootstrap is a one-member, one-time operation.</td>
+</tr>
+<tr>
+<td><code>group_replication_single_primary_mode</code></td>
+<td>ON is the usual starting choice. Multi-primary requires compatible checks/workload.</td>
+</tr>
+<tr>
+<td><code>group_replication_enforce_update_everywhere_checks</code></td>
+<td>Enable the documented extra checks for multi-primary mode; not a switch to make conflicting application writes safe.</td>
+</tr>
+<tr>
+<td><code>server_id</code>, <code>gtid_mode</code>, <code>enforce_gtid_consistency</code></td>
+<td>Unique server IDs and compatible ON GTID settings, established safely before group operation.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Plan a controlled restart for startup-only settings; verify effective configuration and logs rather than blindly restarting after pasting a block.</p>
+<p><a id="mysql-group-replication--cite-58-1" class="citation-ref" href="#mysql-group-replication--source-58" aria-label="Source 58">[58]</a><a id="mysql-group-replication--cite-59-1" class="citation-ref" href="#mysql-group-replication--source-59" aria-label="Source 59">[59]</a><a id="mysql-group-replication--cite-60-1" class="citation-ref" href="#mysql-group-replication--source-60" aria-label="Source 60">[60]</a><a id="mysql-group-replication--cite-61-1" class="citation-ref" href="#mysql-group-replication--source-61" aria-label="Source 61">[61]</a><a id="mysql-group-replication--cite-62-1" class="citation-ref" href="#mysql-group-replication--source-62" aria-label="Source 62">[62]</a><a id="mysql-group-replication--cite-63-1" class="citation-ref" href="#mysql-group-replication--source-63" aria-label="Source 63">[63]</a><a id="mysql-group-replication--cite-64-1" class="citation-ref" href="#mysql-group-replication--source-64" aria-label="Source 64">[64]</a><a id="mysql-group-replication--cite-90-1" class="citation-ref" href="#mysql-group-replication--source-90" aria-label="Source 90">[90]</a><a id="mysql-group-replication--cite-108-1" class="citation-ref" href="#mysql-group-replication--source-108" aria-label="Source 108">[108]</a><a id="mysql-group-replication--cite-116-1" class="citation-ref" href="#mysql-group-replication--source-116" aria-label="Source 116">[116]</a></p>
+<p><span id="mysql-group-replication--b-ensure-gtidmode-on" class="source-anchor"></span>
+<span id="mysql-group-replication--3-temporarily-change-clone-threshold" class="source-anchor"></span>
+<span id="mysql-group-replication--4-create-rpluser-and-grant-privileges" class="source-anchor"></span>
+<span id="mysql-group-replication--5-start" class="source-anchor"></span>
+<span id="mysql-b-1250" class="source-anchor"></span>
+<span id="mysql-b-1254" class="source-anchor"></span>
+<span id="mysql-b-1255" class="source-anchor"></span>
+<span id="mysql-b-1260" class="source-anchor"></span>
+<span id="mysql-b-1261" class="source-anchor"></span>
+<span id="mysql-b-1265" class="source-anchor"></span>
+<span id="mysql-b-1266" class="source-anchor"></span>
+<span id="mysql-b-1277" class="source-anchor"></span>
+</p>
+<h3 id="mysql-b-1278">Existing-server GTID transition</h3>
+<p>A fresh lab can be initialized with GTIDs ON. Converting a live topology requires the official coordinated sequence: enable/verify GTID-consistent operations, pass through <code>OFF_PERMISSIVE</code> on <strong>all</strong> servers, then <code>ON_PERMISSIVE</code> on all, wait for anonymous transactions to finish and replicate everywhere, then move all to ON and persist the intended restart settings. Check <code>Ongoing_anonymous_transaction_count</code> and all channel progress as documented. The source’s two <code>SET PERSIST</code> lines skip prerequisites and are not a safe conversion recipe. Preserve backups/rollback and halt if any member cannot progress.</p>
+
+<h3 id="mysql-group-replication--section-2">Distributed recovery and clone</h3>
+<p>A joiner needs a compatible consistent state and all missing history. Group recovery can transfer transactions incrementally or clone from a suitable donor. Clone <strong>replaces the joiner’s existing data</strong> and has version/plugin/space/restart prerequisites. Do not lower <code>group_replication_clone_threshold</code> to 1 as a generic fix. Choose/verify donor, back up or explicitly discard the joining instance, check compatibility and then select a documented recovery method. Restore any temporary threshold to its recorded prior value after the operation.</p>
+
+<h3 id="mysql-group-replication--section-3">Recovery accounts</h3>
+<p>Provision the controlled recovery identity on required donor/member endpoints with verified TLS. Restrict host access to the actual members instead of adopting <code>%</code> by default. Choose secure secret delivery and intentionally decide whether account creation is locally provisioned or replicated; <code>SET SQL_LOG_BIN=0</code> requires authority and must be restored to its prior state in the same session when used.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Group replication and failover: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Privilege from source</th>
+<th>Why/when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>REPLICATION SLAVE</code></td>
+<td>Distributed recovery transaction transfer.</td>
+</tr>
+<tr>
+<td><code>CONNECTION_ADMIN</code></td>
+<td>Recovery access where the documented read-only/connection restrictions require it.</td>
+</tr>
+<tr>
+<td><code>BACKUP_ADMIN</code></td>
+<td>Clone donor backup access when cloning is used, not an arbitrary application grant.</td>
+</tr>
+<tr>
+<td><code>GROUP_REPLICATION_STREAM</code></td>
+<td>Required for the documented MYSQL communication-stack secure-connection case.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Use <code>CREATE USER</code> / <code>GRANT</code> rather than editing grant tables; ordinary account statements do not need <code>FLUSH PRIVILEGES</code>. Install credentials using the documented recovery-channel or <code>START GROUP_REPLICATION</code> credential interface with secure handling. Password arguments must not land in history, readable config, logs or copied examples. In-memory startup credentials need a defined restart/automatic-join strategy; merely supplying them once does not prove durable recovery readiness.</p>
+
+<h3 id="mysql-group-replication--section-4">Bootstrap exactly once</h3>
+<ol>
+<li>Start from a deliberate new empty group, or follow the separate complete-outage recovery procedure after proving which member has the authoritative most complete history. Confirm there is no reachable/live old group accepting writes.</li>
+<li>On <strong>one designated member only</strong>, set bootstrap ON, start Group Replication with the approved recovery configuration, then immediately set bootstrap OFF even if startup fails. Never persist bootstrap ON or execute this on all hosts.</li>
+<li>Inspect membership/error logs and confirm the intended group UUID/primary/state. Start other members with bootstrap OFF. Check all become ONLINE before admitting application traffic.</li>
+<li>Route clients through a topology-aware strategy such as configured Router/connection logic; certification/membership alone does not redirect existing clients or fence an external writer.</li>
+</ol>
+<p><a id="mysql-group-replication--cite-53-1" class="citation-ref" href="#mysql-group-replication--source-53" aria-label="Source 53">[53]</a><a id="mysql-group-replication--cite-59-2" class="citation-ref" href="#mysql-group-replication--source-59" aria-label="Source 59">[59]</a><a id="mysql-group-replication--cite-62-2" class="citation-ref" href="#mysql-group-replication--source-62" aria-label="Source 62">[62]</a><a id="mysql-group-replication--cite-63-2" class="citation-ref" href="#mysql-group-replication--source-63" aria-label="Source 63">[63]</a><a id="mysql-group-replication--cite-64-2" class="citation-ref" href="#mysql-group-replication--source-64" aria-label="Source 64">[64]</a><a id="mysql-group-replication--cite-91-1" class="citation-ref" href="#mysql-group-replication--source-91" aria-label="Source 91">[91]</a></p>
+<p><span id="mysql-group-replication--joining-member" class="source-anchor"></span>
+<span id="mysql-group-replication--1-a-precheck" class="source-anchor"></span>
+<span id="mysql-group-replication--b-if-gtids-conflict" class="source-anchor"></span>
+<span id="mysql-group-replication--2-follow-previous-steps-1-3" class="source-anchor"></span>
+<span id="mysql-group-replication--3-start" class="source-anchor"></span>
+<span id="mysql-group-replication--troubleshooting" class="source-anchor"></span>
+<span id="mysql-group-replication--view-status" class="source-anchor"></span>
+<span id="mysql-group-replication--switch-replication-modes-on-an-active-setup" class="source-anchor"></span>
+<span id="mysql-group-replication--monitor-switch-progress" class="source-anchor"></span>
+<span id="mysql-b-1284" class="source-anchor"></span>
+<span id="mysql-b-1286" class="source-anchor"></span>
+<span id="mysql-b-1287" class="source-anchor"></span>
+<span id="mysql-b-1290" class="source-anchor"></span>
+<span id="mysql-b-1291" class="source-anchor"></span>
+<span id="mysql-b-1294" class="source-anchor"></span>
+<span id="mysql-b-1296" class="source-anchor"></span>
+<span id="mysql-b-1297" class="source-anchor"></span>
+<span id="mysql-b-1301" class="source-anchor"></span>
+<span id="mysql-b-1303" class="source-anchor"></span>
+<span id="mysql-b-1304" class="source-anchor"></span>
+<span id="mysql-b-1307" class="source-anchor"></span>
+<span id="mysql-b-1311" class="source-anchor"></span>
+<span id="mysql-b-1315" class="source-anchor"></span>
+<span id="mysql-b-1318" class="source-anchor"></span>
+<span id="mysql-b-1319" class="source-anchor"></span>
+<span id="mysql-b-1323" class="source-anchor"></span>
+<span id="mysql-b-1324" class="source-anchor"></span>
+<span id="mysql-b-1327" class="source-anchor"></span>
+<span id="mysql-b-1331" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-1332">Joining member</h2>
+<p>Before joining, compare server/group identity, GTID sets, data provenance, configuration, table requirements and reachable peers. <code>SHOW BINLOG EVENTS</code> is a log-inspection tool, not proof of a compatible seed. If GTIDs conflict or the joiner has errant transactions, stop and investigate/reconcile or provision a clean joiner through supported backup/clone recovery. <strong>Do not run <code>RESET BINARY LOGS AND GTIDS</code> to hide a conflict.</strong> Clearing metadata does not undo divergent rows.</p>
+<p>Join with bootstrap OFF and the securely provisioned recovery configuration. A failed join needs its actual error diagnosed: credentials/host match, network reachability, TLS issuer/hostname/expiry, plugin/version compatibility, required logs, clone restrictions or conflicting transactions.</p>
+
+<h2 id="mysql-group-replication--section-5">Inspect membership and recovery</h2>
+<pre tabindex="0" role="region" aria-label="Group replication and failover: code 1, horizontally scrollable"><code class="language-sql">SELECT * FROM performance_schema.replication_group_members;
+SHOW REPLICA STATUS FOR CHANNEL 'group_replication_recovery'\G
+</code></pre>
+<p>The recovery channel is not the normal group applier channel. Inspect Performance Schema applier worker/coordinator status and errors for <code>group_replication_applier</code> as well, plus <code>replication_group_member_stats</code> and server error logs. Verify the elected primary, ONLINE members, backlog/conflicts and client routing. Empty recovery activity after a completed join is not automatically a fault.</p>
+
+<h3 id="mysql-group-replication--section-6">Keep three different kinds of keys separate</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Group replication and failover: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Credential/key</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SSH host/user keys</td>
+<td>OS remote-login/file-transfer trust; Group Replication does not exchange SSH keys to authenticate database peers.</td>
+</tr>
+<tr>
+<td>TLS certificate/private key/CA</td>
+<td>Encrypt and authenticate transport. Use per-member private keys; distribute trust anchors, not another member’s private key.</td>
+</tr>
+<tr>
+<td>Authentication RSA public key</td>
+<td>Used by applicable password plugins when not protected by a secure transport; <code>public_key.pem</code> is not an SSL private key/certificate.</td>
+</tr>
+</tbody>
+</table></div>
+<p>If an approved non-TLS authentication path requires <code>group_replication_recovery_public_key_path</code>, verify the donor’s RSA public key through a trusted channel and configure the actual server-readable path as documented. Prefer correctly verified TLS; do not cure TLS failures by blindly copying <code>public_key.pem</code> over SSH. For multiple possible donors, validate the chosen key strategy rather than assuming one donor’s key applies to all.</p>
+
+<h2 id="mysql-group-replication--section-7">Change primary mode deliberately</h2>
+<p>The SQL functions below are real group operations, not per-session settings:</p>
+<pre tabindex="0" role="region" aria-label="Group replication and failover: code 2, horizontally scrollable"><code class="language-sql">SELECT group_replication_switch_to_multi_primary_mode();
+SELECT group_replication_switch_to_single_primary_mode();
+</code></pre>
+<p>These are <strong>alternatives</strong>, not a sequence to paste. Require a healthy/quorate compatible group, approved privileges, reviewed workload restrictions, routing changes and a maintenance plan. Multi-primary conflicts can abort transactions; applications must handle them. If selecting a particular single primary, use the documented member-UUID argument after identifying that member.</p>
+<p>Progress instrumentation, when enabled, can be inspected with:</p>
+<pre tabindex="0" role="region" aria-label="Group replication and failover: code 3, horizontally scrollable"><code class="language-sql">SELECT event_name, work_completed, work_estimated
+FROM performance_schema.events_stages_current
+WHERE event_name LIKE '%stage/group_rpl%';
+</code></pre>
+<p>No rows alone does not prove completion. Recheck group primary/mode/member states and application writes. Do not use a mode switch, forced membership or bootstrap as an unexplained recovery shortcut.</p>
+<p><a id="mysql-group-replication--cite-46-1" class="citation-ref" href="#mysql-group-replication--source-46" aria-label="Source 46">[46]</a><a id="mysql-group-replication--cite-58-2" class="citation-ref" href="#mysql-group-replication--source-58" aria-label="Source 58">[58]</a><a id="mysql-group-replication--cite-59-3" class="citation-ref" href="#mysql-group-replication--source-59" aria-label="Source 59">[59]</a><a id="mysql-group-replication--cite-60-2" class="citation-ref" href="#mysql-group-replication--source-60" aria-label="Source 60">[60]</a><a id="mysql-group-replication--cite-62-3" class="citation-ref" href="#mysql-group-replication--source-62" aria-label="Source 62">[62]</a><a id="mysql-group-replication--cite-63-3" class="citation-ref" href="#mysql-group-replication--source-63" aria-label="Source 63">[63]</a><a id="mysql-group-replication--cite-64-3" class="citation-ref" href="#mysql-group-replication--source-64" aria-label="Source 64">[64]</a><a id="mysql-group-replication--cite-65-1" class="citation-ref" href="#mysql-group-replication--source-65" aria-label="Source 65">[65]</a><a id="mysql-group-replication--cite-150-1" class="citation-ref" href="#mysql-group-replication--source-150" aria-label="Source 150">[150]</a></p>
+
+<h2 id="mysql-group-replication--section-8">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-group-replication--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-group-replication--source-46">[46] <a href="https://dev.mysql.com/doc/refman/8.4/en/reset-binary-logs-and-gtids.html">https://dev.mysql.com/doc/refman/8.4/en/reset-binary-logs-and-gtids.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 15.4.1.2 RESET BINARY LOGS AND GTIDS Statement
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-46-1" aria-label="Return to citation 46, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-group-replication--source-53">[53] <a href="https://dev.mysql.com/doc/refman/8.4/en/replication-gtids-howto.html">https://dev.mysql.com/doc/refman/8.4/en/replication-gtids-howto.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 19.1.3.4 Setting Up Replication Using GTIDs
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-53-1" aria-label="Return to citation 53, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-group-replication--source-58">[58] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-requirements.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-requirements.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 20.3.1 Group Replication Requirements
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-58-1" aria-label="Return to citation 58, occurrence 1">↩1</a><a class="citation-return" href="#mysql-group-replication--cite-58-2" aria-label="Return to citation 58, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-group-replication--source-59">[59] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-bootstrap.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-bootstrap.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 20.2.1.5 Bootstrapping the Group
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-59-1" aria-label="Return to citation 59, occurrence 1">↩1</a><a class="citation-return" href="#mysql-group-replication--cite-59-2" aria-label="Return to citation 59, occurrence 2">↩2</a><a class="citation-return" href="#mysql-group-replication--cite-59-3" aria-label="Return to citation 59, occurrence 3">↩3</a></span></div><div class="source-entry" id="mysql-group-replication--source-60">[60] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-fault-tolerance.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-fault-tolerance.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 20.1.4.3 Fault-tolerance
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-60-1" aria-label="Return to citation 60, occurrence 1">↩1</a><a class="citation-return" href="#mysql-group-replication--cite-60-2" aria-label="Return to citation 60, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-group-replication--source-61">[61] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-ip-address-permissions.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-ip-address-permissions.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 20.6.4 Group Replication IP Address Permissions
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-61-1" aria-label="Return to citation 61, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-group-replication--source-62">[62] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-configuring-instances.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-configuring-instances.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 20.2.1.2 Configuring an Instance for Group Replication
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-62-1" aria-label="Return to citation 62, occurrence 1">↩1</a><a class="citation-return" href="#mysql-group-replication--cite-62-2" aria-label="Return to citation 62, occurrence 2">↩2</a><a class="citation-return" href="#mysql-group-replication--cite-62-3" aria-label="Return to citation 62, occurrence 3">↩3</a></span></div><div class="source-entry" id="mysql-group-replication--source-63">[63] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-distributed-recovery.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-distributed-recovery.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 20.5.4 Distributed Recovery
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-63-1" aria-label="Return to citation 63, occurrence 1">↩1</a><a class="citation-return" href="#mysql-group-replication--cite-63-2" aria-label="Return to citation 63, occurrence 2">↩2</a><a class="citation-return" href="#mysql-group-replication--cite-63-3" aria-label="Return to citation 63, occurrence 3">↩3</a></span></div><div class="source-entry" id="mysql-group-replication--source-64">[64] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-secure-user.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-secure-user.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 20.6.3.1 Secure User Credentials for Distributed Recovery
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-64-1" aria-label="Return to citation 64, occurrence 1">↩1</a><a class="citation-return" href="#mysql-group-replication--cite-64-2" aria-label="Return to citation 64, occurrence 2">↩2</a><a class="citation-return" href="#mysql-group-replication--cite-64-3" aria-label="Return to citation 64, occurrence 3">↩3</a></span></div><div class="source-entry" id="mysql-group-replication--source-65">[65] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-server-states.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-server-states.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 20.4.2 Group Replication Server States
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-65-1" aria-label="Return to citation 65, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-group-replication--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-group-replication--source-90">[90] <a href="https://dev.mysql.com/doc/refman/8.4/en/upgrading-from-previous-series.html">https://dev.mysql.com/doc/refman/8.4/en/upgrading-from-previous-series.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 3.5 Changes in MySQL 8.4
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-90-1" aria-label="Return to citation 90, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-group-replication--source-91">[91] <a href="https://dev.mysql.com/doc/refman/8.4/en/replication-mode-change-online-enable-gtids.html">https://dev.mysql.com/doc/refman/8.4/en/replication-mode-change-online-enable-gtids.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 19.1.4.2 Enabling GTID Transactions Online
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-91-1" aria-label="Return to citation 91, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-group-replication--source-108">[108] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-connection-security.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-connection-security.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 20.6.1 Communication Stack for Connection Security Management
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-108-1" aria-label="Return to citation 108, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-group-replication--source-116">[116] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-configuring-consistency-guarantees.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-configuring-consistency-guarantees.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 20.5.3.2 Configuring Transaction Consistency Guarantees
+<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-116-1" aria-label="Return to citation 116, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-group-replication--source-150">[150] <a href="https://dev.mysql.com/doc/refman/8.4/en/group-replication-functions-for-mode.html">https://dev.mysql.com/doc/refman/8.4/en/group-replication-functions-for-mode.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 14.18.1.2 Functions which Configure the Group Replication Mode<span class="citation-returns"><a class="citation-return" href="#mysql-group-replication--cite-150-1" aria-label="Return to citation 150, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-replication.html"><span>Previous · MySQL</span><strong>Source-replica replication and recovery</strong></a></div><div><a rel="next" href="mysql-hardening.html"><span>Next · MySQL</span><strong>TLS and encryption at rest</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/replicate.html">Explore Keep more than one copy ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a aria-current="page" href="../chapters/mysql-group-replication.html">Group replication and failover</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-replication-ha.html">Replication and high availability</a></div><div><span>MongoDB</span><a href="mongodb-replication.html">Replica sets and high availability</a><a href="mongodb-sharding.html">Sharding and resharding</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

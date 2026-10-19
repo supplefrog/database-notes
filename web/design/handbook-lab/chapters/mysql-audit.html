@@ -1,0 +1,188 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Auditing activity — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-audit"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/observe.html">See what the server is doing</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> See what the server is doing</p><h1>Auditing activity</h1></header>
+<div class="reader-controls"><a href="../tasks/observe.html">← See what the server is doing</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a  href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a aria-current="page" href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-0617">Audit availability and setup</a><a class="level-3" href="#mysql-audit--section-1">Configuration reference</a><a class="level-3" href="#mysql-audit--section-2">Filters: replacements for old utility commands</a><a class="level-3" href="#mysql-audit--section-3">Reading/searching audit logs</a><a class="level-2" href="#mysql-audit--section-4">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-vacuum.html">Vacuum, freezing and bloat</a><a href="postgresql-audit-performance.html">Audit, statistics and performance</a><p class="product-label">MongoDB</p><a href="mongodb-performance.html">Auditing and performance</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-audit; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-audit--cite-1-1" class="citation-ref" href="#mysql-audit--source-1" aria-label="Source 1">[1]</a><a id="mysql-audit--cite-72-1" class="citation-ref" href="#mysql-audit--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-audit--audit" class="source-anchor"></span>
+<span id="mysql-audit--download-preferred-3rd-party-plugin-to-plugindir-usr-lib64-mysql-plugin-and-install" class="source-anchor"></span>
+<span id="mysql-audit--or" class="source-anchor"></span>
+<span id="mysql-audit--install-enterprise-plugin" class="source-anchor"></span>
+<span id="mysql-audit--mysql-enterprise-audit" class="source-anchor"></span>
+<span id="mysql-audit--mysqlauditadmin" class="source-anchor"></span>
+<span id="mysql-audit--mysqlauditgrep" class="source-anchor"></span>
+<span id="mysql-b-0581" class="source-anchor"></span>
+<span id="mysql-b-0583" class="source-anchor"></span>
+<span id="mysql-b-0584" class="source-anchor"></span>
+<span id="mysql-b-0585" class="source-anchor"></span>
+<span id="mysql-b-0586" class="source-anchor"></span>
+<span id="mysql-b-0589" class="source-anchor"></span>
+<span id="mysql-b-0591" class="source-anchor"></span>
+<span id="mysql-b-0604" class="source-anchor"></span>
+<span id="mysql-b-0606" class="source-anchor"></span>
+<span id="mysql-b-0615" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0617">Audit availability and setup</h2>
+<p><strong>MySQL Enterprise Audit is commercial.</strong> Use the plugin and installation SQL shipped with the same server distribution/build. A third-party audit plugin has its own license, ABI, policy language and compatibility matrix; copying an arbitrary <code>.so</code> into <code>plugin_dir</code> is not an installation procedure.</p>
+<p>The Enterprise installation script creates the plugin, filter tables and loadable functions. A bare <code>INSTALL PLUGIN audit_log SONAME 'audit_log.so'</code> alone does not establish the full filtering configuration. Follow the package’s <code>audit_log_filter_linux_install.sql</code> procedure with the documented administrator privileges, after checking for an existing installation. Back up the filter definitions and plan performance/retention/security requirements. Verify <code>SHOW PLUGINS</code>, filter tables and a controlled login/query event, then read the actual audit file. No sample audit output is assumed here.</p>
+
+<h3 id="mysql-audit--section-1">Configuration reference</h3>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Auditing activity: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Parameter / interface</th>
+<th>8.4 meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plugin-load</code> / <code>plugin-load-add</code></td>
+<td>Startup plugin loading; repeated <code>plugin-load</code> can replace the list. Prefer the documented complete installation path.</td>
+</tr>
+<tr>
+<td><code>audit_log_policy</code></td>
+<td>Legacy mode’s <code>ALL</code>, <code>LOGINS</code>, <code>QUERIES</code>, <code>NONE</code>; rule-based filtering uses JSON filters instead. Not a universal runtime policy selector.</td>
+</tr>
+<tr>
+<td><code>audit_log_file</code></td>
+<td>Audit path; protect ownership, free space and retention.</td>
+</tr>
+<tr>
+<td><code>audit_log_format</code></td>
+<td><code>OLD</code> or <code>NEW</code> XML formats, or <code>JSON</code>; <code>XML</code> is not the literal option value. Startup setting.</td>
+</tr>
+<tr>
+<td><code>audit_log_rotate_on_size</code></td>
+<td>Size-triggered rotation, in bytes; use supported audit rotation/purge rather than uncoordinated file deletion.</td>
+</tr>
+<tr>
+<td><code>audit_log_compression</code></td>
+<td><code>NONE</code> or <code>GZIP</code>; verify format/installation prerequisites.</td>
+</tr>
+<tr>
+<td><code>audit_log_encryption</code></td>
+<td><code>NONE</code> or <code>AES</code>; requires an appropriate working keyring. <code>AES256</code> is not the option token. Keep the keys required to read retained logs.</td>
+</tr>
+<tr>
+<td><code>audit_log_include_accounts</code></td>
+<td>Legacy include-list behavior, not a replacement for rule filters.</td>
+</tr>
+<tr>
+<td><code>audit_log_exclude_accounts</code></td>
+<td>Legacy exclusion list; review interaction with include lists rather than enabling both indiscriminately.</td>
+</tr>
+<tr>
+<td><code>audit_log_filter_id</code></td>
+<td>Read-only identifier of the session’s assigned filter; not a command for selecting a policy.</td>
+</tr>
+</tbody>
+</table></div>
+
+<h3 id="mysql-audit--section-2">Filters: replacements for old utility commands</h3>
+<p>The source’s <code>mysqlauditadmin</code> flags were not a valid 8.4 management API. Preserve their intended operations using the real interfaces below. Filter functions require the audit-administration privilege documented for the installed plugin. Start with a limited test account and verify events before broad assignment; logging SQL can capture sensitive data.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Auditing activity: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Source operation/flag</th>
+<th>Current interface and meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--list-filters</code></td>
+<td>Inspect <code>mysql.audit_log_filter</code> and account assignments in <code>mysql.audit_log_user</code> with authorized access.</td>
+</tr>
+<tr>
+<td><code>--create-filter --name --filter</code></td>
+<td><code>audit_log_filter_set_filter(filter_name, json_definition)</code> creates/replaces a named JSON filter. Validate its event rules.</td>
+</tr>
+<tr>
+<td><code>--create-policy --name --filter --log</code></td>
+<td>No separate command with this contract; put event logging decisions in the filter JSON.</td>
+</tr>
+<tr>
+<td><code>--apply-policy --name --user</code></td>
+<td><code>audit_log_filter_set_user(account, filter_name)</code> assigns a filter to an account. The <code>%</code> assignment is a default and needs deliberate review.</td>
+</tr>
+<tr>
+<td><code>--drop-filter --name</code></td>
+<td><code>audit_log_filter_remove_filter(filter_name)</code> removes a filter and affects its assignments.</td>
+</tr>
+<tr>
+<td><code>--drop-policy --name</code></td>
+<td>Remove/reassign affected account rules with <code>audit_log_filter_remove_user(account)</code> and manage named filters explicitly.</td>
+</tr>
+</tbody>
+</table></div>
+<p>An example definition, not an instruction to log every production account:</p>
+<pre tabindex="0" role="region" aria-label="Auditing activity: code 1, horizontally scrollable"><code class="language-sql">SELECT audit_log_filter_set_filter('review_all_events', '{"filter":{"log":true}}');
+</code></pre>
+
+<h3 id="mysql-audit--section-3">Reading/searching audit logs</h3>
+<p>The old <code>mysqlauditgrep</code> task list remains relevant, but its guessed flags must not be treated as installed 8.4 commands. Use the documented <code>audit_log_read</code>/bookmark functions for compatible JSON logs or an access-controlled JSON parser; encrypted/compressed files need their supported reader/decryption workflow first.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Auditing activity: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Original option intent</th>
+<th>Equivalent review task</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--pattern</code>, <code>-e</code></td>
+<td>Match the selected SQL/message field, not arbitrary raw lines across records.</td>
+</tr>
+<tr>
+<td><code>--regexp</code></td>
+<td>Apply an explicit regular expression in the chosen analysis tool; do not assume SQL LIKE semantics.</td>
+</tr>
+<tr>
+<td><code>--users</code></td>
+<td>Filter account/host fields, preserving identities exactly.</td>
+</tr>
+<tr>
+<td><code>--start-date</code></td>
+<td>Inclusive starting timestamp; account for log timezone.</td>
+</tr>
+<tr>
+<td><code>--end-date</code></td>
+<td>Explicit ending boundary; document inclusive/exclusive handling.</td>
+</tr>
+<tr>
+<td><code>--event-type</code></td>
+<td>Filter documented event classes/subclasses for that log format.</td>
+</tr>
+<tr>
+<td><code>--query-type</code></td>
+<td>Filter statement classifications where present; do not infer SQL type by a fragile string prefix.</td>
+</tr>
+<tr>
+<td><code>--status</code></td>
+<td>Check recorded success/error status with that event schema.</td>
+</tr>
+<tr>
+<td><code>--file-stats</code></td>
+<td>Calculate counts/size/time span with the analysis tool; not a server audit-policy flag.</td>
+</tr>
+<tr>
+<td><code>--license</code></td>
+<td>Inspect the selected tool’s license/version separately; it does not validate the audit trail.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Secure rotation archives, separate audit administration from ordinary application access, and test disk-full/failure behavior. The general query log is not a drop-in compliance audit system.</p>
+<p><a id="mysql-audit--cite-28-1" class="citation-ref" href="#mysql-audit--source-28" aria-label="Source 28">[28]</a><a id="mysql-audit--cite-29-1" class="citation-ref" href="#mysql-audit--source-29" aria-label="Source 29">[29]</a><a id="mysql-audit--cite-30-1" class="citation-ref" href="#mysql-audit--source-30" aria-label="Source 30">[30]</a><a id="mysql-audit--cite-31-1" class="citation-ref" href="#mysql-audit--source-31" aria-label="Source 31">[31]</a></p>
+
+<h2 id="mysql-audit--section-4">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-audit--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-audit--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-audit--source-28">[28] <a href="https://dev.mysql.com/doc/refman/8.4/en/audit-log.html">https://dev.mysql.com/doc/refman/8.4/en/audit-log.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.5 MySQL Enterprise Audit
+<span class="citation-returns"><a class="citation-return" href="#mysql-audit--cite-28-1" aria-label="Return to citation 28, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-audit--source-29">[29] <a href="https://dev.mysql.com/doc/refman/8.4/en/audit-log-reference.html">https://dev.mysql.com/doc/refman/8.4/en/audit-log-reference.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.5.11 Audit Log Reference
+<span class="citation-returns"><a class="citation-return" href="#mysql-audit--cite-29-1" aria-label="Return to citation 29, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-audit--source-30">[30] <a href="https://dev.mysql.com/doc/refman/8.4/en/audit-log-filtering.html">https://dev.mysql.com/doc/refman/8.4/en/audit-log-filtering.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.5.7 Audit Log Filtering
+<span class="citation-returns"><a class="citation-return" href="#mysql-audit--cite-30-1" aria-label="Return to citation 30, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-audit--source-31">[31] <a href="https://dev.mysql.com/doc/refman/8.4/en/audit-log-installation.html">https://dev.mysql.com/doc/refman/8.4/en/audit-log-installation.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 8.4.5.2 Installing or Uninstalling MySQL Enterprise Audit
+<span class="citation-returns"><a class="citation-return" href="#mysql-audit--cite-31-1" aria-label="Return to citation 31, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-audit--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database<span class="citation-returns"><a class="citation-return" href="#mysql-audit--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-accounts-settings.html"><span>Previous · MySQL</span><strong>Settings, accounts, roles and privileges</strong></a></div><div><a rel="next" href="mysql-performance.html"><span>Next · MySQL</span><strong>Execution plans, indexes and diagnostics</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/observe.html">Explore See what the server is doing ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a aria-current="page" href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-vacuum.html">Vacuum, freezing and bloat</a><a href="postgresql-audit-performance.html">Audit, statistics and performance</a></div><div><span>MongoDB</span><a href="mongodb-performance.html">Auditing and performance</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>

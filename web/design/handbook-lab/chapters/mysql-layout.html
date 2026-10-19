@@ -1,0 +1,295 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Operating systems and database learning notes"><title>Executables, schemas and server files — Systems & databases</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%232a2927'/%3E%3Ctext x='6' y='23' fill='%23e9e9e5' font-family='serif' font-size='21'%3ES%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="../teaching-figures.css"><script src="../app.js" defer></script></head>
+<body data-root="../" data-chapter="mysql-layout"><a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header"><a class="brand" href="../index.html">Systems <span aria-hidden="true">/</span> databases</a><nav aria-label="Subjects"><a href="../operating-systems.html">Operating systems</a><a href="../databases.html">Databases</a></nav><button class="search-open" type="button" data-search-open hidden>Search the handbook <span aria-hidden="true">⌕</span></button></header>
+<main id="main-content"><div class="reading-layout"><div class="reader">
+<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="../index.html">Home</a><a href="../databases.html">Databases</a><a href="../tasks/understand.html">Understand the moving parts</a></nav>
+<header class="reader-head"><p class="reader-context">MySQL <span aria-hidden="true">/</span> Understand the moving parts</p><h1>Executables, schemas and server files</h1></header>
+<div class="reader-controls"><a href="../tasks/understand.html">← Understand the moving parts</a><details class="chapters-menu"><summary>Chapters</summary><nav aria-label="MySQL chapters"><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a aria-current="page" href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li><li><a  href="../chapters/mysql-innodb.html">Storage engines, transactions and InnoDB</a></li><li><a  href="../chapters/mysql-objects.html">Objects, sessions and table management</a></li><li><a  href="../chapters/mysql-installation.html">Installing MySQL on Linux</a></li><li><a  href="../chapters/mysql-configuration.html">Configuration and systemd services</a></li><li><a  href="../chapters/mysql-troubleshooting.html">Startup, OS security and multiple instances</a></li><li><a  href="../chapters/mysql-client-storage.html">Client workflow and moving the data directory</a></li><li><a  href="../chapters/mysql-accounts-settings.html">Settings, accounts, roles and privileges</a></li><li><a  href="../chapters/mysql-audit.html">Auditing activity</a></li><li><a  href="../chapters/mysql-performance.html">Execution plans, indexes and diagnostics</a></li><li><a  href="../chapters/mysql-backup-logical.html">Logical backups, restore tests and point-in-time recovery</a></li><li><a  href="../chapters/mysql-backup-physical.html">Physical backups, tablespace transfer and log rotation</a></li><li><a  href="../chapters/mysql-replication.html">Source-replica replication and recovery</a></li><li><a  href="../chapters/mysql-group-replication.html">Group replication and failover</a></li><li><a  href="../chapters/mysql-hardening.html">TLS and encryption at rest</a></li><li><a  href="../chapters/mysql-upgrades.html">Upgrades and rollback planning</a></li><li><a  href="../chapters/mysql-migration.html">Migrating MySQL to Oracle</a></li></ol></nav></details><details class="contents-menu"><summary>On this page</summary><nav aria-label="On this page"><a class="level-2" href="#mysql-b-0114">Physical</a><a class="level-3" href="#mysql-b-0116">Executables and package layout</a><a class="level-3" href="#mysql-layout--section-1">Optional and historical utilities</a><a class="level-3" href="#mysql-b-0225">Schemas and storage: logical objects are not one file each</a><a class="level-3" href="#mysql-layout--section-2">Non-schema files</a><a class="level-2" href="#mysql-layout--section-3">Sources</a></nav></details><details class="products-menu"><summary>Products</summary><nav aria-label="Same task in other products"><p class="product-label">PostgreSQL</p><a href="postgresql-foundations.html">PostgreSQL foundations and tools</a><p class="product-label">MongoDB</p><a href="mongodb-architecture.html">Architecture, editions and tools</a></nav></details></div>
+<article class="prose"><!-- reviewed-unit: mysql-layout; documentation-reviewed only; no operational execution -->
+<p>Applies to MySQL Server 8.4 LTS; the production baseline is RHEL 9 x86_64 with Oracle MySQL Community RPMs from the MySQL Yum repository. Separately licensed products and other platforms are identified explicitly.<a id="mysql-layout--cite-1-1" class="citation-ref" href="#mysql-layout--source-1" aria-label="Source 1">[1]</a><a id="mysql-layout--cite-72-1" class="citation-ref" href="#mysql-layout--source-72" aria-label="Source 72">[72]</a></p>
+<p><span id="mysql-layout--physical" class="source-anchor"></span>
+</p>
+<h2 id="mysql-b-0114">Physical</h2>
+<p><span id="mysql-layout--base-directory-executables-default-usr-bin" class="source-anchor"></span>
+</p>
+<h3 id="mysql-b-0116">Executables and package layout</h3>
+<p>On RHEL 9 x86-64 RPM installations, client programs commonly live in <code>/usr/bin</code> and the server in <code>/usr/sbin</code>; <code>basedir</code> is not synonymous with <code>/usr/bin</code>. Generic tarballs use a different base directory. Check the package file list rather than guessing paths.</p>
+<p><a id="mysql-layout--cite-18-1" class="citation-ref" href="#mysql-layout--source-18" aria-label="Source 18">[18]</a><a id="mysql-layout--cite-88-1" class="citation-ref" href="#mysql-layout--source-88" aria-label="Source 88">[88]</a></p>
+<p><span id="mysql-b-0118" class="source-anchor"></span></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Executables, schemas and server files: table 1, horizontally scrollable"><table>
+<thead>
+<tr>
+<th style="text-align: left">Client Apps</th>
+<th style="text-align: left">Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left">mysql</td>
+<td style="text-align: left">CLI client</td>
+</tr>
+<tr>
+<td style="text-align: left">mysqladmin</td>
+<td style="text-align: left">CLI for quick server management - status, processlist, kill, flush (reload) tables/logs/privileges, create/drop db, shutdown</td>
+</tr>
+<tr>
+<td style="text-align: left">mysqlbinlog</td>
+<td style="text-align: left">Read binary logs</td>
+</tr>
+<tr>
+<td style="text-align: left">myisamlog</td>
+<td style="text-align: left">Read MyISAM log</td>
+</tr>
+<tr>
+<td style="text-align: left">mysqlcheck</td>
+<td style="text-align: left"><code>-c</code> check <code>-a</code> analyze <code>-o</code> optimize <code>db [table_name]</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>| mysql_config_editor | Saves obfuscated credentials in <code>.mylogin.cnf</code>; restrict filesystem access. It is not strong encryption or a secrets vault. Password entry is prompted. |</p>
+<p><a id="mysql-layout--cite-5-1" class="citation-ref" href="#mysql-layout--source-5" aria-label="Source 5">[5]</a></p>
+<p>| mysqldump              | Logical backup                                                                    |
+| mysqlimport            | Import CSV/TSV - text format data files directly into tables                      |
+| mysql_migrate_keyring  | Migrate encryption keys between keyring components                                |
+| mysqlshow              | Quick overview of databases, tables, columns, or indexes                          |
+| mysqlslap              | Simulate load from multiple clients and measure performance by the timing of each stage |</p>
+<p><span id="mysql-b-0132" class="source-anchor"></span></p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Executables, schemas and server files: table 2, horizontally scrollable"><table>
+<thead>
+<tr>
+<th style="text-align: left">Server Apps</th>
+<th style="text-align: left">Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left">mysqld</td>
+<td style="text-align: left">Server</td>
+</tr>
+</tbody>
+</table></div>
+<p>| mysqld_pre_systemd | RPM support script used by the vendor unit; assists first-start initialization and log setup. Do not assume this helper exists in a generic archive. |</p>
+<p><a id="mysql-layout--cite-19-1" class="citation-ref" href="#mysql-layout--source-19" aria-label="Source 19">[19]</a></p>
+<p>| mysqldumpslow              | Summarize slow query logs to prioritize queries for tuning                                  |
+| mysql_secure_installation  | Set root password, remove anonymous users, disallow remote root login, remove test databases, reload privilege tables |
+| mysql_tzinfo_to_sql        | Load system time zones into <code>mysql</code> schema                                                  |
+| my_print_defaults          | Print options in options groups of option files                                             |</p>
+<p>Client utilities are separate programs with separate option syntax. <code>mysqlimport</code> uses <code>LOAD DATA</code> conventions: filenames map to tables and delimiter/escaping settings must match the source file; a CSV extension does not set those automatically. <code>mysqlcheck --optimize</code> can rebuild/lock tables and is not a harmless read-only diagnostic. <code>mysqlslap</code> generates workload and can create/drop its test schema: use only a disposable environment with explicit reviewed targets. <code>myisamlog</code> reads MyISAM logs, not the server binary log. <code>my_print_defaults</code> can disclose sensitive option values; keep its output private. <code>mysql_migrate_keyring</code> is a versioned offline component-key migration tool, not proof that encrypted tables have been migrated safely. Check each program’s packaged availability and official reference.</p>
+<p><a id="mysql-layout--cite-118-1" class="citation-ref" href="#mysql-layout--source-118" aria-label="Source 118">[118]</a><a id="mysql-layout--cite-119-1" class="citation-ref" href="#mysql-layout--source-119" aria-label="Source 119">[119]</a><a id="mysql-layout--cite-120-1" class="citation-ref" href="#mysql-layout--source-120" aria-label="Source 120">[120]</a><a id="mysql-layout--cite-121-1" class="citation-ref" href="#mysql-layout--source-121" aria-label="Source 121">[121]</a><a id="mysql-layout--cite-122-1" class="citation-ref" href="#mysql-layout--source-122" aria-label="Source 122">[122]</a><a id="mysql-layout--cite-123-1" class="citation-ref" href="#mysql-layout--source-123" aria-label="Source 123">[123]</a><a id="mysql-layout--cite-124-1" class="citation-ref" href="#mysql-layout--source-124" aria-label="Source 124">[124]</a><a id="mysql-layout--cite-125-1" class="citation-ref" href="#mysql-layout--source-125" aria-label="Source 125">[125]</a><a id="mysql-layout--cite-126-1" class="citation-ref" href="#mysql-layout--source-126" aria-label="Source 126">[126]</a><a id="mysql-layout--cite-127-1" class="citation-ref" href="#mysql-layout--source-127" aria-label="Source 127">[127]</a><a id="mysql-layout--cite-128-1" class="citation-ref" href="#mysql-layout--source-128" aria-label="Source 128">[128]</a></p>
+<p><span id="mysql-b-0141" class="source-anchor"></span>
+</p>
+<h3 id="mysql-layout--section-1">Optional and historical utilities</h3>
+<p>The following names remain useful when reading old runbooks. They are <strong>not an 8.4 installation checklist</strong>. MySQL Utilities 1.x was a separate, Python-based historical suite; do not install it as the operating layer for 8.4. Use current server SQL, MySQL Shell and supported topology tools. Third-party projects require separate maintenance and compatibility review.</p>
+<div class="table-wrap" tabindex="0" role="region" aria-label="Executables, schemas and server files: table 3, horizontally scrollable"><table>
+<thead>
+<tr>
+<th>Utility retained from the source</th>
+<th>Original task</th>
+<th>Current approach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>mysqltuner</td>
+<td>Configuration recommendations</td>
+<td>Third-party heuristic script, not Oracle support advice; validate each proposal against workload measurements.</td>
+</tr>
+<tr>
+<td>mysqlreport</td>
+<td>Human-readable status reports</td>
+<td>Historical third-party reporting; use status variables, Performance Schema and <code>sys</code>.</td>
+</tr>
+<tr>
+<td>mysqlauditadmin</td>
+<td>Audit administration</td>
+<td>Enterprise Audit filter functions and rotation/reader interfaces.</td>
+</tr>
+<tr>
+<td>mysqlauditgrep</td>
+<td>Search audit logs</td>
+<td>JSON-aware log analysis or Enterprise Audit reader functions.</td>
+</tr>
+<tr>
+<td>mysqldbcompare</td>
+<td>Structure/data comparison</td>
+<td>Schema diff plus bounded data reconciliation; row counts alone are insufficient.</td>
+</tr>
+<tr>
+<td>mysqldbcopy</td>
+<td>Database copy</td>
+<td>Shell dump/load or another tested logical migration.</td>
+</tr>
+<tr>
+<td>mysqldbexport</td>
+<td>Export definitions/data</td>
+<td><code>mysqldump</code> or Shell dump utilities.</td>
+</tr>
+<tr>
+<td>mysqldbimport</td>
+<td>Import exported objects</td>
+<td><code>mysql</code> for SQL dumps; Shell <code>util.loadDump</code> for Shell dump format.</td>
+</tr>
+<tr>
+<td>mysqldiff</td>
+<td>Schema differences</td>
+<td>Compare normalized DDL with explicit definers, collation and routine handling.</td>
+</tr>
+<tr>
+<td>mysqldiskusage</td>
+<td>Disk estimates</td>
+<td><code>information_schema.tables</code> estimates plus actual storage measurement.</td>
+</tr>
+<tr>
+<td>mysqlfailover</td>
+<td>Automatic failover</td>
+<td>InnoDB Cluster/AdminAPI/Router for appropriate supported topology, not automatic replacement of arbitrary asynchronous topology.</td>
+</tr>
+<tr>
+<td>mysqlfrm</td>
+<td>Reconstruct <code>.frm</code> definitions</td>
+<td>Historical pre-8.0 metadata; 8.4 uses the transactional data dictionary, not <code>.frm</code>.</td>
+</tr>
+<tr>
+<td>mysqlindexcheck</td>
+<td>Redundant-index checks</td>
+<td><code>sys.schema_redundant_indexes</code> and measured workload review.</td>
+</tr>
+<tr>
+<td>mysqlmetagrep</td>
+<td>Metadata search</td>
+<td>Information Schema queries.</td>
+</tr>
+<tr>
+<td>mysqlprocgrep</td>
+<td>Session search</td>
+<td>Performance Schema process list or <code>sys.processlist</code>.</td>
+</tr>
+<tr>
+<td>mysqlreplicate</td>
+<td>Configure replication</td>
+<td>Versioned <code>CHANGE REPLICATION SOURCE TO</code> procedure.</td>
+</tr>
+<tr>
+<td>mysqlrpladmin</td>
+<td>Topology administration</td>
+<td>Current replication statements and AdminAPI where applicable.</td>
+</tr>
+<tr>
+<td>mysqlrplcheck</td>
+<td>Replication checks</td>
+<td>Status tables, error/lag monitoring and independent data reconciliation.</td>
+</tr>
+<tr>
+<td>mysqlrplshow</td>
+<td>Display topology</td>
+<td>Explicit topology inventory and supported cluster tooling.</td>
+</tr>
+<tr>
+<td>mysqlserverclone</td>
+<td>Instance copying</td>
+<td>Shell logical copy/dump/load or the server Clone plugin, with overwrite checks.</td>
+</tr>
+<tr>
+<td>mysqlserverinfo</td>
+<td>Server information</td>
+<td>Variables, status and package/version inventory.</td>
+</tr>
+<tr>
+<td>mysqluc</td>
+<td>Utilities console</td>
+<td>Historical suite launcher; not <code>mysqlsh</code>.</td>
+</tr>
+<tr>
+<td>mysqluserclone</td>
+<td>Copy users/grants</td>
+<td>Review <code>SHOW CREATE USER</code>/<code>SHOW GRANTS</code>, roles and authentication compatibility; do not copy <code>mysql.user</code> files.</td>
+</tr>
+</tbody>
+</table></div>
+<p><a id="mysql-layout--cite-4-1" class="citation-ref" href="#mysql-layout--source-4" aria-label="Source 4">[4]</a><a id="mysql-layout--cite-35-1" class="citation-ref" href="#mysql-layout--source-35" aria-label="Source 35">[35]</a><a id="mysql-layout--cite-36-1" class="citation-ref" href="#mysql-layout--source-36" aria-label="Source 36">[36]</a><a id="mysql-layout--cite-85-1" class="citation-ref" href="#mysql-layout--source-85" aria-label="Source 85">[85]</a><a id="mysql-layout--cite-95-1" class="citation-ref" href="#mysql-layout--source-95" aria-label="Source 95">[95]</a><a id="mysql-layout--cite-96-1" class="citation-ref" href="#mysql-layout--source-96" aria-label="Source 96">[96]</a></p>
+<p><span id="mysql-layout--schemas-and-their-corresponding-files-in-data-directory-default-var-lib-mysql" class="source-anchor"></span>
+<span id="mysql-layout--non-schema-files" class="source-anchor"></span>
+<span id="mysql-b-0167" class="source-anchor"></span>
+<span id="mysql-b-0168" class="source-anchor"></span>
+<span id="mysql-b-0223" class="source-anchor"></span>
+</p>
+<h3 id="mysql-b-0225">Schemas and storage: logical objects are not one file each</h3>
+<p>Typical RPM data directory: <code>/var/lib/mysql</code>. Query <code>@@datadir</code> on the actual instance. Paths can be configured; do not edit or delete live server files.</p>
+<pre tabindex="0" role="region" aria-label="Executables, schemas and server files: code 1, horizontally scrollable"><code class="language-text">Logical objects                         Typical 8.4 persistence
+user schema/
+  InnoDB tables                         .ibd for file-per-table; shared tablespaces also possible
+  MyISAM tables                         .MYD data and .MYI indexes; metadata in .sdi
+  procedures / functions                transactional data dictionary, not one routine file
+  triggers                              dictionary metadata, not legacy .TRG files
+  views                                 dictionary metadata, not materialized query results
+mysql schema
+  account/grant tables                  mysql.user, db, tables_priv, columns_priv, roles, ...
+  protected dictionary tables           schemata, tables, columns, indexes, routines, events, ...
+  persistence                           mysql.ibd contains dictionary and mysql system tables
+information_schema
+  metadata / privilege views            exposed by server; no user-managed per-view data files
+performance_schema
+  runtime instrumentation tables        engine-managed in-memory data; .sdi metadata may exist
+sys
+  diagnostic views, procedures/functions wrappers over monitoring information
+  sys_config table                      persistent configuration (not every sys view is a file)
+</code></pre>
+<p>MySQL 8.4 does not use <code>.frm</code>, <code>.TRG</code> or <code>.par</code> as the old metadata model. Protected dictionary tables are not a supported direct-query API: use Information Schema and <code>SHOW</code>. The original <code>sysconfig.ibd</code> name was inaccurate; <code>sys_config</code> is the table name and its physical placement is not a portable administration API.</p>
+
+<h3 id="mysql-layout--section-2">Non-schema files</h3>
+<pre tabindex="0" role="region" aria-label="Executables, schemas and server files: code 2, horizontally scrollable"><code class="language-text">Configured datadir (example /var/lib/mysql)
+  ibdata1                 InnoDB system tablespace: change buffer and possible shared table data
+  mysql.ibd               transactional dictionary and mysql system tables
+  #innodb_redo/           active and spare redo files
+  undo_001, undo_002       default separate undo tablespaces
+  #ib_&lt;page-size&gt;_*.dblwr  doublewrite files (location configurable)
+  #innodb_temp/           pooled session temporary tablespaces
+  ibtmp1                  global temporary tablespace: temporary-table rollback segments
+  auto.cnf                server UUID; not a configuration template to duplicate
+  mysqld-auto.cnf          persisted system-variable settings; server-managed
+  binlog files + index    binary-log changes for replication/PITR
+  relay files + index     replica's received events
+  mysql.sock + .lock      Unix socket and ownership lock when configured here
+Outside or inside datadir, according to configuration
+  error log               startup/runtime diagnostics
+  general query log       connection and statement activity; sensitive, potentially costly
+  slow query log          statements meeting configured thresholds/filters
+  /etc/my.cnf             RPM option file, not a database data file
+</code></pre>
+<p>The InnoDB <strong>DDL log</strong> supports crash-safe DDL internally; it is not a general text log of all DDL statements. Binary, relay, redo and undo logs serve different recovery purposes. Do not use logrotate or manual deletion for managed database log files. The socket is created for a running local listener; verify server ownership before investigating stale socket/lock files.</p>
+<p><a id="mysql-layout--cite-4-2" class="citation-ref" href="#mysql-layout--source-4" aria-label="Source 4">[4]</a><a id="mysql-layout--cite-10-1" class="citation-ref" href="#mysql-layout--source-10" aria-label="Source 10">[10]</a><a id="mysql-layout--cite-11-1" class="citation-ref" href="#mysql-layout--source-11" aria-label="Source 11">[11]</a><a id="mysql-layout--cite-12-1" class="citation-ref" href="#mysql-layout--source-12" aria-label="Source 12">[12]</a><a id="mysql-layout--cite-13-1" class="citation-ref" href="#mysql-layout--source-13" aria-label="Source 13">[13]</a><a id="mysql-layout--cite-18-2" class="citation-ref" href="#mysql-layout--source-18" aria-label="Source 18">[18]</a><a id="mysql-layout--cite-20-1" class="citation-ref" href="#mysql-layout--source-20" aria-label="Source 20">[20]</a><a id="mysql-layout--cite-87-1" class="citation-ref" href="#mysql-layout--source-87" aria-label="Source 87">[87]</a><a id="mysql-layout--cite-145-1" class="citation-ref" href="#mysql-layout--source-145" aria-label="Source 145">[145]</a></p>
+
+<h2 id="mysql-layout--section-3">Sources</h2>
+<div class="source-list"><div class="source-entry" id="mysql-layout--source-1">[1] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-releases.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 1.3 MySQL Releases: Innovation and LTS
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-1-1" aria-label="Return to citation 1, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-4">[4] <a href="https://dev.mysql.com/doc/refman/8.4/en/data-dictionary.html">https://dev.mysql.com/doc/refman/8.4/en/data-dictionary.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 16 MySQL Data Dictionary
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-4-1" aria-label="Return to citation 4, occurrence 1">↩1</a><a class="citation-return" href="#mysql-layout--cite-4-2" aria-label="Return to citation 4, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-layout--source-5">[5] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-config-editor.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-config-editor.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.6.7 mysql_config_editor — MySQL Configuration Utility
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-5-1" aria-label="Return to citation 5, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-10">[10] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-redo-log.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-redo-log.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.6.5 Redo Log
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-10-1" aria-label="Return to citation 10, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-11">[11] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-doublewrite-buffer.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-doublewrite-buffer.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.6.4 Doublewrite Buffer
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-11-1" aria-label="Return to citation 11, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-12">[12] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-temporary-tablespace.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-temporary-tablespace.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.6.3.5 Temporary Tablespaces
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-12-1" aria-label="Return to citation 12, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-13">[13] <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-multi-versioning.html">https://dev.mysql.com/doc/refman/8.4/en/innodb-multi-versioning.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 17.3 InnoDB Multi-Versioning
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-13-1" aria-label="Return to citation 13, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-18">[18] <a href="https://dev.mysql.com/doc/refman/8.4/en/linux-installation-rpm.html">https://dev.mysql.com/doc/refman/8.4/en/linux-installation-rpm.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.5.4 Installing MySQL on Linux Using RPM Packages from Oracle
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-18-1" aria-label="Return to citation 18, occurrence 1">↩1</a><a class="citation-return" href="#mysql-layout--cite-18-2" aria-label="Return to citation 18, occurrence 2">↩2</a></span></div><div class="source-entry" id="mysql-layout--source-19">[19] <a href="https://dev.mysql.com/doc/refman/8.4/en/using-systemd.html">https://dev.mysql.com/doc/refman/8.4/en/using-systemd.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.5.9 Managing MySQL Server with systemd
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-19-1" aria-label="Return to citation 19, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-20">[20] <a href="https://dev.mysql.com/doc/refman/8.4/en/option-files.html">https://dev.mysql.com/doc/refman/8.4/en/option-files.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.2.2.2 Using Option Files
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-20-1" aria-label="Return to citation 20, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-35">[35] <a href="https://dev.mysql.com/doc/refman/8.4/en/sys-schema.html">https://dev.mysql.com/doc/refman/8.4/en/sys-schema.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 30 MySQL sys Schema
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-35-1" aria-label="Return to citation 35, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-36">[36] <a href="https://dev.mysql.com/doc/refman/8.4/en/information-schema.html">https://dev.mysql.com/doc/refman/8.4/en/information-schema.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 28 INFORMATION_SCHEMA Tables
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-36-1" aria-label="Return to citation 36, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-72">[72] <a href="https://www.mysql.com/support/supportedplatforms/database.html">https://www.mysql.com/support/supportedplatforms/database.html</a> — MySQL :: Supported Platforms: MySQL Database
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-72-1" aria-label="Return to citation 72, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-85">[85] <a href="https://dev.mysql.com/doc/refman/8.4/en/programs.html">https://dev.mysql.com/doc/refman/8.4/en/programs.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6 MySQL Programs
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-85-1" aria-label="Return to citation 85, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-87">[87] <a href="https://dev.mysql.com/doc/refman/8.4/en/system-schema.html">https://dev.mysql.com/doc/refman/8.4/en/system-schema.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 7.3 The mysql System Schema
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-87-1" aria-label="Return to citation 87, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-88">[88] <a href="https://dev.mysql.com/doc/refman/8.4/en/binary-installation.html">https://dev.mysql.com/doc/refman/8.4/en/binary-installation.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 2.2 Installing MySQL on Unix/Linux Using Generic Binaries
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-88-1" aria-label="Return to citation 88, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-95">[95] <a href="https://docs.oracle.com/cd/E17952_01/mysql-shell-8.4-en/mysql-shell-utilities-dump-instance-schema.html">https://docs.oracle.com/cd/E17952_01/mysql-shell-8.4-en/mysql-shell-utilities-dump-instance-schema.html</a> — 11.5&nbsp;Instance Dump Utility, Schema Dump Utility, and Table Dump Utility
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-95-1" aria-label="Return to citation 95, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-96">[96] <a href="https://docs.oracle.com/cd/E17952_01/mysql-shell-8.4-en/mysql-shell-utilities-load-dump.html">https://docs.oracle.com/cd/E17952_01/mysql-shell-8.4-en/mysql-shell-utilities-load-dump.html</a> — 11.6&nbsp;Dump Loading Utility
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-96-1" aria-label="Return to citation 96, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-118">[118] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-migrate-keyring.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-migrate-keyring.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.6.8 mysql_migrate_keyring — Keyring Key Migration Utility
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-118-1" aria-label="Return to citation 118, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-119">[119] <a href="https://dev.mysql.com/doc/refman/8.4/en/myisamlog.html">https://dev.mysql.com/doc/refman/8.4/en/myisamlog.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.6.5 myisamlog — Display MyISAM Log File Contents
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-119-1" aria-label="Return to citation 119, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-120">[120] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysqlcheck.html">https://dev.mysql.com/doc/refman/8.4/en/mysqlcheck.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.5.3 mysqlcheck — A Table Maintenance Program
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-120-1" aria-label="Return to citation 120, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-121">[121] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysqlimport.html">https://dev.mysql.com/doc/refman/8.4/en/mysqlimport.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.5.5 mysqlimport — A Data Import Program
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-121-1" aria-label="Return to citation 121, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-122">[122] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysqlslap.html">https://dev.mysql.com/doc/refman/8.4/en/mysqlslap.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.5.7 mysqlslap — A Load Emulation Client
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-122-1" aria-label="Return to citation 122, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-123">[123] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-secure-installation.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-secure-installation.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.4.2 mysql_secure_installation — Improve MySQL Installation Security
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-123-1" aria-label="Return to citation 123, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-124">[124] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysql-tzinfo-to-sql.html">https://dev.mysql.com/doc/refman/8.4/en/mysql-tzinfo-to-sql.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.4.3 mysql_tzinfo_to_sql — Load the Time Zone Tables
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-124-1" aria-label="Return to citation 124, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-125">[125] <a href="https://dev.mysql.com/doc/refman/8.4/en/my-print-defaults.html">https://dev.mysql.com/doc/refman/8.4/en/my-print-defaults.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.7.2 my_print_defaults — Display Options from Option Files
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-125-1" aria-label="Return to citation 125, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-126">[126] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysqldumpslow.html">https://dev.mysql.com/doc/refman/8.4/en/mysqldumpslow.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.6.10 mysqldumpslow — Summarize Slow Query Log Files
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-126-1" aria-label="Return to citation 126, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-127">[127] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysqlshow.html">https://dev.mysql.com/doc/refman/8.4/en/mysqlshow.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.5.6 mysqlshow — Display Database, Table, and Column Information
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-127-1" aria-label="Return to citation 127, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-128">[128] <a href="https://dev.mysql.com/doc/refman/8.4/en/mysqladmin.html">https://dev.mysql.com/doc/refman/8.4/en/mysqladmin.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 6.5.2 mysqladmin — A MySQL Server Administration Program
+<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-128-1" aria-label="Return to citation 128, occurrence 1">↩</a></span></div><div class="source-entry" id="mysql-layout--source-145">[145] <a href="https://dev.mysql.com/doc/refman/8.4/en/data-dictionary-file-removal.html">https://dev.mysql.com/doc/refman/8.4/en/data-dictionary-file-removal.html</a> — MySQL :: MySQL 8.4 Reference Manual :: 16.2 Removal of File-based Metadata Storage<span class="citation-returns"><a class="citation-return" href="#mysql-layout--cite-145-1" aria-label="Return to citation 145, occurrence 1">↩</a></span></div></div>
+</article><nav class="adjacent" aria-label="Adjacent chapters"><div><a rel="prev" href="mysql-connections.html"><span>Previous · MySQL</span><strong>Connections and query execution</strong></a></div><div><a rel="next" href="mysql-innodb.html"><span>Next · MySQL</span><strong>Storage engines, transactions and InnoDB</strong></a></div></nav></div>
+<aside class="reading-aside"><a class="task-back" href="../tasks/understand.html">Explore Understand the moving parts ↗</a><div class="current-group"><h2>In MySQL</h2><ol class="chapter-list"><li><a  href="../chapters/mysql-overview.html">Database vocabulary, editions and tools</a></li><li><a  href="../chapters/mysql-connections.html">Connections and query execution</a></li><li><a aria-current="page" href="../chapters/mysql-layout.html">Executables, schemas and server files</a></li></ol></div><div class="peer-products"><h2>Same task, other products</h2><div><span>PostgreSQL</span><a href="postgresql-foundations.html">PostgreSQL foundations and tools</a></div><div><span>MongoDB</span><a href="mongodb-architecture.html">Architecture, editions and tools</a></div></div></aside></div></main><footer class="site-footer"><span>Systems & databases</span><a href="../index.html">Start again ↑</a></footer>
+<dialog class="search-dialog" aria-labelledby="search-title"><div class="dialog-top"><h2 id="search-title">Search the handbook</h2><button type="button" data-search-close aria-label="Close search">Close ×</button></div><label for="handbook-query">Find a topic, task, or command</label><input id="handbook-query" type="search" autocomplete="off" spellcheck="false"><p class="search-count" role="status" aria-live="polite">Type to search all chapters.</p><ol class="search-results"></ol></dialog></body></html>
