@@ -5,7 +5,7 @@ and DOM measurements through an injected adapter. It does not read saved QA
 observations. Run it for changes that can affect the UI; documentation-only
 changes do not need the full browser pass. Static build/link checks are separate.
 
-The current candidate has 19 executable groups: 78 representative layout states,
+The current candidate has 22 executable groups: 78 representative layout states,
 20 Contents hierarchy/panel states, search completion/Escape/focus, stable modal
 controls and background locking, Contents from the bottom and chapter selection,
 task/product routing, continuation, history-neutral Back to top with real browser
@@ -23,10 +23,10 @@ local runtime on Windows. In its documented CUA Node session, with an existing
 `browser` binding and `suiteURL` set to this module's absolute file URL:
 
 ```js
-const {runUiRegressions} = await import(suiteURL);
+const {runUiRegressions,observeCopyFeedback} = await import(suiteURL);
 const baseURL = 'http://127.0.0.1:8765/';
 const viewport = await browser.capabilities.get('viewport');
-const tab = await browser.tabs.new();
+const tab = await browser.tabs.get(tabId); // the displayed IAB QA tab
 await tab.goto(new URL('design/handbook-lab/index.html',baseURL).href);
 const nativeTab = await cua.getTab(tab.id,{browser:browser.browserId});
 const cdp = await tab.capabilities.get('cdp');
@@ -53,6 +53,15 @@ try {
         return true;
       })()`, awaitPromise:true, returnByValue:true
     },{timeoutMs:5000}),
+    slowRegistryBaseURL: 'http://127.0.0.1:8767/',
+    startCopyObservation: async () => (await cdp.send('Runtime.evaluate', {
+      expression:'('+observeCopyFeedback.toString()+')()',
+      awaitPromise:true,returnByValue:true
+    },{timeoutMs:5000})).result.value,
+    readReadingLocation: async () => (await cdp.send('Runtime.evaluate', {
+      expression:'JSON.parse(localStorage.getItem("handbook-reading-location-v1")||"null")',
+      returnByValue:true
+    })).result.value,
     readHistory: async () => (await cdp.send('Runtime.evaluate', {
       expression: '({url:location.href,historyLength:history.length})',
       returnByValue:true
@@ -64,13 +73,14 @@ try {
   });
   nodeRepl.write(report);
 } finally {
-  await tab.clipboard.write(savedClipboard);
+  if (savedClipboard.length) await tab.clipboard.write(savedClipboard);
+  else await tab.clipboard.writeText('');
   await viewport.reset();
   await tab.close();
 }
 ```
 
-Read the browser/viewport/CDP documentation first. The page-entry hook establishes
+Read the browser/viewport/CDP documentation first. Use the same displayed IAB QA tab for viewport changes and native keys; verify actual innerWidth before trusting layout results. Both local server origins require their applicable browser approval. Explicit `caseIds` can split the same suite into bounded batches; report all required groups before calling it a full pass. The page-entry hook establishes
 an independent, font-ready fixture before each case; it does not delay actions
 in the product. Active entry/interruption is tested separately. The IAB's
 read-only DOM evaluator does not expose `document.getAnimations`, so its adapter
@@ -92,10 +102,18 @@ Linux environment with Node 24, resolvable `playwright@1.64.1`, Chromium and its
 OS libraries. It was syntax-checked but **not executed**; no dependency/runtime
 was installed. No browser permissions are automatically granted.
 
-With a static server serving `web/` on port 8765:
+Start the bounded slow-registry fixture as well as the ordinary server serving
+`web/` on port 8765. It serves the actual public files and delays only registry
+responses by one second; stop it after QA. No site output is copied or changed.
 
 ```sh
-UI_BASE_URL=http://127.0.0.1:8765/ UI_REPORT=/tmp/database-notes-browser-report.json node scripts/run-browser-regressions.mjs
+python tests/slow-registry-server.py --port 8767
+```
+
+For the optional Linux runner:
+
+```sh
+UI_BASE_URL=http://127.0.0.1:8765/ UI_SLOW_REGISTRY_BASE_URL=http://127.0.0.1:8767/ UI_REPORT=/tmp/database-notes-browser-report.json node scripts/run-browser-regressions.mjs
 ```
 
 The runner writes its report and exits nonzero on failure. Point it at the
@@ -107,8 +125,13 @@ unpublished features. No CI workflow is supplied or enabled. The separate
 
 **Validate a symbol's contribution before choosing its direction.** The old checks verified that repeated entry arrows were rendered and pointed right, while never asking whether they conveyed anything the link label and context did not. Task-directory headings, subject doors and Resume already name their action/destination; these now omit the redundant mark. `entry-links-omit-redundant-arrows` checks those surfaces and exercises a real destination. Preserve useful neighbors: previous/next task arrows convey ordered progression, disclosure carets convey expansion, and teaching-diagram arrows convey relationships. A global “no arrows” rule would be another error.
 
-**Viewport actions must not become history destinations.** The old footer used a fragment link plus `history.pushState('#page-top')`; its test explicitly expected that hash. That made browser Back revisit the chapter's bottom. Back to top is now a native button, revealed only when its JavaScript action is available; activation changes scroll/focus without changing the current URL or adding history. `page-top-preserves-url-history-and-browser-back` enters a chapter from its index, reaches the footer without a fragment navigation, activates twice, checks unchanged URL/history length, then uses actual browser Back and Forward. Merely checking arrival at y=0 would miss the regression. Real chapter, Contents and citation links retain their meaningful URLs, direct links and normal history behavior.
+**Viewport actions must not become history destinations.** The old footer used a fragment link plus `history.pushState('#page-top')`; its test explicitly expected that hash. That made browser Back revisit the chapter's bottom. Back to top is now a native button, revealed only when its JavaScript action is available; activation changes scroll/focus without changing the current URL or adding history. `page-top-preserves-url-history-and-browser-back` enters a chapter from its index, reaches the footer without a fragment navigation, activates twice, checks unchanged URL/history length, then uses actual browser Back and Forward. Merely checking arrival at y=0 would miss the regression. Real page changes retain normal history. Same-document Contents, Search, citations/returns, prose anchors and Skip to content keep shareable URLs through replacement, without adding Back stops. `same-document-navigation-does-not-add-history-stops` exercises these sibling actions repeatedly at phone/wide widths, then actual Back/Forward and incoming deep-link entry. The earlier top-only test and this former sentence incorrectly treated every fragment as a meaningful history stop.
 
 These incidents are failures to enforce the existing contribution and complete-navigation contract, not evidence that every site needs more icons, another navigation layer or a broader instruction checklist. Review necessity and navigation consequences while editing; do not turn a flawed implementation into a required test expectation.
 
 **Test the route into content, not just movement after arrival.** The OS index repeats the chapter reader's Contents tree. Making that index the mandatory subject entry adds a page without a distinct decision or useful result. Database task pages contain comparison guidance, so they can remain optional references; product/chapter entry should be available directly from Home and the reader's Contents. The earlier suite started most flows inside a chapter and therefore passed the repaired rail while missing the extra Home → index → task/product → chapter friction. A full navigation regression must begin on Home, enter actual reading content with Contents available, switch subject/product without mandatory directory detours, and verify browser Back. An index is justified when it adds a real comparison or discovery task, not merely because a hierarchy has another level. The selected direct-entry treatment is covered by `home-to-reader-without-directory-gates` (four entry choices at phone/desktop widths and real Back), `reader-path-switches-keep-the-task-and-avoid-indexes`, and `database-chooser-is-an-accessible-history-neutral-disclosure`. Do not replace these journeys with assertions that a menu exists.
+
+
+**Observe transient feedback and the internal control, not only its final box.** The old Copy test verified Copied/Retry and a fixed outer size but missed immediate Copying flashes and icon/text movement. `copy-active-feedback-does-not-flash-or-shift` observes mutations and rendered frames during actual repeated writes and reset. Fast writes must not flash progress; perceptible waits and failure/retry feedback remain valid. The shared I25 animation contract already required intermediate observation; this was an enforcement gap, not permission to add a duplicate rule.
+
+**Resume must use current validated reading state at activation.** An initial link default is not a saved location. `resume-reading-keeps-database-and-section-in-both-layouts` uses a real database chapter/section, observes its saved state, then clicks Home's Resume before an intentionally delayed registry reply. It also checks restored Home at phone/wide widths. Direct incoming fragments, blocked/invalid storage and a clearly labeled starting fallback remain valid. This fixture specifically distinguishes the early-click repair from a settled-page test that passed the old implementation.

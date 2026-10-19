@@ -22,6 +22,14 @@ Redundant arrows are removed from subject doors, Resume and database task-direct
 
 All 19 executable browser groups passed, including 78 representative layout states, 20 Contents states and eight Home-to-reader entry states with real browser Back. Related-task product switches, keyboard/pointer disclosure behavior, repeated Back to top, search, diagrams and Copy were exercised. All 56 authored chapter articles, original anchors, code, citations, assets, search data and notices are preserved from 0.1.2. The static build, link/fragment checks and private-data scan passed. The optional Linux runner, other browser engines, physical input/zoom, screen readers and displayed FPS remain unverified. No dependencies, CI workflows or hosting settings were added.
 
+## 0.1.4 history, Copy and Resume corrections
+
+Same-document Contents, Search, citation/return and prose links now replace the current shareable fragment instead of adding Back stops. Actual page navigation, direct links and modified/new-tab links keep their normal behavior. Search closure no longer restores stale focus after a subsequent navigation.
+
+Copy keeps its icon and text aligned through feedback. Fast writes go directly to the result; repeated clicks retain that result, with progress shown only for perceptible waits. Resume validates an early click before navigation and refreshes on restored Home/reading-state changes, retaining the saved database and section. With no valid saved location its fallback is labeled Start reading.
+
+The 22-group browser suite includes repeated section/Search/citation navigation with actual Back/Forward, active Copy feedback observation and phone/wide Resume under delayed registry loading. All public HTML, authored articles, IDs, code, assets, search and registry data remain unchanged from 0.1.3. Browser observations and publication receipts remain outside the public output.
+
 ## Validate locally
 
 Requires Node.js 24. No npm dependencies or installation are needed.

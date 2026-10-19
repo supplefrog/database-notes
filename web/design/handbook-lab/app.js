@@ -17,6 +17,9 @@ const decodeFragment = hash => {
   try { return decodeURIComponent(hash.replace(/^#/, '')); }
   catch { return ''; }
 };
+// Position changes keep a shareable fragment without creating another Back stop.
+const samePageTarget = link => link.origin === location.origin && link.pathname === location.pathname && link.search === location.search && link.hash ? document.getElementById(decodeFragment(link.hash)) : null;
+let recordReadingLocation = () => {};
 const normalize = s => s.toLocaleLowerCase().normalize('NFKD').replace(/\p{Diacritic}/gu, '');
 const openSearch = async (trigger, pointer = false) => {
   if (!dialog || typeof dialog.showModal !== 'function' || document.querySelector('dialog[open]')) return;
@@ -49,18 +52,21 @@ document.querySelector('[data-search-close]')?.addEventListener('click', () => d
 dialog?.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); dialog.close(); } });
 dialog?.addEventListener('close', () => {
   if (dialog.open) return;
-  const destination = searchDestination || origin;
+  // Same-page results already received focus through shared navigation.
+  // A later close event must not steal it back after another accepted action.
+  const destination = searchDestination ? null : origin;
   searchDestination = null;
   origin = null;
   if (!document.querySelector('dialog[open]') && destination?.isConnected) { destination.removeAttribute('data-pointer-focus'); destination.focus({ preventScroll: true }); }
 });
-// Preserve native links/history while completing same-page search navigation.
+// Close search and restore focus to a same-page result; shared navigation below
+// owns its URL/scroll behavior. Cross-page and modified links stay native.
 results?.addEventListener('click', event => {
   const link = event.target.closest('a');
   if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   searchDestination = null;
-  if (link.origin === location.origin && link.pathname === location.pathname && link.hash) {
-    const target = document.getElementById(decodeFragment(link.hash));
+  if (samePageTarget(link)) {
+    const target = samePageTarget(link);
     if (target) {
       if (!target.hasAttribute('tabindex')) target.tabIndex = -1;
       searchDestination = target;
@@ -106,41 +112,62 @@ async function loadRegistry() {
   try { const response = await fetch(`${root}registry.json`); return response.ok ? await response.json() : null; }
   catch { return null; }
 }
-loadRegistry().then(registry => {
-  if (!registry) return;
-  const resume = document.querySelector('[data-resume]');
-  if (resume) {
-    try {
-      const value = JSON.parse(localStorage.getItem(key) || 'null');
-      if (value && validId(value.chapter) && Object.hasOwn(registry,value.chapter) && (!value.heading || registry[value.chapter].includes(value.heading))) {
-        resume.href = `${root}chapters/${value.chapter}.html${value.heading ? `#${encodeURIComponent(value.heading)}` : ''}`;
-      }
-    } catch { /* Blocked or invalid storage leaves the real fallback link. */ }
-  }
-  if (!chapter || !Object.hasOwn(registry,chapter)) return;
-  const record = () => {
+const resume = document.querySelector('[data-resume]');
+const resumeFallback = resume?.getAttribute('href');
+let readingRegistry;
+const refreshResume = () => {
+  if (!resume || readingRegistry === undefined) return;
+  let destination = resumeFallback;
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || 'null');
+    if (readingRegistry && value && validId(value.chapter) && Object.hasOwn(readingRegistry,value.chapter) && (!value.heading || readingRegistry[value.chapter].includes(value.heading))) {
+      destination = `${root}chapters/${value.chapter}.html${value.heading ? `#${encodeURIComponent(value.heading)}` : ''}`;
+    }
+  } catch { /* Blocked or invalid storage leaves a real starting link. */ }
+  resume.href = destination;
+  resume.textContent = destination === resumeFallback ? 'Start reading' : 'Resume reading';
+};
+const registryReady = loadRegistry().then(registry => {
+  readingRegistry = registry;
+  refreshResume();
+  if (!registry || !chapter || !Object.hasOwn(registry,chapter)) return;
+  recordReadingLocation = () => {
     const heading = decodeFragment(location.hash);
     const value = { chapter };
     if (heading && registry[chapter].includes(heading)) value.heading = heading;
     try { localStorage.setItem(key,JSON.stringify(value)); } catch { /* Reading never depends on storage. */ }
   };
-  record();
-  window.addEventListener('hashchange',record);
+  recordReadingLocation();
+  window.addEventListener('hashchange',recordReadingLocation);
+});
+// A restored Home or another tab's reading change must not retain an old route.
+window.addEventListener('pageshow',refreshResume);
+window.addEventListener('focus',refreshResume);
+window.addEventListener('storage',event => { if (event.key === key || event.key === null) refreshResume(); });
+resume?.addEventListener('click', async event => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (readingRegistry !== undefined) { refreshResume(); return; }
+  // An early click must wait for validation rather than follow the OS fallback.
+  event.preventDefault();
+  await registryReady;
+  refreshResume();
+  location.assign(resume.href);
 });
 
-// Exported citation and return links point to real IDs. Focus before moving the
-// hash, then let the browser perform ordinary anchor/history navigation.
-document.querySelectorAll('a.citation-ref,a.figure-source-ref,a.citation-return').forEach(link => {
-  link.addEventListener('click', event => {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    const target = document.getElementById(decodeFragment(link.hash));
-    if (!target) return;
-    event.preventDefault();
-    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex','-1');
-    target.focus({ preventScroll:true });
-    if (location.hash !== link.hash) location.hash = link.hash;
-    target.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'instant' : 'smooth'});
-  });
+// Apply one rule to Contents, search, citations, prose anchors and Skip to content.
+// Real hrefs preserve no-JS reading, copied deep links and modified/new-tab clicks.
+document.addEventListener('click', event => {
+  const link = event.target.closest('a');
+  if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.hasAttribute('download') || (link.target && link.target !== '_self')) return;
+  const target = samePageTarget(link);
+  if (!target) return;
+  event.preventDefault();
+  if (location.href !== link.href) history.replaceState(history.state,'',link.href);
+  if (!target.hasAttribute('tabindex')) target.tabIndex = -1;
+  target.removeAttribute('data-pointer-focus');
+  target.focus({preventScroll:true});
+  target.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'instant' : 'smooth'});
+  recordReadingLocation();
 });
 // Returning to the top is a viewport action, not a document/history destination.
 const pageTopAction = document.querySelector('[data-page-top]');
@@ -216,16 +243,6 @@ contents?.addEventListener('click', event => {
   const link = event.target.closest('a');
   if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   if (!wideReader.matches) contents.open = false;
-  if (link.pathname === location.pathname && link.hash) {
-    const target = document.getElementById(decodeFragment(link.hash));
-    if (target) {
-      if (!target.hasAttribute('tabindex')) target.tabIndex = -1;
-      event.preventDefault();
-      target.focus({preventScroll:true});
-      if (location.hash !== link.hash) location.hash = link.hash;
-      target.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'instant' : 'smooth'});
-    }
-  }
 });
 document.addEventListener('click', event => {
   if (contents && !wideReader.matches && !contents.contains(event.target)) contents.open = false;
@@ -242,7 +259,7 @@ for (const pre of document.querySelectorAll('.prose pre')) {
   button.innerHTML = '<svg class="copy-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg><svg class="copy-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><svg class="copy-error" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 4h.01"/></svg><span class="copy-label">Copy</span>';
   const label = button.querySelector('.copy-label');
   function showCopyState(state) {
-    label.textContent = state === 'pending' ? 'Copying…' : state === 'success' ? 'Copied' : state === 'error' ? 'Retry' : 'Copy';
+    label.textContent = state === 'pending' ? 'Copying' : state === 'success' ? 'Copied' : state === 'error' ? 'Retry' : 'Copy';
     status.textContent = state === 'pending' ? 'Copying code' : state === 'success' ? 'Copied' : state === 'error' ? 'Could not copy' : '';
     button.setAttribute('aria-label',state === 'error' ? 'Retry copying this code' : 'Copy this code');
     button.title = state === 'error' ? 'Could not copy — try again' : 'Copy code';
@@ -252,16 +269,19 @@ for (const pre of document.querySelectorAll('.prose pre')) {
   let resetCopy, copyAttempt = 0;
   button.addEventListener('click',async () => {
     const attempt = ++copyAttempt;
-    clearTimeout(resetCopy); showCopyState('pending');
+    clearTimeout(resetCopy);
+    // Fast writes go straight to their result; repeated clicks keep that result
+    // visible. Show progress only when there is actually time to perceive it.
+    const pending = setTimeout(() => { if (attempt === copyAttempt) showCopyState('pending'); },150);
     try {
       await navigator.clipboard.writeText(text);
       if (attempt !== copyAttempt) return;
-      showCopyState('success');
+      if (button.dataset.copyState !== 'success') showCopyState('success');
     } catch {
       if (attempt !== copyAttempt) return;
-      showCopyState('error');
-    }
-    resetCopy = setTimeout(() => showCopyState(null),2000);
+      if (button.dataset.copyState !== 'error') showCopyState('error');
+    } finally { clearTimeout(pending); }
+    if (attempt === copyAttempt) resetCopy = setTimeout(() => showCopyState(null),2000);
   });
   pre.before(block); block.append(pre,status,button);
 }

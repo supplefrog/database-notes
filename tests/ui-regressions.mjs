@@ -50,13 +50,36 @@ export function layoutProblems(m) {
   }
   return problems;
 }
-export async function runUiRegressions({page,setViewport,pressKey,readHistory=()=>page.evaluate(()=>({url:location.href,historyLength:history.length})),waitForPageEntry=async()=>{},baseURL,settle=async()=>{},onResult=()=>{}}) {
+// Observe the active feedback window, not only its settled labels/outer box.
+export function observeCopyFeedback() {
+  return new Promise(resolve => {
+    const button=document.querySelector('.copy-button'),start=performance.now(),changes=[],clicks=[],frames=[];
+    const read=()=>{
+      const box=button.getBoundingClientRect(),label=button.querySelector('.copy-label'),visible=[...button.querySelectorAll('svg')].filter(e=>getComputedStyle(e).display!=='none');
+      const icon=visible[0]?.getBoundingClientRect();
+      return {ms:performance.now()-start,state:button.dataset.copyState||null,label:label.textContent,labelX:label.getBoundingClientRect().left-box.left,iconX:icon?icon.left-box.left:null,icons:visible.length,width:box.width,height:box.height};
+    };
+    const click=()=>clicks.push(read());
+    button.addEventListener('click',click,{capture:true});
+    const observer=new MutationObserver(()=>changes.push(read()));
+    observer.observe(button,{attributes:true,childList:true,subtree:true});
+    const step=()=>{
+      frames.push(read());
+      if(performance.now()-start<2700)requestAnimationFrame(step);
+      else {
+        observer.disconnect();button.removeEventListener('click',click,{capture:true});
+        resolve({clicks,changes,frameCount:frames.length,frames:frames.filter((r,i)=>!i||r.label!==frames[i-1].label||r.state!==frames[i-1].state||r.labelX!==frames[i-1].labelX||r.iconX!==frames[i-1].iconX)});
+      }
+    };requestAnimationFrame(step);
+  });
+}
+export async function runUiRegressions({page,setViewport,pressKey,caseIds,slowRegistryBaseURL,readReadingLocation=()=>page.evaluate(()=>JSON.parse(localStorage.getItem("handbook-reading-location-v1")||"null")),startCopyObservation=()=>page.evaluate(observeCopyFeedback),readHistory=()=>page.evaluate(()=>({url:location.href,historyLength:history.length})),waitForPageEntry=async()=>{},baseURL,settle=async()=>{},onResult=()=>{}}) {
   const results=[],layouts=[];
   const require=(ok,text)=>{if(!ok)throw Error(text)};
   const ready=async()=>{await settle();};
   const go=async path=>{await page.goto(new URL('design/handbook-lab/'+path,baseURL).href);await waitForPageEntry();await ready();};
   const until=async(read,accept,label)=>{let value;for(let n=0;n<50;n++){value=await read();if(accept(value))return value;await new Promise(r=>setTimeout(r,40));}throw Error(label+': '+JSON.stringify(value));};
-  const test=async(id,fn)=>{let row;try{row={id,status:'pass',observed:await fn()}}catch(e){row={id,status:'fail',finding:e.message}}results.push(row);await onResult(row);};
+  const test=async(id,fn)=>{if(caseIds&&!caseIds.includes(id))return;let row;try{row={id,status:'pass',observed:await fn()}}catch(e){row={id,status:'fail',finding:e.message}}results.push(row);await onResult(row);};
   await test('responsive-clearance-header-and-rendered-marks',async()=>{
     for(const path of ['index.html','operating-systems.html','databases.html','tasks/use.html','chapters/os-processes.html','chapters/mysql-installation.html']){
       await go(path);
@@ -82,6 +105,7 @@ export async function runUiRegressions({page,setViewport,pressKey,readHistory=()
     await go('chapters/os-processes.html');
     await page.getByRole('button',{name:'Search the handbook',exact:true}).press('Enter');await ready();
     await until(()=>page.evaluate(()=>({open:document.querySelector('.search-dialog').open,focus:document.activeElement.id})),m=>m.open&&m.focus==='handbook-query','search frame did not open at input');
+    await waitForPageEntry();
     const measure=()=>page.evaluate(()=>{
       const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}};
       const results=document.querySelector('.search-results');
@@ -119,8 +143,8 @@ export async function runUiRegressions({page,setViewport,pressKey,readHistory=()
     return until(()=>page.evaluate(()=>({open:document.querySelector('.contents-menu').open,focus:document.activeElement.id,hash:location.hash})),m=>!m.open&&m.focus==='os-processes--process-control-block-data-structure'&&m.hash==='#'+m.focus,'contents choice did not complete');
   });
   await test('diagram-scroll-fit-and-escape',async()=>{
-    await go('chapters/postgresql-joins.html');
-    await page.getByRole('button',{name:'Enlarge diagram',exact:true}).first().press('Enter');await ready();
+    await setViewport({width:390,height:844});await go('chapters/postgresql-joins.html');
+    await page.getByRole('button',{name:'Enlarge diagram',exact:true}).first().press('Enter');await ready();await waitForPageEntry();
     const measure=()=>page.evaluate(()=>{
       const d=document.querySelector('.figure-dialog'),c=d.querySelector('.figure-canvas'),b=d.querySelector('[data-figure-close]'),r=b.getBoundingClientRect();
       return {open:d.open,close:{x:r.x,y:r.y,width:r.width,height:r.height},scrollLeft:c.scrollLeft,scrollRange:c.scrollWidth-c.clientWidth,fitted:c.classList.contains('fit-width'),y:scrollY,rootOverflow:getComputedStyle(document.documentElement).overflow};
@@ -130,7 +154,8 @@ export async function runUiRegressions({page,setViewport,pressKey,readHistory=()
     let lastY=null,stable=0;
     const initial=await until(measure,m=>{stable=lastY!==null&&Math.abs(m.y-lastY)<=.5?stable+1:0;lastY=m.y;return stable>=3},'diagram launch did not settle');
     require(initial.open&&initial.scrollRange>0,'diagram not open with local scrolling');
-    await page.locator('.figure-canvas').press('ArrowRight');await ready();
+    await page.locator('.figure-canvas').press('Shift');
+    await pressKey('ArrowRight');await ready();
     const scrolled=await until(measure,m=>m.scrollLeft>0,'diagram canvas did not scroll');
     await page.getByRole('button',{name:'Fit to width',exact:true}).click();await ready();
     const fitted=await until(measure,m=>m.fitted&&m.scrollRange<=1,'diagram did not fit');
@@ -236,6 +261,63 @@ export async function runUiRegressions({page,setViewport,pressKey,readHistory=()
     const forward=await until(()=>page.evaluate(()=>({url:location.href,y:scrollY})),m=>m.url===before.url&&m.y>=0&&m.y<=2,'Forward did not return to the chapter at its last position');
     return {before,activations,back,forward};
   });
+  await test('same-document-navigation-does-not-add-history-stops',async()=>{
+    const observations=[];
+    for(const width of [390,1440]){
+      await setViewport({width,height:900});await go('index.html');
+      const home=await page.evaluate(()=>location.href);
+      await page.locator('.subject-doors>a').press('Enter');await waitForPageEntry();await ready();
+      const before=await readHistory();
+      const record=async id=>{
+        const reached=await until(()=>page.evaluate(()=>({hash:location.hash,focus:document.activeElement.id})),m=>m.hash==='#'+id&&m.focus===id,'section URL/focus incomplete');
+        const history=await readHistory();require(history.historyLength===before.historyLength,'same-document navigation added a Back stop');return {...reached,historyLength:history.historyLength};
+      };
+      const links=await page.evaluate(()=>[...document.querySelectorAll('.chapter-sections a')].slice(0,2).map(a=>a.getAttribute('href')));
+      const actions=[];
+      for(const hash of [links[0],links[1],links[1]]){
+        if(width<1101){await page.locator('.contents-menu>summary').press('Enter');await ready();}
+        await page.locator('.contents-menu a[href="'+hash+'"]').press('Enter');await ready();actions.push(await record(hash.slice(1)));
+      }
+      await page.getByRole('button',{name:'Search the handbook',exact:true}).press('Enter');await ready();
+      await page.getByRole('searchbox').fill('process');await ready();
+      await page.locator('.search-results').getByRole('link',{name:/^Process control block/}).press('Enter');await ready();
+      actions.push(await record('os-processes--process-control-block-data-structure'));
+      const citation=await page.evaluate(()=>{const a=document.querySelector('a.citation-ref');return {id:a.id,hash:a.hash}});
+      await page.locator('a.citation-ref').first().press('Enter');await ready();actions.push(await record(citation.hash.slice(1)));
+      await page.locator('a.citation-return[href="#'+citation.id+'"]').press('Enter');await ready();actions.push(await record(citation.id));
+      await page.getByRole('link',{name:'Skip to content',exact:true}).press('Enter');await ready();actions.push(await record('main-content'));
+      await page.goBack();await waitForPageEntry();await ready();require(await page.evaluate(()=>location.href)===home,'Back stopped at a section instead of the previous page');
+      await page.goForward();await waitForPageEntry();await ready();require(await page.evaluate(()=>location.hash)==='#main-content','Forward lost the latest shareable fragment');
+      observations.push({width,before,actions,back:home});
+    }
+    // A real incoming deep link must still win over any stored reading location.
+    await go('chapters/os-processes.html#os-processes--process-control-block-data-structure');
+    require(await page.evaluate(()=>location.hash)==='#os-processes--process-control-block-data-structure','direct fragment entry lost');
+    return observations;
+  });
+  await test('resume-reading-keeps-database-and-section-in-both-layouts',async()=>{
+    require(slowRegistryBaseURL,'slow-registry fixture required for the early-click regression');
+    const observations=[];
+    for(const width of [390,1440]){
+      await setViewport({width,height:900});
+      const chapterURL=new URL('design/handbook-lab/chapters/mysql-overview.html',slowRegistryBaseURL).href;
+      const homeURL=new URL('design/handbook-lab/index.html',slowRegistryBaseURL).href;
+      await page.goto(chapterURL);await waitForPageEntry();await ready();
+      if(width<1101){await page.locator('.contents-menu>summary').press('Enter');await ready();}
+      await page.locator('.chapter-sections a').first().press('Enter');await ready();
+      const target=await page.evaluate(()=>location.href);
+      // Observe saved application state, rather than guessing registry timing.
+      await until(readReadingLocation,value=>value?.chapter==='mysql-overview'&&value.heading===new URL(target).hash.slice(1),'reading location was not recorded');
+      await page.goto(homeURL);await waitForPageEntry();await ready();
+      await until(()=>page.locator('[data-resume]').getAttribute('href'),href=>new URL(href,homeURL).href===target,'Home did not expose the saved reading location');
+      // Reload Home and click before its intentionally delayed registry responds.
+      await page.goto(homeURL);await page.locator('[data-resume]').press('Enter');await waitForPageEntry();await ready();
+      await until(()=>page.evaluate(()=>location.href),url=>url===target,'early Resume click followed OS fallback');
+      await page.goBack();await waitForPageEntry();await ready();
+      const restored=await until(()=>page.locator('[data-resume]').getAttribute('href'),href=>new URL(href,homeURL).href===target,'restored Home retained a stale Resume route');
+      observations.push({width,target,restored});
+    }return observations;
+  });
   await test('home-to-reader-without-directory-gates',async()=>{
     const observations=[];
     for(const width of [390,1440]){
@@ -309,7 +391,7 @@ export async function runUiRegressions({page,setViewport,pressKey,readHistory=()
     return {pointer,keyboard};
   });
   await test('copy-feedback-is-stable-repeatable-and-resets',async()=>{
-    await go('chapters/mysql-installation.html');
+    await setViewport({width:390,height:844});await go('chapters/mysql-installation.html');
     const button=page.locator('.copy-button').first();
     const read=()=>page.evaluate(()=>{const e=document.querySelector('.copy-button'),r=e.getBoundingClientRect();return {label:e.textContent,name:e.getAttribute('aria-label'),status:e.parentElement.querySelector('[role="status"]').textContent,state:e.dataset.copyState||null,width:r.width,height:r.height,outline:getComputedStyle(e).outlineStyle}});
     const initial=await read();require(initial.label==='Copy'&&initial.name==='Copy this code'&&initial.height>=44,'Copy label or target size');await button.press('Enter');await ready();
@@ -336,6 +418,25 @@ export async function runUiRegressions({page,setViewport,pressKey,readHistory=()
     for(const part of ['x','y','width','height'])require(Math.abs(scrollEnd.button[part]-scrollStart.button[part])<=1,'Copy moved with horizontal code scroll');
     require(scrollEnd.pageWidth<=scrollEnd.viewportWidth,'wide code caused document overflow');
     return {initial,keyboard,feedback,repeated,reset,scrollStart,scrollEnd};
+  });
+  await test('copy-active-feedback-does-not-flash-or-shift',async()=>{
+    await setViewport({width:1100,height:850});await go('chapters/mysql-installation.html');
+    const button=page.locator('.copy-button').first();
+    await button.press('Shift');await ready();
+    const pending=startCopyObservation();
+    await button.click();await ready();
+    await until(()=>page.evaluate(()=>document.querySelector('.copy-button').dataset.copyState),state=>state==='success'||state==='error','copy result absent');
+    await button.click();await ready();
+    const trace=await pending;
+    require(trace.frameCount>2&&trace.clicks.length===2,'active Copy window was not observed');
+    for(const row of [...trace.changes,...trace.frames]){
+      const click=trace.clicks.filter(c=>c.ms<=row.ms).at(-1);
+      if(row.state==='pending')require(click&&row.ms-click.ms>=120,'fast clipboard write flashed a pending label');
+      require(row.icons===1&&!!row.label,'Copy feedback briefly disappeared or doubled');
+      require(Math.abs(row.labelX-trace.frames[0].labelX)<=1&&Math.abs(row.iconX-trace.frames[0].iconX)<=1,'Copy label/icon shifted during feedback');
+    }
+    require(trace.frames.at(-1).label==='Copy'&&trace.frames.at(-1).state===null,'Copy did not settle back to its idle state');
+    return trace;
   });
   await test('modal-interrupts-travel-and-preserves-reading-position',async()=>{
     require(typeof pressKey==='function','native page-key adapter required for interruption check');
