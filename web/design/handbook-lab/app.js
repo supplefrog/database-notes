@@ -142,15 +142,32 @@ document.querySelectorAll('a.citation-ref,a.figure-source-ref,a.citation-return'
     target.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'instant' : 'smooth'});
   });
 });
-// Keep the footer's current-page return explicit, including repeated activation.
-document.querySelector('.site-footer a[href="#page-top"]')?.addEventListener('click', event => {
-  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  const target = document.getElementById('page-top');
-  if (!target) return;
-  event.preventDefault();
-  target.focus({preventScroll:true});
-  if (location.hash !== '#page-top') history.pushState(null,'','#page-top');
-  window.scrollTo({top:0,left:0,behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'instant' : 'smooth'});
+// Returning to the top is a viewport action, not a document/history destination.
+const pageTopAction = document.querySelector('[data-page-top]');
+if (pageTopAction) {
+  pageTopAction.hidden = false;
+  pageTopAction.addEventListener('click', () => {
+    const target = document.getElementById('page-top');
+    if (!target) return;
+    target.focus({preventScroll:true});
+    window.scrollTo({top:0,left:0,behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'instant' : 'smooth'});
+  });
+}
+// The database chooser opens routes directly; its disclosure is not history.
+for (const menu of document.querySelectorAll('.subject-path-menu')) {
+  const summary = menu.querySelector('summary');
+  summary.addEventListener('pointerdown', () => summary.setAttribute('data-pointer-focus',''));
+  menu.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && menu.open) {
+      event.preventDefault(); menu.open = false;
+      summary.removeAttribute('data-pointer-focus'); summary.focus();
+    }
+  });
+}
+document.addEventListener('click', event => {
+  for (const menu of document.querySelectorAll('.subject-path-menu[open]')) {
+    if (!menu.contains(event.target)) menu.open = false;
+  }
 });
 // One native contents tree serves both the wide rail and narrow overlay.
 const contents = document.querySelector('.reader-controls > .contents-menu');

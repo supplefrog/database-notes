@@ -19,7 +19,8 @@ export function measureLayout() {
   const visible=e=>!!e&&e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0;
   return {width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth,
     brand:rect('.brand'),nav:rect('.site-header nav'),search:rect('.search-open'),header:rect('.site-header'),
-    navLines:Array.from(document.querySelectorAll('.site-header nav a')).map(e=>({height:e.getBoundingClientRect().height,lineHeight:getComputedStyle(e).lineHeight})),
+    navLines:Array.from(document.querySelectorAll('.site-header nav>a')).map(e=>({height:e.getBoundingClientRect().height,lineHeight:getComputedStyle(e).lineHeight})),
+    subjectLabelFonts:Array.from(document.querySelectorAll('.site-header nav>a,.subject-path-menu>summary')).map(e=>getComputedStyle(e).fontSize),
     readerControls:Array.from(document.querySelectorAll('.reader-controls > a,.reader-controls > details > summary')).filter(visible).map(e=>({tag:e.tagName,top:e.getBoundingClientRect().top,height:e.getBoundingClientRect().height})),
     hero,art:rect('.hero-art'),action:rect('.resume'),doors:rect('.subject-doors'),indexArt:rect('.index-art'),taskList:rect('.task-list'),marks};
 }
@@ -33,6 +34,7 @@ export function layoutProblems(m) {
     need(Math.abs(m.search.x-m.nav.x)<=1&&Math.abs(m.search.right-(m.header.right-m.nav.x))<=1,'isolated search row width');
   }
   need(m.navLines.every(l=>l.height<=Number.parseFloat(l.lineHeight)+1),'wrapped subject name');
+  need(new Set(m.subjectLabelFonts).size<=1,'subject label type mismatch');
   if(m.width<=680){const menus=m.readerControls.filter(e=>e.tag==='SUMMARY');if(menus.length>1)need(Math.max(...menus.map(e=>e.height))-Math.min(...menus.map(e=>e.height))<=1,'reader menu height mismatch');}
   if(m.art){
     need(!overlap(m.art,m.action),'art/action overlap');
@@ -48,7 +50,7 @@ export function layoutProblems(m) {
   }
   return problems;
 }
-export async function runUiRegressions({page,setViewport,pressKey,waitForPageEntry=async()=>{},baseURL,settle=async()=>{},onResult=()=>{}}) {
+export async function runUiRegressions({page,setViewport,pressKey,readHistory=()=>page.evaluate(()=>({url:location.href,historyLength:history.length})),waitForPageEntry=async()=>{},baseURL,settle=async()=>{},onResult=()=>{}}) {
   const results=[],layouts=[];
   const require=(ok,text)=>{if(!ok)throw Error(text)};
   const ready=async()=>{await settle();};
@@ -186,17 +188,105 @@ export async function runUiRegressions({page,setViewport,pressKey,waitForPageEnt
     await page.getByRole('link',{name:'Memory and virtual memory',exact:true}).press('Enter');await ready();
     return until(()=>page.evaluate(()=>({chapter:document.body.dataset.chapter,current:document.querySelector('.contents-menu [aria-current="page"]').getAttribute('href'),open:document.querySelector('.contents-menu').open})),m=>m.chapter==='os-memory'&&m.current==='os-memory.html'&&!m.open,'chapter choice/current indication incomplete');
   });
-  await test('continuation-before-sources-and-real-page-top',async()=>{
+  await test('continuation-before-sources-and-top-action',async()=>{
     const observations=[];
     for(const path of ['chapters/os-processes.html','chapters/mysql-installation.html','chapters/mongodb-upgrades.html']){
       await go(path);
-      const m=await page.evaluate(()=>{const s=Array.from(document.querySelectorAll('.prose h2,.prose h3')).find(e=>e.textContent.trim()==='Sources'),n=document.querySelector('nav.adjacent'),a=document.querySelector('.site-footer a');return {sources:!!s,gap:s&&n?s.getBoundingClientRect().top-n.getBoundingClientRect().bottom:null,next:!!n?.querySelector('a[rel="next"]'),footerText:a.textContent.trim(),footerHref:a.getAttribute('href'),topTarget:!!document.getElementById('page-top'),internalDiagonal:Array.from(document.querySelectorAll('svg.nav-icon')).some(e=>e.querySelector('path')?.getAttribute('d')==='M3 13 13 3M4 3h9v9'&&e.closest('a')?.origin===location.origin)}});
-      require(m.sources&&m.gap>=0&&m.next,'continuation follows Sources');require(m.footerText==='Back to top'&&m.footerHref==='#page-top'&&m.topTarget&&!m.internalDiagonal,'misleading navigation action');observations.push({path,...m});
+      const m=await page.evaluate(()=>{const s=Array.from(document.querySelectorAll('.prose h2,.prose h3')).find(e=>e.textContent.trim()==='Sources'),n=document.querySelector('nav.adjacent'),a=document.querySelector('.site-footer button');return {sources:!!s,gap:s&&n?s.getBoundingClientRect().top-n.getBoundingClientRect().bottom:null,next:!!n?.querySelector('a[rel="next"]'),footerText:a.textContent.trim(),footerHref:a.getAttribute('href'),footerType:a.type,topTarget:!!document.getElementById('page-top'),internalDiagonal:Array.from(document.querySelectorAll('svg.nav-icon')).some(e=>e.querySelector('path')?.getAttribute('d')==='M3 13 13 3M4 3h9v9'&&e.closest('a')?.origin===location.origin)}});
+      require(m.sources&&m.gap>=0&&m.next,'continuation follows Sources');require(m.footerText==='Back to top'&&m.footerHref===null&&m.footerType==='button'&&m.topTarget&&!m.internalDiagonal,'misleading navigation action');observations.push({path,...m});
     }
-    await page.getByRole('link',{name:'Back to top',exact:true}).press('Enter');await ready();
-    // Allow two CSS pixels for native smooth-scroll settlement rounding.
-    const returned=await until(()=>page.evaluate(()=>({y:scrollY,hash:location.hash,focus:document.activeElement.id})),m=>m.y>=0&&m.y<=2&&m.hash==='#page-top'&&m.focus==='page-top','Back to top did not return position and focus');
-    return {observations,returned};
+    return {observations};
+  });
+  await test('entry-links-omit-redundant-arrows',async()=>{
+    const observations=[];
+    for(const [path,selector,count] of [['databases.html','.task-list h2 a',8],['index.html','.resume,.subject-doors a',5]]){
+      await go(path);
+      const links=await page.evaluate(selector=>Array.from(document.querySelectorAll(selector)).map(e=>({text:e.textContent.trim(),href:e.getAttribute('href'),icons:e.querySelectorAll('svg').length,before:getComputedStyle(e,'::before').content,after:getComputedStyle(e,'::after').content})),selector);
+      require(links.length===count&&links.every(e=>e.href&&e.text&&e.icons===0&&!/[→↗]/.test(e.text)&&['none','normal','""'].includes(e.before)&&['none','normal','""'].includes(e.after)),'unnecessary directional marks returned on entry links');
+      observations.push({path,links});
+    }
+    await go('databases.html');
+    await page.getByRole('link',{name:'Understand the moving parts',exact:true}).press('Enter');await waitForPageEntry();await ready();
+    const next=await page.evaluate(()=>{const a=document.querySelector('.task-adjacent a[rel="next"]');return {path:location.pathname,label:a?.getAttribute('aria-label'),href:a?.getAttribute('href')}});
+    require(next.path.endsWith('/tasks/understand.html')&&next.href==='store.html'&&next.label?.startsWith('Next task:'),'entry link or meaningful task progression was lost');
+    return {observations,next};
+  });
+  await test('page-top-preserves-url-history-and-browser-back',async()=>{
+    require(typeof page.goBack==='function'&&typeof page.goForward==='function','browser Back/Forward adapter required');
+    await setViewport({width:390,height:844});await go('operating-systems.html');
+    const previous=await page.evaluate(()=>location.href);
+    await page.getByRole('link',{name:'Processes and scheduling',exact:true}).press('Enter');await waitForPageEntry();await ready();
+    const top=page.getByRole('button',{name:'Back to top',exact:true});
+    const bottom=async()=>{
+      await top.press('Shift');await ready();let last=null,stable=0;
+      return until(()=>page.evaluate(()=>{const r=document.querySelector('[data-page-top]').getBoundingClientRect();return {y:scrollY,buttonTop:r.top,buttonBottom:r.bottom,viewport:innerHeight}}),m=>{stable=last===m.y?stable+1:0;last=m.y;return stable>=3&&m.y>1000&&m.buttonTop>=0&&m.buttonBottom<=m.viewport},'footer did not reach its actual use position');
+    };
+    await bottom();
+    const before=await readHistory();
+    const activations=[];
+    for(let n=0;n<2;n++){
+      if(n)await bottom();
+      await top.press('Enter');await ready();
+      const reached=await until(()=>page.evaluate(()=>({y:scrollY,focus:document.activeElement.id,url:location.href})),m=>m.y>=0&&m.y<=2&&m.focus==='page-top','Back to top did not move position and focus');
+      const after=await readHistory();require(reached.url===before.url&&after.url===before.url&&after.historyLength===before.historyLength,'viewport action changed URL or added browser history');activations.push({...reached,historyLength:after.historyLength});
+    }
+    await page.goBack();await waitForPageEntry();await ready();
+    const back=await until(()=>page.evaluate(()=>location.href),url=>url===previous,'Back returned to an artificial bottom-of-page history stop');
+    await page.goForward();await waitForPageEntry();await ready();
+    const forward=await until(()=>page.evaluate(()=>({url:location.href,y:scrollY})),m=>m.url===before.url&&m.y>=0&&m.y<=2,'Forward did not return to the chapter at its last position');
+    return {before,activations,back,forward};
+  });
+  await test('home-to-reader-without-directory-gates',async()=>{
+    const observations=[];
+    for(const width of [390,1440]){
+      await setViewport({width,height:900});
+      for(const [name,chapter] of [['Operating systems','os-processes'],['MySQL','mysql-overview'],['PostgreSQL','postgresql-foundations'],['MongoDB','mongodb-architecture']]){
+        await go('index.html');const home=await page.evaluate(()=>location.href);
+        if(name==='Operating systems')await page.locator('.subject-doors>a').press('Enter');
+        else await page.locator('.product-entries').getByRole('link',{name,exact:true}).press('Enter');
+        await waitForPageEntry();await ready();
+        const reached=await page.evaluate(()=>{const c=document.querySelector('.contents-menu'),r=c.querySelector('summary').getBoundingClientRect();return {chapter:document.body.dataset.chapter,articleLength:document.querySelector('.prose')?.textContent.length,contentsCount:document.querySelectorAll('.contents-menu').length,wide:innerWidth>1100,contentsOpen:c.open,triggerVisible:r.width>0&&r.height>0,url:location.href,overflow:document.documentElement.scrollWidth>innerWidth}});
+        require(reached.chapter===chapter&&reached.articleLength>100&&reached.contentsCount===1&&!reached.overflow,'Home entry stopped before actual readable content');
+        require(reached.wide?reached.contentsOpen&&!reached.triggerVisible:!reached.contentsOpen&&reached.triggerVisible,'Contents unavailable after direct entry');
+        await page.goBack();await waitForPageEntry();await ready();
+        require(await page.evaluate(()=>location.href)===home,'Back added an intermediate directory stop');
+        observations.push({width,name,reached});
+      }
+    }return observations;
+  });
+  await test('reader-path-switches-keep-the-task-and-avoid-indexes',async()=>{
+    await setViewport({width:390,height:844});await go('chapters/mysql-installation.html');
+    const observations=[];
+    for(const [product,chapter] of [['PostgreSQL','postgresql-install-instances'],['MongoDB','mongodb-installation']]){
+      await page.locator('.contents-menu>summary').press('Enter');await ready();
+      await page.locator('.contents-product-links').getByRole('link',{name:product,exact:true}).press('Enter');await waitForPageEntry();await ready();
+      const reached=await page.evaluate(()=>({chapter:document.body.dataset.chapter,product:document.querySelector('.contents-product-links strong')?.textContent,task:document.querySelector('.current-chapter').closest('.contents-group').querySelector('summary').textContent,url:location.href}));
+      require(reached.chapter===chapter&&reached.product===product&&reached.task==='Get a server running','product switch lost the related task or stopped at a directory');observations.push(reached);
+    }
+    await page.locator('.contents-menu>summary').press('Enter');await ready();
+    await page.locator('.contents-paths>.os-entry').press('Enter');await waitForPageEntry();await ready();
+    require(await page.evaluate(()=>document.body.dataset.chapter)==='os-processes','subject switch did not reach OS content');
+    await page.goBack();await waitForPageEntry();await ready();
+    require(await page.evaluate(()=>document.body.dataset.chapter)==='mongodb-installation','subject switch added a directory history stop');
+    return observations;
+  });
+  await test('database-chooser-is-an-accessible-history-neutral-disclosure',async()=>{
+    await go('chapters/os-processes.html');
+    const summary=page.locator('.subject-path-menu>summary');
+    const read=()=>page.evaluate(()=>{const d=document.querySelector('.subject-path-menu'),s=d.querySelector('summary'),h=document.querySelector('.site-header').getBoundingClientRect(),p=d.querySelector('.subject-path-options').getBoundingClientRect();return {open:d.open,focused:document.activeElement===s,outline:getComputedStyle(s).outlineStyle,pointer:s.hasAttribute('data-pointer-focus'),header:{x:h.x,y:h.y,width:h.width,height:h.height},panel:{x:p.x,right:p.right},viewport:innerWidth,options:d.querySelectorAll('a').length}});
+    const before=await read(),historyBefore=await readHistory();
+    await summary.press('Enter');await ready();const opened=await until(read,m=>m.open,'database chooser did not open');
+    require(opened.options===3&&opened.panel.x>=0&&opened.panel.right<=opened.viewport,'database choices exceed viewport');
+    for(const part of ['x','y','width','height'])require(Math.abs(opened.header[part]-before.header[part])<=1,'opening database choices moved header controls');
+    await summary.press('Escape');await ready();const escaped=await read();
+    require(!escaped.open&&escaped.focused&&escaped.outline!=='none','database chooser Escape lost visible focus');
+    await summary.click();await ready();const pointer=await read();require(pointer.open&&pointer.pointer&&pointer.outline==='none','pointer chooser retained keyboard outline');
+    await page.getByRole('heading',{name:'Processes and scheduling',exact:true}).click();await ready();require(!(await read()).open,'outside activation left database chooser open');
+    const historyAfter=await readHistory();require(historyAfter.url===historyBefore.url&&historyAfter.historyLength===historyBefore.historyLength,'opening a chooser changed navigation history');
+    await summary.press('Enter');await ready();
+    await page.locator('.subject-path-options').getByRole('link',{name:'PostgreSQL',exact:true}).press('Enter');await waitForPageEntry();await ready();
+    require(await page.evaluate(()=>document.body.dataset.chapter)==='postgresql-foundations','header database choice did not reach content');
+    return {before,opened,escaped,pointer,historyBefore,historyAfter};
   });
   await test('task-comparison-preserves-product-route',async()=>{
     await setViewport({width:390,height:844});await go('chapters/mysql-installation.html');
@@ -204,7 +294,7 @@ export async function runUiRegressions({page,setViewport,pressKey,waitForPageEnt
     await page.getByRole('link',{name:'Compare products for this task',exact:true}).press('Enter');await ready();
     require(await page.evaluate(()=>document.querySelector('h1').textContent==='Get a server running'),'comparison left the selected task');
     await page.getByRole('link',{name:'Installation, services and instances',exact:true}).press('Enter');await ready();
-    return until(()=>page.evaluate(()=>({chapter:document.body.dataset.chapter,product:document.querySelector('.breadcrumbs span')?.textContent,task:document.querySelector('.current-chapter').closest('.contents-group').querySelector('summary').textContent})),m=>m.chapter==='postgresql-install-instances'&&m.product==='PostgreSQL'&&m.task==='Get a server running','task/product route lost context');
+    return until(()=>page.evaluate(()=>({chapter:document.body.dataset.chapter,product:document.querySelector('.breadcrumbs>:last-child')?.textContent,task:document.querySelector('.current-chapter').closest('.contents-group').querySelector('summary').textContent})),m=>m.chapter==='postgresql-install-instances'&&m.product==='PostgreSQL'&&m.task==='Get a server running','task/product route lost context');
   });
   await test('contents-pointer-feedback-keeps-keyboard-return',async()=>{
     await go('chapters/mysql-installation.html');

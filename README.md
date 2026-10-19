@@ -14,6 +14,14 @@ The authorized in-app browser pass executed all 14 groups, including 78 layout s
 
 Recorded 0.1.1 observations are historical and do not certify this manifest; use the executable browser adapter for current measurements.
 
+## 0.1.3 direct entry and navigation corrections
+
+The selected A treatment opens reading content directly from Home: Operating systems, MySQL, PostgreSQL and MongoDB each have a chapter entry. The header database chooser and reader Contents offer the same paths; switching database product keeps the current shared task. Chapter breadcrumbs describe the subject without routing readers through a duplicate directory. Task comparison pages remain optional references.
+
+Redundant arrows are removed from subject doors, Resume and database task-directory headings. Useful previous/next task arrows retain their sequence meaning. Back to top is a native button that changes scroll and focus without changing the URL or adding history; opening the database chooser is also history-neutral. The failure causes, misleading old assertions and durable regression contracts are recorded in [tests/README.md](tests/README.md#regressions-to-avoid).
+
+All 19 executable browser groups passed, including 78 representative layout states, 20 Contents states and eight Home-to-reader entry states with real browser Back. Related-task product switches, keyboard/pointer disclosure behavior, repeated Back to top, search, diagrams and Copy were exercised. All 56 authored chapter articles, original anchors, code, citations, assets, search data and notices are preserved from 0.1.2. The static build, link/fragment checks and private-data scan passed. The optional Linux runner, other browser engines, physical input/zoom, screen readers and displayed FPS remain unverified. No dependencies, CI workflows or hosting settings were added.
+
 ## Validate locally
 
 Requires Node.js 24. No npm dependencies or installation are needed.
