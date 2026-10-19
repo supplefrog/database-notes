@@ -21,3 +21,47 @@
   .reader-controls summary:after{margin-left:5px}
 }
 @media(max-width:1000px){.reading-layout{grid-template-columns:minmax(0,760px);justify-content:center}.reading-aside{padding:0 0 20px;grid-row:1;display:flex;gap:18px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--rule)}.reading-aside .current-group,.reading-aside .peer-products{display:none}.reader .breadcrumbs{margin-top:22px}.home-hero{min-height:500px}}@media(max-width:680px){.site-header{flex-wrap:wrap;gap:0 16px;padding:12px 18px}.brand{width:100%;padding-bottom:10px}.site-header nav{margin:0 auto 0 0;gap:16px}.site-header nav a{font-size:13px}.search-open{font-size:13px;padding:5px 9px}.home-hero{display:block;min-height:0}.hero-copy{padding:50px 0 0}.home h1{font-size:clamp(58px,14vw,86px);max-width:530px}.hero-art{width:85%;margin:-22px -4% -15px auto}.subject-doors{grid-template-columns:1fr}.subject-doors a{min-height:156px;padding:20px 8px}.subject-doors a:first-child{border-right:0;border-bottom:1px solid var(--rule)}.passage{display:block;margin:70px auto 10px}.passage img{max-width:400px;margin-bottom:24px}.passage blockquote{font-size:20px}.passage blockquote[lang]{font-size:16px}.task-products{grid-template-columns:1fr;gap:22px}.index-art{margin:20px auto}.task-list h2{font-size:27px}.reader-head h1{font-size:clamp(35px,9vw,46px)}.reader-controls{gap:6px}.reader-controls>a{width:100%;padding-left:0}.reader-controls details{flex:1}.reader-controls summary{justify-content:space-between}.reading-aside{display:none}.prose h2{font-size:27px}.prose h3{font-size:21px}.prose table{font-size:13px}.prose th,.prose td{padding:8px 8px 8px 0}.flow-diagram{flex-direction:column}.flow-step{flex:0 1 auto}.flow-arrow{transform:rotate(90deg);align-self:center}.task-adjacent{flex-wrap:wrap}.site-footer{margin-top:60px}}@media(max-width:350px){.site-header nav{width:100%;margin-bottom:8px}.search-open{width:100%}.task-list li{grid-template-columns:38px 1fr}.reader-controls summary{font-size:13px;padding:8px}.hero-art{width:100%}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{view-transition-name:none!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}@supports(view-transition-name:root){@media(prefers-reduced-motion:no-preference){@view-transition{navigation:auto}::view-transition-old(root){animation:130ms ease-out both fade-out}::view-transition-new(root){animation:150ms ease-in both fade-in}@keyframes fade-out{to{opacity:.75}}@keyframes fade-in{from{opacity:.75}}}}
+
+/* Modal reading position and controls remain stable while results scroll. */
+html{scrollbar-gutter:stable}
+html:has(dialog[open]){overflow:hidden}
+.search-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
+.search-dialog>:not(.search-results){flex-shrink:0}
+.search-dialog .dialog-top button{white-space:nowrap}
+.search-results{min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+
+/* Navigation marks use vector strokes, independent of system symbol fonts. */
+.nav-icon{display:inline-block;width:1em;height:1em;vertical-align:-.13em;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.reader-controls summary:after{content:"";width:.4em;height:.4em;flex:none;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);position:relative;top:-.1em}
+.reader-controls details[open] summary:after{color:inherit}
+.chapter-list a[aria-current]:before{content:"";display:inline-block;width:.6em;height:.6em;margin-right:.5em;border-left:1.5px solid currentColor;border-bottom:1.5px solid currentColor;position:relative;top:-.15em}
+
+/* Pointer editing retains the caret/border; keyboard and forced-color focus stay visible. */
+@media(forced-colors:none){.search-dialog input[data-pointer-focus]:focus-visible{outline:none}}
+
+/* Shared reader menus retain one row height when a narrow label wraps. */
+.reader-controls details{align-self:stretch}
+.reader-controls summary{height:100%}
+
+/* Diagram controls share the search modal's stable-controls behavior. */
+.figure-dialog[open]{display:flex;flex-direction:column;overflow:hidden}
+.figure-dialog>:not(.figure-canvas){flex-shrink:0}
+.figure-dialog[open]>.figure-canvas{min-height:0;overflow:auto;overscroll-behavior:contain}
+
+/* Reserve the results frame so typing and result-count changes keep the query anchored. */
+.search-dialog[open]{height:85vh;height:85dvh}
+
+/* Responsive spacing repair: wrapped header rows retain a gap and a full-row
+   search button fills that row. Keep subject names intact near tablet widths. */
+@media(max-width:800px){
+  .site-header{flex-wrap:wrap;gap:12px 16px;padding:12px 18px}
+  .brand{width:100%;padding-bottom:0}
+  .site-header nav{width:auto;flex-shrink:0;margin:0 auto 0 0;gap:16px}
+  .site-header nav a{font-size:13px;white-space:nowrap}
+  .site-header .search-open{flex:1;min-width:max-content;width:auto;font-size:13px;padding:5px 9px}
+}
+/* Hero copy clearance: the illustration must not intrude into reading text. */
+.home-hero{column-gap:clamp(24px,4vw,64px)}
+.hero-art{margin-left:0}
+/* In the stacked hero, art follows the action and clears the next section. */
+@media(max-width:680px){.hero-art{margin:16px 0 24px auto}}

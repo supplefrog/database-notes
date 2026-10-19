@@ -5,6 +5,7 @@ const input = document.querySelector('#handbook-query');
 const results = document.querySelector('.search-results');
 const status = document.querySelector('.search-count');
 let origin = null;
+let searchDestination = null;
 let searchData = null;
 let searchFailed = false;
 const decodeFragment = hash => {
@@ -12,10 +13,11 @@ const decodeFragment = hash => {
   catch { return ''; }
 };
 const normalize = s => s.toLocaleLowerCase().normalize('NFKD').replace(/\p{Diacritic}/gu, '');
-const openSearch = async trigger => {
+const openSearch = async (trigger, pointer = false) => {
   if (!dialog || typeof dialog.showModal !== 'function' || document.querySelector('dialog[open]')) return;
   origin = trigger || document.activeElement;
   dialog.showModal();
+  input.toggleAttribute('data-pointer-focus', pointer);
   input.value = '';
   results.replaceChildren();
   status.textContent = 'Type to search all chapters.';
@@ -34,16 +36,37 @@ const openSearch = async trigger => {
 document.querySelectorAll('[data-search-open]').forEach(button => {
   if (typeof dialog?.showModal !== 'function') return;
   button.hidden = false;
-  button.addEventListener('click', () => openSearch(button));
+  button.addEventListener('click', event => openSearch(button, event.detail > 0));
 });
 document.querySelector('[data-search-close]')?.addEventListener('click', () => dialog.close());
 dialog?.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); dialog.close(); } });
-dialog?.addEventListener('close', () => { origin?.focus({ preventScroll: true }); origin = null; });
+dialog?.addEventListener('close', () => {
+  if (dialog.open) return;
+  const destination = searchDestination || origin;
+  searchDestination = null;
+  origin = null;
+  if (destination?.isConnected) destination.focus({ preventScroll: true });
+});
+// Preserve native links/history while completing same-page search navigation.
+results?.addEventListener('click', event => {
+  const link = event.target.closest('a');
+  if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  searchDestination = null;
+  if (link.origin === location.origin && link.pathname === location.pathname && link.hash) {
+    const target = document.getElementById(decodeFragment(link.hash));
+    if (target) {
+      if (!target.hasAttribute('tabindex')) target.tabIndex = -1;
+      searchDestination = target;
+    }
+  }
+  dialog.close();
+});
 document.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && typeof dialog?.showModal === 'function') { event.preventDefault(); if (!dialog.open) openSearch(document.activeElement); }
 });
 function renderSearch() {
   results.replaceChildren();
+  results.scrollTop = 0;
   const query = normalize(input.value.trim());
   if (!searchData) {
     status.textContent = searchFailed ? 'Search is unavailable. Browse the subject links instead.' : 'Loading search…';
@@ -66,6 +89,8 @@ function renderSearch() {
   }
 }
 input?.addEventListener('input', renderSearch);
+input?.addEventListener('pointerdown', () => input.setAttribute('data-pointer-focus', ''));
+input?.addEventListener('keydown', () => input.removeAttribute('data-pointer-focus'));
 
 const chapter = document.body.dataset.chapter;
 const key = 'handbook-reading-location-v1';
