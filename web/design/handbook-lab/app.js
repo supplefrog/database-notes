@@ -3,7 +3,35 @@
 // the browser moves focus. Programmatic restoration clears its target too.
 document.addEventListener('pointerdown', event => event.target.closest('button')?.setAttribute('data-pointer-focus',''));
 document.addEventListener('keydown', () => document.querySelectorAll('[data-pointer-focus]').forEach(element => element.removeAttribute('data-pointer-focus')), {capture:true});
-const freezePageScroll = () => window.scrollTo({left:window.scrollX,top:window.scrollY,behavior:'instant'});
+// Native smooth scrolling does not reliably yield to wheel input in every browser.
+// Remember our last transport until takeover: cancelling an already settled one
+// is harmless, and no stale scrollend event/timer can clear a newer command.
+let authoredPageScroll = false;
+const pageScrollMotion = window.matchMedia('(prefers-reduced-motion:reduce)');
+const freezePageScroll = () => {
+  authoredPageScroll = false;
+  window.scrollTo({left:window.scrollX,top:window.scrollY,behavior:'instant'});
+};
+const pageScrollBehavior = () => {
+  authoredPageScroll = !pageScrollMotion.matches;
+  return authoredPageScroll ? 'smooth' : 'instant';
+};
+const interruptPageScroll = () => {
+  if (!authoredPageScroll) return;
+  freezePageScroll();
+  scheduleCurrentSection();
+};
+// Stop only the authored transport; never prevent the input's normal action.
+window.addEventListener('wheel', event => {
+  if (event.deltaX || event.deltaY) interruptPageScroll();
+}, {capture:true,passive:true});
+window.addEventListener('touchstart',interruptPageScroll,{capture:true,passive:true});
+window.addEventListener('pointerdown',interruptPageScroll,{capture:true,passive:true});
+window.addEventListener('keydown', event => {
+  if (event.defaultPrevented || event.target.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="combobox"],[role="slider"],[role="spinbutton"]')) return;
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End',' ','Escape','Tab'].includes(event.key)) interruptPageScroll();
+});
+pageScrollMotion.addEventListener('change',event => { if (event.matches) interruptPageScroll(); });
 const root = document.body.dataset.root || './';
 const dialog = document.querySelector('.search-dialog');
 const input = document.querySelector('#handbook-query');
@@ -170,7 +198,7 @@ document.addEventListener('click', event => {
   if (!target.hasAttribute('tabindex')) target.tabIndex = -1;
   target.removeAttribute('data-pointer-focus');
   target.focus({preventScroll:true});
-  target.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'instant' : 'smooth'});
+  target.scrollIntoView({block:'start',behavior:pageScrollBehavior()});
   recordReadingLocation();
 });
 // Returning to the top is a viewport action, not a document/history destination.
@@ -181,7 +209,7 @@ if (pageTopAction) {
     const target = document.getElementById('page-top');
     if (!target) return;
     target.focus({preventScroll:true});
-    window.scrollTo({top:0,left:0,behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'instant' : 'smooth'});
+    window.scrollTo({top:0,left:0,behavior:pageScrollBehavior()});
   });
 }
 // The database chooser opens routes directly; its disclosure is not history.

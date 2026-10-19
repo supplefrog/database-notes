@@ -73,7 +73,7 @@ export function observeCopyFeedback() {
     };requestAnimationFrame(step);
   });
 }
-export async function runUiRegressions({page,setViewport,pressKey,caseIds,slowRegistryBaseURL,readReadingLocation=()=>page.evaluate(()=>JSON.parse(localStorage.getItem("handbook-reading-location-v1")||"null")),startCopyObservation=()=>page.evaluate(observeCopyFeedback),readHistory=()=>page.evaluate(()=>({url:location.href,historyLength:history.length})),waitForPageEntry=async()=>{},baseURL,settle=async()=>{},onResult=()=>{}}) {
+export async function runUiRegressions({page,setViewport,pressKey,wheel,caseIds,slowRegistryBaseURL,readReadingLocation=()=>page.evaluate(()=>JSON.parse(localStorage.getItem("handbook-reading-location-v1")||"null")),startCopyObservation=()=>page.evaluate(observeCopyFeedback),readHistory=()=>page.evaluate(()=>({url:location.href,historyLength:history.length})),waitForPageEntry=async()=>{},baseURL,settle=async()=>{},onResult=()=>{}}) {
   const results=[],layouts=[];
   const require=(ok,text)=>{if(!ok)throw Error(text)};
   const ready=async()=>{await settle();};
@@ -497,6 +497,41 @@ export async function runUiRegressions({page,setViewport,pressKey,caseIds,slowRe
     }
     require(trace.frames.at(-1).label==='Copy'&&trace.frames.at(-1).state===null,'Copy did not settle back to its idle state');
     return trace;
+  });
+  await test('manual-wheel-and-keys-interrupt-page-travel-without-resuming-it',async()=>{
+    require(typeof wheel==='function'&&typeof pressKey==='function','real wheel and native page-key adapters required; synthetic events are not coverage');
+    await setViewport({width:1440,height:1000});await go('index.html');
+    await page.getByRole('link',{name:'Operating systems',exact:true}).click();await waitForPageEntry();await ready();
+    const read=()=>page.evaluate(()=>({y:scrollY,url:location.href,reduced:matchMedia('(prefers-reduced-motion:reduce)').matches,current:[...document.querySelectorAll('.chapter-sections a[aria-current="location"]')].map(a=>a.hash.slice(1))}));
+    require(!(await read()).reduced,'normal-motion takeover fixture required; reduced-motion runtime is a separate scenario');
+    const startTravel=async()=>{
+      await page.getByRole('link',{name:'Sources',exact:true}).press('Enter');
+      const target=await page.evaluate(()=>{const a=[...document.querySelectorAll('.chapter-sections a')].find(a=>a.textContent.trim()==='Sources'),t=document.getElementById(decodeURIComponent(a.hash.slice(1)));return Math.min(scrollY+t.getBoundingClientRect().top-parseFloat(getComputedStyle(t).scrollMarginTop||0),document.documentElement.scrollHeight-innerHeight);});
+      const active=await until(read,m=>m.y>5&&m.y<target-100,'a genuinely in-flight scroll was not captured');
+      return {target,active};
+    };
+    const travel=await startTravel();await wheel(-500);
+    await new Promise(r=>setTimeout(r,850));const stopped=await read();
+    require(stopped.y<travel.target-100,'opposing wheel was ignored or stale transport resumed');
+    const saved=await readReadingLocation();
+    require(stopped.current.length===1&&saved?.heading===stopped.current[0],'manual takeover left stale section/Resume state');
+    require(stopped.url.endsWith('#os-processes--section-1'),'takeover changed the shareable URL');
+    await wheel(250);const manual=await until(read,m=>m.y>stopped.y+20,'ordinary wheel scrolling no longer works after takeover');
+    await page.goBack();await waitForPageEntry();await ready();
+    const resumedState=await readReadingLocation();const resumeHref=await page.locator('[data-resume]').getAttribute('href');
+    require(resumeHref.endsWith('#'+resumedState.heading),'Home Resume lost the observed interrupted reading position');
+    await page.locator('[data-resume]').click();await waitForPageEntry();await ready();
+    require((await read()).url.endsWith('#'+resumedState.heading),'Resume did not reopen the observed section');
+    await go('chapters/os-processes.html');const keyTravel=await startTravel();await pressKey('PageUp');
+    await new Promise(r=>setTimeout(r,850));const keyed=await read();
+    require(keyed.y<keyTravel.target-100,'PageUp did not retain native takeover');
+    await go('chapters/os-processes.html');const reverseTravel=await startTravel();
+    await page.locator('.chapter-sections a').first().press('Enter');
+    await page.locator('.chapter-sections a').first().press('Enter');
+    await new Promise(r=>setTimeout(r,850));
+    const reversed=await page.evaluate(()=>{const a=document.querySelector('.chapter-sections a'),t=document.getElementById(decodeURIComponent(a.hash.slice(1)));return {y:scrollY,top:t.getBoundingClientRect().top,url:location.href,hash:a.hash};});
+    require(reversed.top>=-2&&reversed.top<1000/3&&reversed.url.endsWith(reversed.hash),'rapid/repeated anchor commands resumed the superseded destination');
+    return {travel,stopped,manual,saved,resumeHref,resumedState,keyTravel,keyed,reverseTravel,reversed,limits:'Touch/pointer/scrollbar and active reduced-motion changes need separate real-input browser observations.'};
   });
   await test('modal-interrupts-travel-and-preserves-reading-position',async()=>{
     require(typeof pressKey==='function','native page-key adapter required for interruption check');

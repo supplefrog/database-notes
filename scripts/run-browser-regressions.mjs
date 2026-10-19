@@ -13,7 +13,7 @@ try{
     await Promise.all(document.getAnimations().map(a=>a.finished.catch(()=>{})));
     await new Promise(resolve=>requestAnimationFrame(resolve));
   });
-  const report=await runUiRegressions({slowRegistryBaseURL:process.env.UI_SLOW_REGISTRY_BASE_URL,page,waitForPageEntry,pressKey:key=>page.keyboard.press(key),setViewport:size=>page.setViewportSize(size),baseURL,settle:()=>page.waitForLoadState('domcontentloaded'),onResult:r=>console.log(r.id+': '+r.status)});
+  const report=await runUiRegressions({slowRegistryBaseURL:process.env.UI_SLOW_REGISTRY_BASE_URL,page,waitForPageEntry,pressKey:key=>page.keyboard.press(key),wheel:async delta=>{const r=await page.locator('.reader').boundingBox();await page.mouse.move(r.x+r.width/2,400);await page.mouse.wheel(0,delta);},setViewport:size=>page.setViewportSize(size),baseURL,settle:()=>page.waitForLoadState('domcontentloaded'),onResult:r=>console.log(r.id+': '+r.status)});
   await writeFile(process.env.UI_REPORT||'/tmp/database-notes-browser-report.json',JSON.stringify(report,null,2)+'\n');
   process.exitCode=report.status==='pass'?0:1;
 }finally{await browser.close();}
