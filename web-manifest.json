@@ -1,5 +1,5 @@
 {
-  "design/handbook-lab/app.js": "a1e5b872b407e5b3f66eec4082e587925b6dac2cdf3405f67dce4626368be8c8",
+  "design/handbook-lab/app.js": "a0137ebf1045d8ca7eb209b69c4e1cf7084e3038891af2a11fabd654c34b1f83",
   "design/handbook-lab/assets/open-loop.webp": "e0d9ada654991a73cf5a174dc9f17c5d9773ac4a3aa71b62c148df56a4c0f2ab",
   "design/handbook-lab/assets/shared-machine.webp": "f299e8df47d0a133d75ce2196f28f78adb628e8839e6aefbdbe103d580d8780d",
   "design/handbook-lab/chapters/mongodb-administration.html": "e7165d36768fb29bb10be749fe721127358a3d3972cff068aab813488682bffd",
@@ -67,7 +67,7 @@
   "design/handbook-lab/operating-systems.html": "82b081f0851029b55199032892bfe9129d1c0779b0af34a44ccdc385d35acaa6",
   "design/handbook-lab/registry.json": "6efd35bcccd4c70f1cee28fef9f289ab18c063d254242ff40e6edc98689f9638",
   "design/handbook-lab/search-index.json": "f6ee751ba1b0d281a6871f7de595bfa394ce5197e463f6cc3fc4e8a96e7f50f4",
-  "design/handbook-lab/styles.css": "2ece5f9fc16e7115f2ede0bf93e0c8fac4761ffdc85cf5f5e53283e693d9c2e5",
+  "design/handbook-lab/styles.css": "054a1dbbf03e5edd1b8645facfeaa54b5781521bc4bdb26d456b5705e214d7b8",
   "design/handbook-lab/tasks/change.html": "9c698fb88e0186becca26ee0ec71ef1f4d5fab6b35d543ac023d3a121164d6e7",
   "design/handbook-lab/tasks/observe.html": "580852d4e9f44b4b16a72dee0f572fc8328cc399ce4ba42e1da5c884be9caf69",
   "design/handbook-lab/tasks/recover.html": "472d599d7c35d9fe4ed40b9e1998a380c6fc639673598ace9e1f5ccd79c3d95c",

@@ -14,6 +14,25 @@ Browser verification scope and historical QA records live in
 - Check package/changelog consistency in the normal build, with a standalone
   release check and regression cases for stale or duplicated entries.
 
+## [0.1.13]
+
+### Changed
+
+- Give Contents and search results a rounded native scrollbar pill whose track
+  fades in on interaction. Fade the horizontal code pill in without a track;
+  preserve the default green accent, native dragging and stable scrollbar lanes.
+- Let Back to top form at the absolute bottom of short scrollable pages, keeping
+  the existing travel threshold for long pages and hiding it on pages that fit.
+- Keep keyboard, reduced-motion and unsupported-feature fallbacks, and preserve
+  the separately published DB Lab startup retry fix unchanged.
+
+### Verification
+
+- Source-stamped in-app observations cover the short-page boundary, history-neutral
+  return, native scrollbar interaction, narrow navigation and stable geometry.
+  The previous release fails the new bottom-trigger check. Scope and remaining
+  browser/media limitations are recorded in tests/README.md.
+
 ## [0.1.12] - 2026-10-21
 
 ### Changed

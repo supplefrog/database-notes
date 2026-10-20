@@ -2,6 +2,7 @@
 // Chapter navigation tears them down before enhancing the next authored main.
 (() => {
 function mountHandbook(){
+ document.documentElement.toggleAttribute('data-scrollbar-motion',typeof CSS.registerProperty==='function'&&CSS.supports('selector(::-webkit-scrollbar)')&&CSS.supports('background','color-mix(in srgb,black 50%,transparent)'));
  const scope=new AbortController(),observers=[],frames=new Set(),timers=new Set();
  const on=(target,type,callback,options={})=>target?.addEventListener(type,callback,{...(typeof options==='boolean'?{capture:options}:options),signal:scope.signal});
  const makeObserver=(Type,callback)=>{const observer=new Type(callback);observers.push(observer);return observer;};
@@ -222,7 +223,9 @@ if (pageTopAction) {
   let topVisible, topMaterial;
   import('./page-top-glass.mjs').then(({attachPageTopGlass})=>{if(scope.signal.aborted)return;topMaterial=attachPageTopGlass(pageTopAction,{signal:scope.signal});topMaterial.setVisible(!!topVisible);}).catch(()=>{});
   const updateTopAction = () => {
-    const visible = scrollY > Math.max(1500, innerHeight * 2.5) && !(narrowTopAction.matches && document.querySelector('.contents-menu[open]'));
+    const maxScroll = Math.max(0,document.documentElement.scrollHeight-innerHeight);
+    const atBottom = maxScroll > 0 && scrollY > 0 && maxScroll-scrollY <= 1;
+    const visible = (scrollY > Math.max(1500, innerHeight * 2.5) || atBottom) && !(narrowTopAction.matches && document.querySelector('.contents-menu[open]'));
     if(visible===topVisible)return;
     topVisible=visible;
     topMaterial?.setVisible(visible);
@@ -233,6 +236,7 @@ if (pageTopAction) {
   on(window,'scroll',updateTopAction,{passive:true});
   on(window,'resize',updateTopAction);
   on(window,'pageshow',updateTopAction);
+  makeObserver(ResizeObserver,updateTopAction).observe(document.body);
   const topContents = document.querySelector('.contents-menu');
   if(topContents)makeObserver(MutationObserver,updateTopAction).observe(topContents,{attributes:true,attributeFilter:['open','data-closing']});
   updateTopAction();

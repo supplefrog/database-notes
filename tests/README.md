@@ -233,3 +233,30 @@ warnings, errors or document overflow.
 External Chrome's reported freeze, physical touch/zoom, slow-network failures,
 runtime reduced-motion switching and unsupported-browser fallbacks were not
 exercised. This record does not claim a new full 25-group browser-suite pass.
+
+
+## 0.1.13 native scrollbars and short-page return
+
+`scrollbar-return-observer.mjs` is a private-server injection for affected browser
+journeys, not a public asset. `scrollbar-return-checks.mjs` validates its recorded
+observations and refuses source hashes that differ from the tested runtime:
+
+```sh
+node tests/scrollbar-return-checks.mjs path/to/evidence
+```
+
+Fresh in-app checks covered a short page just above and at its bottom (including
+intermediate spring formation), return focus/URL/history, a page with no overflow,
+native vertical and horizontal scrollbar interaction, narrow Contents suppression
+and heading navigation. Native code dragging changed scrollLeft without changing
+the lane or content geometry. The old bottom-trigger behavior fails the new check.
+The reviewed prototype also has normal-speed entry/exit samples and an actual
+paused CSS midpoint showing partial native track/pill paint. These signals are not
+physical displayed FPS. Existing pure glass/ownership checks remain separate.
+
+The native page scrollbar is retained as in the reviewed prototype; the styled
+surfaces are Contents, search results and code. No custom scroll transport is used.
+Reduced-motion, forced-color, coarse-pointer and unsupported-feature fallbacks
+are present but were not exercised as native OS/browser modes. External Chrome
+and a fresh complete historical browser suite were not run. The brighter accent
+comparison and all QA outputs remain outside public web files.
