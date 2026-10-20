@@ -1,8 +1,7 @@
 # Changelog
 
 Changes are grouped by package milestone, with supporting commits and comparisons.
-Original dates for 0.1.0 and 0.1.1 are retained; later entries have no recorded
-release date. These links do not imply version tags or GitHub Releases.
+Original dates are retained; entries without a recorded release date omit it. These links do not imply version tags or GitHub Releases.
 Browser verification scope and historical QA records live in
 [tests/README.md](tests/README.md).
 
@@ -14,6 +13,33 @@ Browser verification scope and historical QA records live in
   package history here and move detailed QA narratives to the test documentation.
 - Check package/changelog consistency in the normal build, with a standalone
   release check and regression cases for stale or duplicated entries.
+
+## [0.1.12] - 2026-10-21
+
+### Changed
+
+- Keep narrow Contents painted and anchored through its complete exit; pointer
+  and keyboard reopening reverse from its current visual state.
+- Enhance chapter links with same-document reader replacement, native history,
+  actual Back/Forward positions, focus and a real document-link fallback.
+- Show Back to top after further reading travel, with live backdrop refraction
+  and a reversible spring entrance; retain one history-neutral native button.
+- Dispose prior reader listeners, observers and optical resources on chapter
+  replacement. Preserve the existing Contents optics and authored content.
+- Preserve the separately published 0.1.11 DB Lab exercise, assets, validation
+  rules and documentation; no Lab runtime bytes change in this release.
+
+### Verification and compatibility
+
+- Eighteen scoped in-app browser journeys and separate pointer/keyboard, bubble
+  and chapter reversals passed. Both narrow heading exits had zero measured
+  panel drift. Nineteen existing pure motion/ownership cases passed.
+- Browsers without navigation interception retain ordinary document links.
+  Refraction depends on SVG backdrop-filter support; reduced motion uses static
+  feedback. No content migrations or reader setup changes are required.
+- External Chrome's reported freeze, physical display cadence, slow-network
+  failure and runtime media-preference switching remain unverified. The scoped
+  passes do not establish a new full 25-group suite pass.
 
 ## [0.1.11]
 

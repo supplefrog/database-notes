@@ -1,5 +1,5 @@
 {
-  "design/handbook-lab/app.js": "ba1b26a401cefc9375a19f1570e624a121ec50b0698b9ebd45f6a673b4995349",
+  "design/handbook-lab/app.js": "a1e5b872b407e5b3f66eec4082e587925b6dac2cdf3405f67dce4626368be8c8",
   "design/handbook-lab/assets/open-loop.webp": "e0d9ada654991a73cf5a174dc9f17c5d9773ac4a3aa71b62c148df56a4c0f2ab",
   "design/handbook-lab/assets/shared-machine.webp": "f299e8df47d0a133d75ce2196f28f78adb628e8839e6aefbdbe103d580d8780d",
   "design/handbook-lab/chapters/mongodb-administration.html": "e7165d36768fb29bb10be749fe721127358a3d3972cff068aab813488682bffd",
@@ -61,13 +61,13 @@
   "design/handbook-lab/contents-glass-emphasis.mjs": "f41e08247324564fabb121170b6dfbcc095fdc270df73d62dc9c7e5a89d48946",
   "design/handbook-lab/contents-glass-entry.mjs": "b263135bfd793ca807fc316bbb6e6366f25ea77610d5a1f3781c06d3361296dd",
   "design/handbook-lab/contents-glass-math.mjs": "bbcb33da1659cdfb5d60742cbc554212689326d2423b598f5b498af249353247",
-  "design/handbook-lab/contents-glass.mjs": "6785c4fdb6f7b6dbfbadc2c606b1e252bf8d25f96eb94b0cb8c17fc9ceb072f6",
+  "design/handbook-lab/contents-glass.mjs": "d039f6f36805085b31a4db88b888bafd35f5dacc692f1b595d4799093145681c",
   "design/handbook-lab/databases.html": "d502cc3f916f650cdc34f24423d96d0e53d0fd5c1e75d0c1c156bf4b0c5699e8",
   "design/handbook-lab/index.html": "acc82e1752bbb3b9878855f854eb0f1077e453b7265ca7f44dd3667fdc5dd6b9",
   "design/handbook-lab/operating-systems.html": "82b081f0851029b55199032892bfe9129d1c0779b0af34a44ccdc385d35acaa6",
   "design/handbook-lab/registry.json": "6efd35bcccd4c70f1cee28fef9f289ab18c063d254242ff40e6edc98689f9638",
   "design/handbook-lab/search-index.json": "f6ee751ba1b0d281a6871f7de595bfa394ce5197e463f6cc3fc4e8a96e7f50f4",
-  "design/handbook-lab/styles.css": "fc17f6bc8bec13ee8e52978dcc64430dc877eb4e1ac18b7da35114d1b7a35548",
+  "design/handbook-lab/styles.css": "2ece5f9fc16e7115f2ede0bf93e0c8fac4761ffdc85cf5f5e53283e693d9c2e5",
   "design/handbook-lab/tasks/change.html": "9c698fb88e0186becca26ee0ec71ef1f4d5fab6b35d543ac023d3a121164d6e7",
   "design/handbook-lab/tasks/observe.html": "580852d4e9f44b4b16a72dee0f572fc8328cc399ce4ba42e1da5c884be9caf69",
   "design/handbook-lab/tasks/recover.html": "472d599d7c35d9fe4ed40b9e1998a380c6fc639673598ace9e1f5ccd79c3d95c",
@@ -109,5 +109,7 @@
   "lab/workbench-data.js": "1039311a1fe30c0a4d21cd77b4f99c3a33a7d86034ff7ef46136c7ba60190001",
   "licenses/ibm-plex-mono.txt": "23b0a9d0c6d3f140a0b77e483c5cfa6bba574325ef5cb189ed9f2fec4884533f",
   "licenses/newsreader.txt": "26028ec4e13b650065fa525a09532176f8a668b76ff849ea01c564a7480f91e7",
-  "licenses/notes-GPL-3.0.txt": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809"
+  "licenses/notes-GPL-3.0.txt": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809",
+  "design/handbook-lab/reader-navigation.mjs": "894e9fcf849a3af9f519705f36ff55ff7e49ad79462c63a5f5c9c118499acfbf",
+  "design/handbook-lab/page-top-glass.mjs": "9527fa2a03f07650d0610b5109fc765c024b69cbedeee27a06f9981e7a9be36e"
 }

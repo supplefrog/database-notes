@@ -267,3 +267,32 @@ a,button,summary{transition:color 140ms ease-out,background-color 140ms ease-out
  .contents-group::details-content,.contents-menu::details-content,.reader-controls .contents-menu>nav{transition:none}
  .reader-controls .contents-menu>nav{transform:none}
 }
+
+/* Closing Contents stays anchored while same-page reading travel starts. */
+@media(max-width:1100px){
+ .reader-controls .contents-menu.contents-exiting>nav{position:fixed;left:var(--contents-exit-x);top:var(--contents-exit-y);right:auto;bottom:auto;width:var(--contents-exit-width);height:var(--contents-exit-height);max-height:var(--contents-exit-height);transform:none;transition:none}
+}
+/* Enhanced details retain the one live panel until its actual exit ends. */
+@media(max-width:1100px){
+ .contents-menu[data-lifecycle]::details-content{opacity:1;transition:none}
+ .reader-controls .contents-menu[data-lifecycle]>nav{transform:none;transition:none}
+}
+/* The control remains a native button; only its material forms and settles. */
+.page-top-action{position:fixed;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));z-index:4;min-height:46px;padding:0 18px;border:0;border-radius:999px;background:var(--panel);color:var(--ink);font:600 13px/1 var(--sans);text-decoration:none;visibility:hidden;pointer-events:none}
+.page-top-action[data-visible]{visibility:visible;pointer-events:auto}
+.page-top-action[data-glass]{background:transparent}
+.page-top-action[data-painted]{visibility:visible}
+.page-top-action[data-glass]::before{content:'';position:absolute;inset:0;z-index:-1;border-radius:inherit;border:1px solid #ffffffb8;background:#f3f3ef26;backdrop-filter:url(#page-top-refraction);box-shadow:inset 0 1px 2px #ffffffc0,inset 0 -1px 2px #29292725,0 3px 12px #29292725;transform:scale(var(--top-x,.58),var(--top-y,.24));opacity:var(--top-presence,0);pointer-events:none}
+.page-top-label{position:relative;opacity:var(--top-presence,0);text-shadow:0 0 4px var(--panel),0 0 2px var(--panel)}
+.page-top-action:hover{color:var(--ink)}
+.page-top-action:hover::before{box-shadow:inset 0 1px 2px #fff,inset 0 -1px 2px #29292735,0 4px 16px #29292730}
+.page-top-optics{position:fixed;pointer-events:none}
+body[data-chapter] #main-content{view-transition-name:reader}
+::view-transition-group(reader){animation-duration:180ms}
+::view-transition-old(reader){animation:reader-out 160ms ease-out both;mix-blend-mode:normal}
+::view-transition-new(reader){animation:reader-in 180ms cubic-bezier(.2,.8,.2,1) both;mix-blend-mode:normal}
+@keyframes reader-out{to{opacity:0}}
+@keyframes reader-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){::view-transition-group(reader),::view-transition-old(reader),::view-transition-new(reader){animation:none}}
+@media(forced-colors:active){.page-top-action[data-glass]{background:Canvas;border:1px solid ButtonText}.page-top-action::before{display:none}.page-top-label{text-shadow:none}}
+@media print{.page-top-action{display:none}}

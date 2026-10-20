@@ -1,8 +1,17 @@
+// Each reader mount owns its listeners, observers and scheduled work.
+// Chapter navigation tears them down before enhancing the next authored main.
+(() => {
+function mountHandbook(){
+ const scope=new AbortController(),observers=[],frames=new Set(),timers=new Set();
+ const on=(target,type,callback,options={})=>target?.addEventListener(type,callback,{...(typeof options==='boolean'?{capture:options}:options),signal:scope.signal});
+ const makeObserver=(Type,callback)=>{const observer=new Type(callback);observers.push(observer);return observer;};
+ const requestAnimationFrame=callback=>{const id=window.requestAnimationFrame(time=>{frames.delete(id);if(!scope.signal.aborted)callback(time);});frames.add(id);return id;};
+ const setTimeout=(callback,delay)=>{const id=window.setTimeout(()=>{timers.delete(id);if(!scope.signal.aborted)callback();},delay);timers.add(id);return id;};
 // Progressive enhancement only. Pages and every navigation link work without scripts.
 // Pointer feedback stays quiet; keyboard input clears pointer markers before
 // the browser moves focus. Programmatic restoration clears its target too.
-document.addEventListener('pointerdown', event => event.target.closest('button')?.setAttribute('data-pointer-focus',''));
-document.addEventListener('keydown', () => document.querySelectorAll('[data-pointer-focus]').forEach(element => element.removeAttribute('data-pointer-focus')), {capture:true});
+on(document,'pointerdown', event => event.target.closest('button')?.setAttribute('data-pointer-focus',''));
+on(document,'keydown', () => document.querySelectorAll('[data-pointer-focus]').forEach(element => element.removeAttribute('data-pointer-focus')), {capture:true});
 // Native smooth scrolling does not reliably yield to wheel input in every browser.
 // Remember our last transport until takeover: cancelling an already settled one
 // is harmless, and no stale scrollend event/timer can clear a newer command.
@@ -23,16 +32,16 @@ const interruptPageScroll = () => {
   scheduleCurrentSection();
 };
 // Stop only the authored transport; never prevent the input's normal action.
-window.addEventListener('wheel', event => {
+on(window,'wheel', event => {
   if (event.deltaX || event.deltaY) interruptPageScroll();
 }, {capture:true,passive:true});
-window.addEventListener('touchstart',interruptPageScroll,{capture:true,passive:true});
-window.addEventListener('pointerdown',interruptPageScroll,{capture:true,passive:true});
-window.addEventListener('keydown', event => {
+on(window,'touchstart',interruptPageScroll,{capture:true,passive:true});
+on(window,'pointerdown',interruptPageScroll,{capture:true,passive:true});
+on(window,'keydown', event => {
   if (event.defaultPrevented || event.target.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="combobox"],[role="slider"],[role="spinbutton"]')) return;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End',' ','Escape','Tab'].includes(event.key)) interruptPageScroll();
 });
-pageScrollMotion.addEventListener('change',event => { if (event.matches) interruptPageScroll(); });
+on(pageScrollMotion,'change',event => { if (event.matches) interruptPageScroll(); });
 const root = document.body.dataset.root || './';
 const dialog = document.querySelector('.search-dialog');
 const input = document.querySelector('#handbook-query');
@@ -76,11 +85,11 @@ const openSearch = async (trigger, pointer = false) => {
 document.querySelectorAll('[data-search-open]').forEach(button => {
   if (typeof dialog?.showModal !== 'function') return;
   button.hidden = false;
-  button.addEventListener('click', event => openSearch(button, event.detail > 0));
+  on(button,'click', event => openSearch(button, event.detail > 0));
 });
-document.querySelector('[data-search-close]')?.addEventListener('click', () => dialog.close());
-dialog?.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); dialog.close(); } });
-dialog?.addEventListener('close', () => {
+on(document.querySelector('[data-search-close]'),'click', () => dialog.close());
+on(dialog,'keydown', event => { if (event.key === 'Escape') { event.preventDefault(); dialog.close(); } });
+on(dialog,'close', () => {
   if (dialog.open) return;
   // Same-page results already received focus through shared navigation.
   // A later close event must not steal it back after another accepted action.
@@ -91,7 +100,7 @@ dialog?.addEventListener('close', () => {
 });
 // Close search and restore focus to a same-page result; shared navigation below
 // owns its URL/scroll behavior. Cross-page and modified links stay native.
-results?.addEventListener('click', event => {
+on(results,'click', event => {
   const link = event.target.closest('a');
   if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   searchDestination = null;
@@ -104,7 +113,7 @@ results?.addEventListener('click', event => {
   }
   dialog.close();
 });
-document.addEventListener('keydown', event => {
+on(document,'keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && typeof dialog?.showModal === 'function') { event.preventDefault(); if (!dialog.open) openSearch(document.activeElement); }
 });
 function renderSearch() {
@@ -131,9 +140,9 @@ function renderSearch() {
     link.append(name,context); li.append(link); results.append(li);
   }
 }
-input?.addEventListener('input', renderSearch);
-input?.addEventListener('pointerdown', () => input.setAttribute('data-pointer-focus', ''));
-input?.addEventListener('keydown', () => input.removeAttribute('data-pointer-focus'));
+on(input,'input', renderSearch);
+on(input,'pointerdown', () => input.setAttribute('data-pointer-focus', ''));
+on(input,'keydown', () => input.removeAttribute('data-pointer-focus'));
 
 const chapter = document.body.dataset.chapter;
 const key = 'handbook-reading-location-v1';
@@ -158,6 +167,7 @@ const refreshResume = () => {
   resume.textContent = destination === resumeFallback ? 'Start reading' : 'Resume reading';
 };
 const registryReady = loadRegistry().then(registry => {
+  if(scope.signal.aborted)return;
   readingRegistry = registry;
   refreshResume();
   if (!registry || !chapter || !Object.hasOwn(registry,chapter)) return;
@@ -172,13 +182,13 @@ const registryReady = loadRegistry().then(registry => {
   };
   recordReadingLocation();
   scheduleCurrentSection();
-  window.addEventListener('hashchange',recordReadingLocation);
+  on(window,'hashchange',recordReadingLocation);
 });
 // A restored Home or another tab's reading change must not retain an old route.
-window.addEventListener('pageshow',refreshResume);
-window.addEventListener('focus',refreshResume);
-window.addEventListener('storage',event => { if (event.key === key || event.key === null) refreshResume(); });
-resume?.addEventListener('click', async event => {
+on(window,'pageshow',refreshResume);
+on(window,'focus',refreshResume);
+on(window,'storage',event => { if (event.key === key || event.key === null) refreshResume(); });
+on(resume,'click', async event => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   if (readingRegistry !== undefined) { refreshResume(); return; }
   // An early click must wait for validation rather than follow the OS fallback.
@@ -190,7 +200,7 @@ resume?.addEventListener('click', async event => {
 
 // Apply one rule to Contents, search, citations, prose anchors and Skip to content.
 // Real hrefs preserve no-JS reading, copied deep links and modified/new-tab clicks.
-document.addEventListener('click', event => {
+on(document,'click', event => {
   const link = event.target.closest('a');
   if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.hasAttribute('download') || (link.target && link.target !== '_self')) return;
   const target = samePageTarget(link);
@@ -208,7 +218,25 @@ document.addEventListener('click', event => {
 const pageTopAction = document.querySelector('[data-page-top]');
 if (pageTopAction) {
   pageTopAction.hidden = false;
-  pageTopAction.addEventListener('click', () => {
+  const narrowTopAction = matchMedia('(max-width:1100px)');
+  let topVisible, topMaterial;
+  import('./page-top-glass.mjs').then(({attachPageTopGlass})=>{if(scope.signal.aborted)return;topMaterial=attachPageTopGlass(pageTopAction,{signal:scope.signal});topMaterial.setVisible(!!topVisible);}).catch(()=>{});
+  const updateTopAction = () => {
+    const visible = scrollY > Math.max(1500, innerHeight * 2.5) && !(narrowTopAction.matches && document.querySelector('.contents-menu[open]'));
+    if(visible===topVisible)return;
+    topVisible=visible;
+    topMaterial?.setVisible(visible);
+    pageTopAction.toggleAttribute('data-visible',visible);
+    pageTopAction.inert = !visible;
+    pageTopAction.setAttribute('aria-hidden',String(!visible));
+  };
+  on(window,'scroll',updateTopAction,{passive:true});
+  on(window,'resize',updateTopAction);
+  on(window,'pageshow',updateTopAction);
+  const topContents = document.querySelector('.contents-menu');
+  if(topContents)makeObserver(MutationObserver,updateTopAction).observe(topContents,{attributes:true,attributeFilter:['open','data-closing']});
+  updateTopAction();
+  on(pageTopAction,'click', () => {
     const target = document.getElementById('page-top');
     if (!target) return;
     target.focus({preventScroll:true});
@@ -231,16 +259,16 @@ for (const menu of document.querySelectorAll('.subject-path-menu')) {
   // Exit paint may remain, but its links must leave keyboard/AT interaction now.
   const syncInteraction = () => { options.inert = !menu.open; };
   syncInteraction();
-  new MutationObserver(syncInteraction).observe(menu,{attributes:true,attributeFilter:['open']});
-  summary.addEventListener('pointerdown', () => summary.setAttribute('data-pointer-focus',''));
-  menu.addEventListener('keydown', event => {
+  makeObserver(MutationObserver,syncInteraction).observe(menu,{attributes:true,attributeFilter:['open']});
+  on(summary,'pointerdown', () => summary.setAttribute('data-pointer-focus',''));
+  on(menu,'keydown', event => {
     if (event.key === 'Escape' && menu.open) {
       event.preventDefault(); closeSubjectPathMenu(menu);
       summary.removeAttribute('data-pointer-focus'); summary.focus({preventScroll:true});
     }
   });
 }
-document.addEventListener('click', event => {
+on(document,'click', event => {
   for (const menu of document.querySelectorAll('.subject-path-menu[open]')) {
     if (!menu.contains(event.target)) closeSubjectPathMenu(menu);
   }
@@ -249,20 +277,69 @@ document.addEventListener('click', event => {
 const contents = document.querySelector('.reader-controls > .contents-menu');
 const controls = document.querySelector('.reader-controls');
 const wideReader = window.matchMedia('(min-width:1101px)');
+// Keep the actual panel alive through exit; native details hiding happens last.
+const contentsPanel = contents?.querySelector(':scope>nav');
+const contentsSummary = contents?.querySelector(':scope>summary');
+let contentsMotion, contentsCommand = 0;
+const exitProperties = ['--contents-exit-x','--contents-exit-y','--contents-exit-width','--contents-exit-height'];
+const releaseContentsExit = () => {
+  contents?.classList.remove('contents-exiting');
+  for(const property of exitProperties)contents?.style.removeProperty(property);
+};
+const resetContentsMotion = () => {
+  ++contentsCommand; contentsMotion?.cancel(); contentsMotion=null;
+  contents?.removeAttribute('data-closing'); releaseContentsExit();
+  contentsPanel?.style.removeProperty('opacity');
+  contentsSummary?.removeAttribute('aria-expanded');
+  if(contentsPanel){contentsPanel.inert=!contents.open;contentsPanel.removeAttribute('aria-hidden');}
+};
+const closeReaderContents = () => {
+  if(!contentsPanel||wideReader.matches||!contents.open||contents.hasAttribute('data-closing'))return;
+  const id=++contentsCommand,box=contentsPanel.getBoundingClientRect(),opacity=getComputedStyle(contentsPanel).opacity;
+  contentsMotion?.cancel();
+  exitProperties.forEach((property,index)=>contents.style.setProperty(property,`${[box.x,box.y,box.width,box.height][index]}px`));
+  contents.classList.add('contents-exiting'); contents.setAttribute('data-closing','');
+  contentsSummary.setAttribute('aria-expanded','false'); contentsPanel.inert=true;contentsPanel.setAttribute('aria-hidden','true');
+  const finish=()=>{if(id!==contentsCommand)return;contents.open=false;resetContentsMotion();};
+  if(pageScrollMotion.matches||!contentsPanel.animate){finish();return;}
+  contentsMotion=contentsPanel.animate({opacity:[opacity,0]},{duration:180,easing:'ease-out',fill:'forwards'});
+  contentsMotion.finished.then(finish,()=>{});
+};
+if(contentsPanel){
+  contents.setAttribute('data-lifecycle','');
+  on(contentsSummary,'click',event=>{
+    if(wideReader.matches)return;
+    event.preventDefault();
+    if(contents.open&&!contents.hasAttribute('data-closing')){closeReaderContents();return;}
+    interruptPageScroll();
+    const from=contentsPanel.getBoundingClientRect(),opacity=contents.open?getComputedStyle(contentsPanel).opacity:0;
+    const reversing=contents.hasAttribute('data-closing');
+    resetContentsMotion();contents.open=true;contentsPanel.inert=false;
+    fitContentsPanel();const to=contentsPanel.getBoundingClientRect();
+    if(!pageScrollMotion.matches){
+      const offset=reversing?`${from.x-to.x}px ${from.y-to.y}px`:`0px ${contents.classList.contains('opens-up')?5:-5}px`;
+      contentsMotion=contentsPanel.animate({opacity:[opacity,1],translate:[offset,'0px 0px']},{duration:180,easing:'cubic-bezier(.2,.8,.2,1)'});
+    }
+  });
+  makeObserver(MutationObserver,()=>{contentsPanel.inert=!contents.open||contents.hasAttribute('data-closing');}).observe(contents,{attributes:true,attributeFilter:['open']});
+  on(window,'resize',()=>{const closing=contents.hasAttribute('data-closing');resetContentsMotion();if(closing)contents.open=false;});
+  on(pageScrollMotion,'change',event=>{if(event.matches){const closing=contents.hasAttribute('data-closing');resetContentsMotion();if(closing)contents.open=false;}});
+}
+
 const fitContentsPanel = () => {
-  if (!contents || wideReader.matches || !contents.open) return;
+  if (!contents || wideReader.matches || (!contents.open || contents.hasAttribute('data-closing'))) return;
   const rect = controls.getBoundingClientRect();
   const below = window.innerHeight - rect.bottom - 12, above = rect.top - 12;
   const upward = below < 180 && above > below;
   contents.classList.toggle('opens-up', upward);
   contents.style.setProperty('--contents-room', `${Math.max(80, upward ? above : below)}px`);
 };
-contents?.addEventListener('toggle',fitContentsPanel);
-window.addEventListener('resize',fitContentsPanel);
-window.addEventListener('scroll',fitContentsPanel,{passive:true});
+on(contents,'toggle',fitContentsPanel);
+on(window,'resize',fitContentsPanel);
+on(window,'scroll',fitContentsPanel,{passive:true});
 for (const summary of contents?.querySelectorAll('summary') || []) {
-  summary.addEventListener('pointerdown',()=>summary.setAttribute('data-pointer-focus',''));
-  summary.addEventListener('keydown',()=>summary.removeAttribute('data-pointer-focus'));
+  on(summary,'pointerdown',()=>summary.setAttribute('data-pointer-focus',''));
+  on(summary,'keydown',()=>summary.removeAttribute('data-pointer-focus'));
 }
 const setReaderOffset = () => {
   if (controls) document.documentElement.style.setProperty('--reader-offset', wideReader.matches ? '24px' : `${controls.offsetHeight + 16}px`);
@@ -270,17 +347,18 @@ const setReaderOffset = () => {
 const syncContents = () => {
   if (!contents) return;
   const focused = document.activeElement;
+  resetContentsMotion();
   contents.open = wideReader.matches;
   if (!wideReader.matches && contents.contains(focused) && focused !== contents.querySelector('summary')) { contents.querySelector('summary').removeAttribute('data-pointer-focus'); contents.querySelector('summary').focus({preventScroll:true}); }
   if (wideReader.matches && focused === contents.querySelector('summary')) contents.querySelector('[aria-current="page"]').focus({preventScroll:true});
   setReaderOffset();
 };
 syncContents();
-wideReader.addEventListener('change',syncContents);
-contents?.addEventListener('keydown', event => {
+on(wideReader,'change',syncContents);
+on(contents,'keydown', event => {
   if (event.key !== 'Escape') return;
   if (!wideReader.matches && contents.open) {
-    event.preventDefault(); contents.open = false;
+    event.preventDefault(); closeReaderContents();
     contents.querySelector('summary').removeAttribute('data-pointer-focus');
     contents.querySelector('summary').focus({preventScroll:true});
   } else if (wideReader.matches) {
@@ -288,15 +366,15 @@ contents?.addEventListener('keydown', event => {
     if (group) { event.preventDefault(); group.open = false; group.querySelector('summary').removeAttribute('data-pointer-focus'); group.querySelector('summary').focus({preventScroll:true}); }
   }
 });
-contents?.addEventListener('click', event => {
+on(contents,'click', event => {
   const link = event.target.closest('a');
   if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-  if (!wideReader.matches) contents.open = false;
+  if (!wideReader.matches) closeReaderContents();
 });
-document.addEventListener('click', event => {
-  if (contents && !wideReader.matches && !contents.contains(event.target)) contents.open = false;
+on(document,'click', event => {
+  if (contents && !wideReader.matches && !contents.contains(event.target)) closeReaderContents();
 });
-if (controls && typeof ResizeObserver === 'function') new ResizeObserver(setReaderOffset).observe(controls);
+if (controls && typeof ResizeObserver === 'function') makeObserver(ResizeObserver,setReaderOffset).observe(controls);
 // The section being read is local reading state, independent of URL/history.
 // Follow ordinary scrolling as well as links; never scroll or move focus here.
 const sectionEntries = [...document.querySelectorAll('.chapter-sections a')].map(link => ({link,target:document.getElementById(decodeFragment(link.hash))})).filter(entry => entry.target);
@@ -321,11 +399,11 @@ function scheduleCurrentSection() {
     contentsGlass?.read({current:current.link,position:scrollY,readingLine,transportActive:authoredPageScroll});
   });
 }
-window.addEventListener('scroll',scheduleCurrentSection,{passive:true});
-window.addEventListener('resize',scheduleCurrentSection);
-window.addEventListener('pageshow',scheduleCurrentSection);
-window.addEventListener('load',scheduleCurrentSection);
-document.fonts?.ready.then(scheduleCurrentSection);
+on(window,'scroll',scheduleCurrentSection,{passive:true});
+on(window,'resize',scheduleCurrentSection);
+on(window,'pageshow',scheduleCurrentSection);
+on(window,'load',scheduleCurrentSection);
+document.fonts?.ready.then(()=>{if(!scope.signal.aborted)scheduleCurrentSection();});
 scheduleCurrentSection();
 for (const pre of document.querySelectorAll('.prose pre')) {
   const text = pre.textContent;
@@ -346,18 +424,19 @@ for (const pre of document.querySelectorAll('.prose pre')) {
     else { delete button.dataset.copyState; delete status.dataset.copyState; }
   }
   let resetCopy, copyAttempt = 0;
-  button.addEventListener('click',async () => {
+  on(button,'click',async () => {
     const attempt = ++copyAttempt;
+    if(scope.signal.aborted)return;
     clearTimeout(resetCopy);
     // Fast writes go straight to their result; repeated clicks keep that result
     // visible. Show progress only when there is actually time to perceive it.
     const pending = setTimeout(() => { if (attempt === copyAttempt) showCopyState('pending'); },150);
     try {
       await navigator.clipboard.writeText(text);
-      if (attempt !== copyAttempt) return;
+      if (scope.signal.aborted || attempt !== copyAttempt) return;
       if (button.dataset.copyState !== 'success') showCopyState('success');
     } catch {
-      if (attempt !== copyAttempt) return;
+      if (scope.signal.aborted || attempt !== copyAttempt) return;
       if (button.dataset.copyState !== 'error') showCopyState('error');
     } finally { clearTimeout(pending); }
     if (attempt === copyAttempt) resetCopy = setTimeout(() => showCopyState(null),2000);
@@ -374,7 +453,7 @@ for (const figure of document.querySelectorAll('.schema-figure')) {
   trigger.type = 'button'; trigger.className = 'figure-enlarge'; trigger.textContent = 'Enlarge diagram';
   figure.querySelector('.tf-heading').after(trigger);
   let viewer;
-  trigger.addEventListener('click', () => {
+  on(trigger,'click', () => {
     if (document.querySelector('dialog[open]')) return;
     if (!viewer) {
       viewer = document.createElement('dialog'); viewer.className = 'figure-dialog';
@@ -397,13 +476,13 @@ for (const figure of document.querySelectorAll('.schema-figure')) {
         }
       }
       canvas.append(copy); viewer.append(top, hint, fit, canvas); document.body.append(viewer);
-      fit.addEventListener('click', () => {
+      on(fit,'click', () => {
         const fitted = canvas.classList.toggle('fit-width');
         fit.textContent = fitted ? 'Actual size' : 'Fit to width';
         canvas.scrollLeft = 0;
       });
-      close.addEventListener('click', () => viewer.close());
-      viewer.addEventListener('close', () => { if (!document.querySelector('dialog[open]')) { trigger.removeAttribute('data-pointer-focus'); trigger.focus({ preventScroll: true }); } });
+      on(close,'click', () => viewer.close());
+      on(viewer,'close', () => { if (!document.querySelector('dialog[open]')) { trigger.removeAttribute('data-pointer-focus'); trigger.focus({ preventScroll: true }); } });
     }
     const canvas = viewer.querySelector('.figure-canvas');
     canvas.classList.remove('fit-width'); canvas.scrollLeft = 0;
@@ -415,6 +494,13 @@ for (const figure of document.querySelectorAll('.schema-figure')) {
 
 // Enhance the existing chapter section list; no preview routes or controls.
 if (sectionEntries.length) import('./contents-glass.mjs').then(({attachContentsGlass}) => {
-  contentsGlass = attachContentsGlass({entries:sectionEntries});
+  if(scope.signal.aborted)return;
+  contentsGlass = attachContentsGlass({entries:sectionEntries,signal:scope.signal});
   scheduleCurrentSection();
 }).catch(error => console.warn('Contents material unavailable',error));
+
+ return ()=>{if(dialog?.open)dialog.close();scope.abort();resetContentsMotion();observers.forEach(observer=>observer.disconnect());frames.forEach(id=>window.cancelAnimationFrame(id));timers.forEach(id=>window.clearTimeout(id));document.querySelectorAll('.figure-dialog').forEach(dialog=>dialog.remove());};
+}
+let dispose=mountHandbook();
+import('./reader-navigation.mjs').then(({installReaderNavigation})=>installReaderNavigation({remount(update){dispose();update();dispose=mountHandbook();}})).catch(error=>console.warn('Reader navigation unavailable',error));
+})();

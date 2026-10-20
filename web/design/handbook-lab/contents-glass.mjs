@@ -4,7 +4,10 @@ import {revealStep,revealSettled,revealShape} from './contents-glass-entry.mjs';
 
 // Decorative adapter for the existing native Contents tree. app.js remains the
 // sole owner of reading state, URL/history, focus, Resume and page transport.
-export function attachContentsGlass({entries}){
+export function attachContentsGlass({entries,signal}){
+ const lifetime=new AbortController(),observers=[];
+ const listen=(target,type,callback,options={})=>target?.addEventListener(type,callback,{...options,signal:lifetime.signal});
+ const observe=(Type,callback)=>{const observer=new Type(callback);observers.push(observer);return observer;};
  if(typeof IntersectionObserver!=='function'||typeof ResizeObserver!=='function')return null;
  const panel=document.querySelector('.current-chapter > .chapter-sections');
  if(!panel||!entries.length)return null;
@@ -30,7 +33,7 @@ export function attachContentsGlass({entries}){
  const reduced=()=>motion.matches;
  const glassMode=()=>effective;
  const rasterMode=()=>false;
- const visible=()=>onscreen&&!document.hidden&&parents.every(parent=>parent.open)&&!contrast.matches&&!paintFailure&&!shaderError;
+ const visible=()=>onscreen&&!document.hidden&&parents.every(parent=>parent.open&&!parent.hasAttribute('data-closing'))&&!contrast.matches&&!paintFailure&&!shaderError;
  const canDraw=()=>effective&&visible();
  function visibleInScrollports(){
   const r=panel.getBoundingClientRect();let top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom),left=Math.max(0,r.left),right=Math.min(innerWidth,r.right);
@@ -114,7 +117,7 @@ function setupGL(){if(gl||shaderError)return;try{
  const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
  bgTexture=texture();strongTexture=texture();sceneTexture=texture();resolveTexture=texture();sceneFbo=gl.createFramebuffer();resolveFbo=gl.createFramebuffer();
 }catch(error){shaderError=String(error.message||error);}}
-glass.addEventListener('webglcontextlost',()=>{shaderError='WebGL context lost';stop();refresh();});
+listen(glass,'webglcontextlost',()=>{shaderError='WebGL context lost';stop();refresh();});
 function lineRuns(a,box){
  const style=getComputedStyle(a),font=`${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`,lines=[];
  const walker=document.createTreeWalker(a,NodeFilter.SHOW_TEXT);let node;
@@ -242,7 +245,7 @@ function render(){
   stop();effective=false;
   // IntersectionObserver can arrive one painted frame after a disclosure
   // starts entering. Prepare its new paint synchronously before that frame.
-  if(opening&&parents.every(parent=>parent.open))onscreen=visibleInScrollports();
+  if(opening&&parents.every(parent=>parent.open&&!parent.hasAttribute('data-closing')))onscreen=visibleInScrollports();
   // Preserve the last painted material through the native disclosure's exit.
   // It draws no new frames while hidden, closed or outside the scrollport.
   if(!visible()){if(contrast.matches||paintFailure||shaderError){panel.classList.remove('contents-glass-ready');glass.hidden=true;}return;}
@@ -267,8 +270,8 @@ function render(){
  }
  function follow(){owner=followScroll();observed={...observed,position:scrollY};if(canDraw()){targetShape();request();}}
  for(const [index,link] of links.entries()){
-  link.addEventListener('pointerenter',event=>{if(event.pointerType==='touch')return;hovered=index;labelsDirty=true;request();});
-  link.addEventListener('pointerleave',()=>{if(hovered!==index)return;hovered=-1;labelsDirty=true;request();});
+  listen(link,'pointerenter',event=>{if(event.pointerType==='touch')return;hovered=index;labelsDirty=true;request();});
+  listen(link,'pointerleave',()=>{if(hovered!==index)return;hovered=-1;labelsDirty=true;request();});
  }
  // Reset only after a disclosure has actually finished hiding. A reversal
  // during visible exit retains present expansion/velocity and matched ink.
@@ -276,21 +279,28 @@ function render(){
   if(parents.some(parent=>!parent.open&&(getComputedStyle(parent,'::details-content').contentVisibility==='hidden'||Number(getComputedStyle(parent,'::details-content').opacity)===0)))reveal={value:0,velocity:0};
  }
  for(const parent of parents){
-  parent.addEventListener('transitionend',resetHiddenReveal);
+  listen(parent,'transitionend',resetHiddenReveal);
   const summary=parent.querySelector(':scope>summary');
-  for(const type of ['pointerdown','keydown'])summary?.addEventListener(type,resetHiddenReveal,{capture:true});
+  for(const type of ['pointerdown','keydown'])listen(summary,type,resetHiddenReveal,{capture:true});
  }
- new IntersectionObserver(records=>{const next=records.some(record=>record.isIntersecting);if(next===onscreen)return;onscreen=next;geometryDirty=storageDirty=labelsDirty=true;refresh();}).observe(panel);
- new MutationObserver(()=>{geometryDirty=storageDirty=labelsDirty=true;refresh(true);}).observe(panel.closest('.contents-menu'),{attributes:true,attributeFilter:['open'],subtree:true});
- const resize=new ResizeObserver(invalidate);resize.observe(panel);const article=document.querySelector('.reader');if(article)resize.observe(article);
- document.addEventListener('visibilitychange',refresh);window.addEventListener('pagehide',()=>{stop();effective=false;});
- window.addEventListener('pageshow',()=>{owner=followScroll();invalidate();});
- window.addEventListener('resize',()=>{dpr=devicePixelRatio||1;invalidate();});
- document.fonts?.ready.then(invalidate);window.addEventListener('load',invalidate);
- motion.addEventListener('change',()=>{if(reduced()){reveal={value:1,velocity:0};settleShape();}request();});contrast.addEventListener('change',refresh);
- let dprQuery;function watchDpr(){dprQuery?.removeEventListener('change',changedDpr);dprQuery=matchMedia(`(resolution:${dpr}dppx)`);dprQuery.addEventListener('change',changedDpr);}
+ observe(IntersectionObserver,records=>{const next=records.some(record=>record.isIntersecting);if(next===onscreen)return;onscreen=next;geometryDirty=storageDirty=labelsDirty=true;refresh();}).observe(panel);
+ observe(MutationObserver,()=>{geometryDirty=storageDirty=labelsDirty=true;refresh(true);}).observe(panel.closest('.contents-menu'),{attributes:true,attributeFilter:['open','data-closing'],subtree:true});
+ const resize=observe(ResizeObserver,invalidate);resize.observe(panel);const article=document.querySelector('.reader');if(article)resize.observe(article);
+ listen(document,'visibilitychange',refresh);listen(window,'pagehide',()=>{stop();effective=false;});
+ listen(window,'pageshow',()=>{owner=followScroll();invalidate();});
+ listen(window,'resize',()=>{dpr=devicePixelRatio||1;invalidate();});
+ document.fonts?.ready.then(()=>{if(!lifetime.signal.aborted)invalidate();});listen(window,'load',invalidate);
+ listen(motion,'change',()=>{if(reduced()){reveal={value:1,velocity:0};settleShape();}request();});listen(contrast,'change',refresh);
+ let dprQuery;function watchDpr(){dprQuery?.removeEventListener('change',changedDpr);dprQuery=matchMedia(`(resolution:${dpr}dppx)`);listen(dprQuery,'change',changedDpr);}
  function changedDpr(){dpr=devicePixelRatio||1;watchDpr();invalidate();}watchDpr();
- window.visualViewport?.addEventListener('resize',()=>{if(dpr!==(devicePixelRatio||1))changedDpr();});
+ listen(window.visualViewport,'resize',()=>{if(dpr!==(devicePixelRatio||1))changedDpr();});
  Object.defineProperty(window,'notesContentsGlass',{configurable:true,get:()=>({revision:'local-r4-boxless-bubble',reveal:{...reveal},surface:surfaceShape&&{...surfaceShape},labelRenderer:'native-outside-refracted-inside',filter:'lanczos2',pixelAligned:true,enabled:effective,onscreen,drawingAllowed:canDraw(),owner:{...owner},current:observed.current?.hash,shape:{...shape},aim:{...aim},shapeVelocity:{...shapeVelocity},progress,frames,labelPaints,allocations,dpr,output:[...output],source:[...sourceSize],shaderError,reduced:reduced(),geometryDirty})});
+ signal?.addEventListener('abort',()=>{
+  lifetime.abort();stop();observers.forEach(observer=>observer.disconnect());
+  for(const texture of [bgTexture,strongTexture,sceneTexture,resolveTexture])if(texture)gl.deleteTexture(texture);
+  for(const framebuffer of [sceneFbo,resolveFbo])if(framebuffer)gl.deleteFramebuffer(framebuffer);
+  for(const pass of [surface,horizontal,vertical])if(pass)gl.deleteProgram(pass.program);
+  layer.remove();delete window.notesContentsGlass;
+ },{once:true});
  return {read,select,follow};
 }

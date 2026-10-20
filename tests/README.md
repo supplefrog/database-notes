@@ -201,3 +201,35 @@ fresh affected browser observations, never just changing the stamp. The checker
 does not rerun browser interactions, certify every layout, or run as part of CI.
 Native zoom, trusted wheel/touch, physical-device, screen-reader and changed-cloud
 coverage remain separately identified when not observed.
+
+
+## 0.1.12 section continuity and return action
+
+`section-continuity-browser.mjs` runs ten fresh heading, return-button, chapter and
+Back/Forward journeys at two narrow widths. It accepts the documented browser
+adapter plus real `clickContents`, `capture`, `back` and `forward` inputs.
+`section-continuity-observer.mjs` is a test-only module injected by a local server
+for `?qc=disclosure`; it never belongs in the public web directory. The capture
+adapter reads its JSON script element after actual input. The observer retains
+its identity through enhanced chapter changes, measures intermediate paint and
+excludes closed native content via content-visibility. A timestamp-only
+`sample=clock` mode avoids per-frame layout reads.
+
+The release passed these ten journeys and the existing eight Contents motion
+journeys, with native clicks on the visible sticky trigger. Locator auto-scroll
+must not be mistaken for user scroll or a reading-position regression. Back
+checks compare the actual position immediately before the accepted navigation.
+Separate pointer/keyboard menu reversals, partial bubble reversal and immediate
+Back during a chapter transition passed. The 19 pure cases also passed.
+
+The scoped observer found zero panel drift during both narrow exits. Its active
+timestamp-only control observed a 16ms maximum rAF gap in the first 260ms; this
+is callback timing in the in-app browser, not physical presentation FPS or an
+external Chrome trace. The old published chapter behavior fails the new document
+continuity check. Optical comparison with zero displacement showed that live
+backdrop text/lines refract; the delivered reading preview had no QA observer,
+warnings, errors or document overflow.
+
+External Chrome's reported freeze, physical touch/zoom, slow-network failures,
+runtime reduced-motion switching and unsupported-browser fallbacks were not
+exercised. This record does not claim a new full 25-group browser-suite pass.
