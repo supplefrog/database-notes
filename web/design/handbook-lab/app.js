@@ -7,6 +7,7 @@ document.addEventListener('keydown', () => document.querySelectorAll('[data-poin
 // Remember our last transport until takeover: cancelling an already settled one
 // is harmless, and no stale scrollend event/timer can clear a newer command.
 let authoredPageScroll = false;
+let contentsGlass = null;
 const pageScrollMotion = window.matchMedia('(prefers-reduced-motion:reduce)');
 const freezePageScroll = () => {
   authoredPageScroll = false;
@@ -54,6 +55,7 @@ const openSearch = async (trigger, pointer = false) => {
   origin = trigger || document.activeElement;
   searchDestination = null;
   freezePageScroll();
+  contentsGlass?.follow();
   dialog.showModal();
   input.toggleAttribute('data-pointer-focus', pointer);
   input.value = '';
@@ -199,6 +201,7 @@ document.addEventListener('click', event => {
   target.removeAttribute('data-pointer-focus');
   target.focus({preventScroll:true});
   target.scrollIntoView({block:'start',behavior:pageScrollBehavior()});
+  contentsGlass?.select(link,authoredPageScroll);
   recordReadingLocation();
 });
 // Returning to the top is a viewport action, not a document/history destination.
@@ -209,6 +212,7 @@ if (pageTopAction) {
     const target = document.getElementById('page-top');
     if (!target) return;
     target.focus({preventScroll:true});
+    contentsGlass?.follow();
     window.scrollTo({top:0,left:0,behavior:pageScrollBehavior()});
   });
 }
@@ -314,6 +318,7 @@ function scheduleCurrentSection() {
       else entry.link.removeAttribute('aria-current');
     }
     recordReadingLocation(current.target.id);
+    contentsGlass?.read({current:current.link,position:scrollY,readingLine,transportActive:authoredPageScroll});
   });
 }
 window.addEventListener('scroll',scheduleCurrentSection,{passive:true});
@@ -407,3 +412,9 @@ for (const figure of document.querySelectorAll('.schema-figure')) {
     viewer.showModal();
   });
 }
+
+// Enhance the existing chapter section list; no preview routes or controls.
+if (sectionEntries.length) import('./contents-glass.mjs').then(({attachContentsGlass}) => {
+  contentsGlass = attachContentsGlass({entries:sectionEntries});
+  scheduleCurrentSection();
+}).catch(error => console.warn('Contents material unavailable',error));

@@ -1,5 +1,5 @@
 {
-  "design/handbook-lab/app.js": "2ac10f24a972d160d2e50a95ca668f9eb6f2224f7566c8b8710f4044360e19c9",
+  "design/handbook-lab/app.js": "ba1b26a401cefc9375a19f1570e624a121ec50b0698b9ebd45f6a673b4995349",
   "design/handbook-lab/assets/open-loop.webp": "e0d9ada654991a73cf5a174dc9f17c5d9773ac4a3aa71b62c148df56a4c0f2ab",
   "design/handbook-lab/assets/shared-machine.webp": "f299e8df47d0a133d75ce2196f28f78adb628e8839e6aefbdbe103d580d8780d",
   "design/handbook-lab/chapters/mongodb-administration.html": "e7165d36768fb29bb10be749fe721127358a3d3972cff068aab813488682bffd",
@@ -63,7 +63,7 @@
   "design/handbook-lab/operating-systems.html": "82b081f0851029b55199032892bfe9129d1c0779b0af34a44ccdc385d35acaa6",
   "design/handbook-lab/registry.json": "4db800aa69a65f65ea7f5a4a21a1ebcfaafd489eae7e727c1895e700f4d940a9",
   "design/handbook-lab/search-index.json": "e7036f0f9e54c78ef026fd418db2f50a48c7dd776606cecf60541383372cf779",
-  "design/handbook-lab/styles.css": "ba1ae220c76ae2ca8a2b7e2e8078e5082cb86738e820dbd95639a44ad4d13990",
+  "design/handbook-lab/styles.css": "26edcb2db973a4c58dd257778f3a8b71e2399b6bc8eab868010251ea392b450e",
   "design/handbook-lab/tasks/change.html": "9c698fb88e0186becca26ee0ec71ef1f4d5fab6b35d543ac023d3a121164d6e7",
   "design/handbook-lab/tasks/observe.html": "580852d4e9f44b4b16a72dee0f572fc8328cc399ce4ba42e1da5c884be9caf69",
   "design/handbook-lab/tasks/recover.html": "472d599d7c35d9fe4ed40b9e1998a380c6fc639673598ace9e1f5ccd79c3d95c",
@@ -94,5 +94,7 @@
   "lab/selected.js": "b1f5038e91c5b50780fe6b31bfaacc307f45edb603f493ae6bff0daf3fe434c1",
   "lab/speckle.svg": "4c98597b5cae5e192706166eadefd532a2927c34722d3e09dbbc248132a48c30",
   "lab/style.css": "62be6fbbf1e1529d8b237e83574ab3bc8c6cf3ea91de1e14543d985455c28f7b",
-  "lab/workbench-data.js": "1039311a1fe30c0a4d21cd77b4f99c3a33a7d86034ff7ef46136c7ba60190001"
+  "lab/workbench-data.js": "1039311a1fe30c0a4d21cd77b4f99c3a33a7d86034ff7ef46136c7ba60190001",
+  "design/handbook-lab/contents-glass.mjs": "defd6fcd815b45764e0cb50bf7011735315157f7dee91ce5abe3c627a0cf79ab",
+  "design/handbook-lab/contents-glass-math.mjs": "bbcb33da1659cdfb5d60742cbc554212689326d2423b598f5b498af249353247"
 }

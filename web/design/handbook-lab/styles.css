@@ -227,3 +227,15 @@ a,button,summary{transition:color 140ms ease-out,background-color 140ms ease-out
 /* Current reading position: retain the chapter and mark its active section. */
 .reader-controls .chapter-sections a[aria-current="location"]{color:var(--red);background:var(--panel);font-weight:600;box-shadow:inset 2px 0 var(--red)}
 @media(forced-colors:active){.reader-controls .chapter-sections a[aria-current="location"]{outline:1px solid CanvasText;outline-offset:-1px}}
+
+
+/* Liquid glass decorates the real section links without replacing their hit areas. */
+.contents-glass-host{position:relative;isolation:isolate}
+.reader-controls .chapter-sections>.contents-glass-layer{position:absolute;inset:0;z-index:0;list-style:none;margin:0;padding:0;border:0;pointer-events:none}
+.contents-glass-layer canvas{position:absolute;top:0;left:0;display:block;pointer-events:none}
+.contents-glass-layer canvas[hidden]{display:none}
+.contents-label-paint{z-index:0}.contents-glass-paint{z-index:1}
+.reader-controls .chapter-sections.contents-glass-ready a,.reader-controls .chapter-sections.contents-glass-ready a[aria-current="location"],.reader-controls .chapter-sections.contents-glass-ready a:hover{position:relative;z-index:2;color:transparent;background:none;box-shadow:none;font-weight:400;text-decoration:none}
+.reader-controls .chapter-sections.contents-glass-ready a:focus-visible{outline-offset:0}
+@media(forced-colors:active){.contents-glass-layer{display:none!important}.reader-controls .chapter-sections.contents-glass-ready a{color:LinkText}}
+@media print{.contents-glass-layer{display:none!important}}
