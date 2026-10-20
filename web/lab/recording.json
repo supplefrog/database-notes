@@ -1,0 +1,190 @@
+{
+  "run_id": "6c084dc3622c4e96bd2038e5741e215a",
+  "stage": "verified",
+  "engine": "SQLite 3.53.1",
+  "seed": "incident-queue-v1",
+  "seed_rows": 120000,
+  "events": [
+    {
+      "position": 1,
+      "action": "query_measurement",
+      "observed_at_ns": 1792428928457275700,
+      "tenant": 7,
+      "results_equal": true
+    },
+    {
+      "position": 2,
+      "action": "checkpoint_and_writes",
+      "observed_at_ns": 1792428928924769500,
+      "journal_events": 24,
+      "snapshot_rows": 120000,
+      "current_rows": 120012
+    },
+    {
+      "position": 3,
+      "action": "delete_tenant_7",
+      "observed_at_ns": 1792428929385556800,
+      "removed_rows": 5012,
+      "scope": "this run's live.sqlite only"
+    },
+    {
+      "position": 4,
+      "action": "snapshot_restore_and_replay",
+      "observed_at_ns": 1792428929428799600,
+      "replayed": 24,
+      "recovery_ms": 27.5772
+    },
+    {
+      "position": 5,
+      "action": "independent_verification",
+      "observed_at_ns": 1792428930382303100,
+      "passed": true
+    }
+  ],
+  "benchmark": {
+    "query": "SELECT id, severity, created_minute FROM incidents\nWHERE tenant_id = ? AND state = ?\nORDER BY created_minute DESC, id DESC LIMIT 50",
+    "parameters": [
+      7,
+      "open"
+    ],
+    "plan": {
+      "scan": [
+        {
+          "id": 4,
+          "parent": 0,
+          "unused": 216,
+          "detail": "SCAN incidents"
+        },
+        {
+          "id": 21,
+          "parent": 0,
+          "unused": 0,
+          "detail": "USE TEMP B-TREE FOR ORDER BY"
+        }
+      ],
+      "index": [
+        {
+          "id": 4,
+          "parent": 0,
+          "unused": 56,
+          "detail": "SEARCH incidents USING COVERING INDEX queue_lookup (tenant_id=? AND state=?)"
+        }
+      ]
+    },
+    "timings": {
+      "scan": {
+        "samples_ms": [
+          6.0849,
+          6.0765,
+          6.0689,
+          6.0026,
+          6.0335,
+          6.2163,
+          6.1886,
+          6.7485,
+          6.3699
+        ],
+        "median_ms": 6.0849,
+        "min_ms": 6.0026,
+        "max_ms": 6.7485,
+        "p95_ms": 6.7485
+      },
+      "index": {
+        "samples_ms": [
+          0.1871,
+          0.0949,
+          0.1487,
+          0.0837,
+          0.1181,
+          0.1096,
+          0.1543,
+          0.0809,
+          0.1452
+        ],
+        "median_ms": 0.1181,
+        "min_ms": 0.0809,
+        "max_ms": 0.1871,
+        "p95_ms": 0.1871
+      }
+    },
+    "work": {
+      "scan": {
+        "vm_instructions_approx": 395300,
+        "granularity": 100,
+        "timed": false
+      },
+      "index": {
+        "vm_instructions_approx": 300,
+        "granularity": 100,
+        "timed": false
+      }
+    },
+    "result_count": 50,
+    "result_sha256": "7a7148ce4cb7245bcd17edd6722a5bd5e0ebc00bb90fc1798e1c89e37d03c97e",
+    "index_sql": "CREATE INDEX queue_lookup ON incidents(tenant_id,state,created_minute DESC,id DESC,severity)",
+    "index_build_ms": 116.6508,
+    "baseline_bytes": 2682880,
+    "indexed_bytes": 5664768,
+    "method": {
+      "warmups_per_variant": 3,
+      "repeats_per_variant": 9,
+      "order": "paired alternating scan/index then index/scan",
+      "clock": "perf_counter_ns",
+      "fetch_all_in_timing": true,
+      "cache": "warm SQLite and OS caches; no cold-cache claim",
+      "limits": "Single process, fixed fixture; no concurrent writers. Not a production benchmark. VM counts are separate instrumented executions, not rows read. Nine samples give a coarse p95."
+    }
+  },
+  "verification": {
+    "passed": true,
+    "oracle": "independent fixture-spec reconstruction v1",
+    "expected": {
+      "tenants": {
+        "rows": 24,
+        "sha256": "84793e24da71d306e264e33aa2399dd6baf0b6b991e38e05bb1013667ff2a28c"
+      },
+      "incidents": {
+        "rows": 120012,
+        "sha256": "f33148c77b1f0c2e774a87d1dffb904bbb05010f34d129aff1264873d9aeea9e"
+      }
+    },
+    "actual": {
+      "tenants": {
+        "rows": 24,
+        "sha256": "84793e24da71d306e264e33aa2399dd6baf0b6b991e38e05bb1013667ff2a28c"
+      },
+      "incidents": {
+        "rows": 120012,
+        "sha256": "f33148c77b1f0c2e774a87d1dffb904bbb05010f34d129aff1264873d9aeea9e"
+      }
+    },
+    "application_marker": true,
+    "integrity_check": [
+      "ok"
+    ],
+    "foreign_key_violations": [],
+    "column_contract": true,
+    "business_tables_only": true,
+    "scope": "Every ordered business row, column names/order, FK and SQLite structure; no byte-for-byte database-file identity claim."
+  },
+  "before_fault": {
+    "tenants": {
+      "rows": 24,
+      "sha256": "84793e24da71d306e264e33aa2399dd6baf0b6b991e38e05bb1013667ff2a28c"
+    },
+    "incidents": {
+      "rows": 120012,
+      "sha256": "f33148c77b1f0c2e774a87d1dffb904bbb05010f34d129aff1264873d9aeea9e"
+    }
+  },
+  "after_fault": {
+    "tenants": {
+      "rows": 24,
+      "sha256": "84793e24da71d306e264e33aa2399dd6baf0b6b991e38e05bb1013667ff2a28c"
+    },
+    "incidents": {
+      "rows": 115000,
+      "sha256": "37970dd1800340ec190119a23a92ee8726fc7dab8e108418008a0b2c481956ff"
+    }
+  }
+}

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>DB Lab — Query inspection</title>
+  <link rel="stylesheet" href="./selected.css">
+  <script type="module" src="./selected.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to query inspection</a>
+  <header class="topbar">
+    <a class="wordmark" href="#main" aria-label="DB Lab, query inspection">DB<span>Lab</span></a>
+    <span id="engine" class="environment">Local SQLite <span class="separator">/</span> recorded benchmark</span>
+    <span id="stage" class="stage">Reading status</span>
+    <details id="run-details" class="run-details disclosure">
+      <summary>Run details <span class="chevron" aria-hidden="true"></span></summary>
+      <div class="disclosure-body"><div class="detail-inner">
+        <p>Read-only query inspection</p>
+        <dl><dt>Run</dt><dd id="run-id">Not loaded</dd><dt>Stage</dt><dd id="run-stage">Not loaded</dd><dt>Fixture</dt><dd id="fixture">Not loaded</dd></dl>
+        <a id="original" hidden>Query inspection</a>
+        <a id="slate" hidden>Recovery evidence</a>
+      </div></div>
+    </details>
+  </header>
+  <main id="main" tabindex="-1">
+    <div class="notice" id="status-notice" role="status" aria-live="polite"></div>
+    <div class="notice error" id="error-notice" role="alert" hidden></div>
+    <div id="empty" class="empty" hidden><h1>Inspect an existing experiment</h1><p id="empty-copy"></p><button id="refresh-empty" type="button">Reload recording</button></div>
+    <div id="experiment" hidden>
+      <h1 id="query-title">Tenant 7’s 50 newest open incidents</h1>
+      <section class="query-context" aria-label="Query and index context">
+        <div class="sql-context"><h2>Query</h2><pre id="query" aria-label="Parameterized SQL query"><code></code></pre><p id="parameters" class="parameters"></p></div>
+        <div class="index-context"><h2 id="index-heading">Index column order</h2><div id="fields" class="fields" aria-label="Inspect an index field"></div><p id="field-explanation" class="field-explanation"></p></div>
+      </section>
+      <section class="inspection" aria-label="Benchmark inspection">
+        <div class="toolbar">
+          <div role="tablist" aria-label="Inspection view" class="tabs"><button id="plans-tab" role="tab" aria-controls="plans-panel" aria-selected="true" tabindex="0">Plans</button><button id="timings-tab" role="tab" aria-controls="timings-panel" aria-selected="false" tabindex="-1">Timings</button></div>
+          <fieldset id="plan-sources" class="sources" aria-label="Inspection source"><legend>Inspect:</legend><label><input type="radio" name="source" value="scan">Baseline</label><label><input type="radio" name="source" value="index" checked>Indexed</label></fieldset><span id="both-copies" class="both-copies" hidden>Both copies</span>
+        </div>
+        <div id="plans-panel" role="tabpanel" aria-labelledby="plans-tab" tabindex="0">
+          <figure class="specimen" id="specimen">
+            <figcaption><span>Schematic of <strong>incidents</strong> (all tenants)</span><span>24 tenants · illustrative layout, not rows read</span></figcaption>
+            <div class="specimen-object" role="img" aria-label="One schematic field divided into 24 equal tenant bands. Equal widths are illustrative and do not represent row counts or measured work. Tenant 7 is the query's tenant."><div id="bands" class="bands" aria-hidden="true"></div><div class="tenant-outline" aria-hidden="true"></div></div>
+            <div id="tenant-axis" class="tenant-axis" aria-hidden="true"></div>
+            <div class="annotation"><span class="tether" aria-hidden="true"></span><p id="plan-annotation"></p></div>
+          </figure>
+          <div id="unsupported-plan" class="unsupported" hidden><p>The specialized tenant/index schematic does not match this recorded query. Inspect the exact plan below.</p><pre id="unsupported-query"></pre></div>
+        </div>
+        <div id="timings-panel" role="tabpanel" aria-labelledby="timings-tab" tabindex="0" hidden>
+          <div class="timing-heading"><h2>Recorded sample pairs</h2><span>Milliseconds · shared zero-based scale</span></div>
+          <p class="timing-help">Hover or focus a pair to inspect it. Select to pin; select again or press Escape to clear.</p>
+          <div class="timing-legend"><span class="baseline-key">Baseline</span><span class="indexed-key">Indexed</span></div>
+          <div id="scale" class="scale" aria-hidden="true"></div>
+          <table class="samples"><caption class="sr-only">All measured pairs. Baseline and indexed milliseconds use the same scale.</caption><thead><tr><th scope="col">Pair</th><th scope="col" class="plot-heading"><span class="sr-only">Shared scale plot</span></th><th scope="col">Baseline · ms</th><th scope="col">Indexed · ms</th></tr></thead><tbody id="samples"></tbody></table>
+          <p id="sample-unavailable" hidden>Complete paired samples are unavailable. No missing values have been estimated.</p>
+          <div class="sample-inspection"><p id="sample-readout" aria-live="polite">No sample pinned.</p><button id="clear-sample" type="button" disabled>Clear selection</button></div>
+          <details id="raw-samples" class="disclosure"><summary>Exact recorded samples <span class="chevron" aria-hidden="true"></span></summary><div class="disclosure-body"><div class="detail-inner"><p>Milliseconds as returned in this benchmark response, without display rounding. Positions correspond to the pair numbers above. The compact table and readout use four decimal places; null means that sample array was not returned.</p><pre id="raw-samples-data" tabindex="0" aria-label="Unrounded recorded baseline and indexed sample arrays, in milliseconds"></pre></div></div></details>
+          <p id="method" class="method"></p>
+        </div>
+      </section>
+      <section class="comparison" aria-label="Measured query comparison">
+        <div class="metric"><h2>Baseline</h2><p><strong id="baseline-median">—</strong><span> ms</span></p><span id="baseline-summary" class="metric-caption"></span></div>
+        <div class="metric"><h2>Indexed</h2><p><strong id="index-median">—</strong><span> ms</span></p><span id="index-summary" class="metric-caption"></span></div>
+        <div class="ratio metric"><h2>Median ratio</h2><p><strong id="ratio">—</strong></p><span class="metric-caption">Baseline ÷ indexed · this run</span></div>
+        <div id="agreement" class="agreement"><span id="agreement-mark" class="agreement-mark" aria-hidden="true">?</span><div><h2 id="agreement-title">Comparison unavailable</h2><p id="agreement-copy"></p></div></div>
+      </section>
+      <section class="evidence-shelf" aria-label="Evidence and recovery continuation">
+        <div class="evidence-group"><h2>Evidence and details</h2><p id="unmeasured-evidence" class="parameters" hidden>No benchmark evidence is recorded yet. Open the existing flow to measure this run.</p><div class="evidence-controls">
+          <details id="plan-details" class="disclosure"><summary>Exact plan <span class="chevron" aria-hidden="true"></span></summary><div class="disclosure-body"><div class="detail-inner"><h3 id="exact-plan-title">Indexed plan</h3><pre id="exact-plan" tabindex="0" aria-label="Complete query plan records"></pre><h3>Index definition</h3><pre id="index-sql" tabindex="0"></pre><h3>Query and parameters</h3><pre id="exact-query" tabindex="0"></pre></div></div></details>
+          <details id="result-details" class="disclosure"><summary>Result evidence <span class="chevron" aria-hidden="true"></span></summary><div class="disclosure-body"><div class="detail-inner"><p id="result-record"></p><h3>Shared ordered-result SHA-256</h3><code id="result-hash" class="digest"></code><button type="button" id="copy-hash" disabled>Copy full hash</button><span id="copy-status" role="status"></span><p id="result-scope">Query-result agreement is separate from independent recovery verification.</p></div></div></details>
+        </div></div>
+        <div class="continuation"><div><h2>Recover the same experiment</h2><p id="recovery-copy">Checkpoint, controlled fault, restore and verify.</p></div><a id="recovery" class="recovery" hidden>Continue to recovery <span aria-hidden="true">→</span></a></div>
+      </section>
+      <footer class="footnote"><p id="qualification"></p><button id="refresh" type="button">Reload recording</button></footer>
+    </div>
+    <noscript>This recorded inspection requires JavaScript. No database operation is available on this website.</noscript>
+  </main>
+</body>
+</html>

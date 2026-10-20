@@ -88,5 +88,19 @@
   "index.html": "80d7071f90b0d974b16a4b723934230c85180413c44711d5d3896a10ac3b5a32",
   "licenses/ibm-plex-mono.txt": "23b0a9d0c6d3f140a0b77e483c5cfa6bba574325ef5cb189ed9f2fec4884533f",
   "licenses/newsreader.txt": "26028ec4e13b650065fa525a09532176f8a668b76ff849ea01c564a7480f91e7",
-  "licenses/notes-GPL-3.0.txt": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809"
+  "licenses/notes-GPL-3.0.txt": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809",
+  "lab/grain.svg": "4d0216a869d7d58e7132d9b029d890837b17ad651f0e1df39a6e43e7fbfbade1",
+  "lab/index.html": "026190e1392177109c7ea7aaa7d3ec5f280d8ca80069a089e3409686bac0a770",
+  "lab/model.js": "bd815b56af747373688be5d572631779d5c0fe4937b484ebf4c31f261bc65ea5",
+  "lab/public-reader.js": "e8bdadd4bc4910039efb0ac1a92177972c60c8adced6d907b609a04597ad4fb1",
+  "lab/recording.json": "f4cd62fce87bba5c7dcf1cb8a2982f149a9e72783f41220674f144b0c4385c22",
+  "lab/recovery.js": "59a1eddc0a5efe7d64666fb49d5ab49aa2f3b77353eae7d8b6dcf5cc6286d657",
+  "lab/review/slate/index.html": "896b099d87a54c178137e00b879a4ca5b415a212061c7b902a2a000b2f0adb7e",
+  "lab/selected-controller.js": "3ded90381a788a1d027b7ec7ea994e923143efc58ac9971eac923e6b974614ab",
+  "lab/selected-motion.js": "634fc6b2c2d2086d034a795856a4953750349259bccf9e7fbdaabeaf9d0083c9",
+  "lab/selected.css": "2d419a9f3f66acd5d461cc0c83f1f5dac165313e89dbd1d627b1f901451cb593",
+  "lab/selected.js": "b1f5038e91c5b50780fe6b31bfaacc307f45edb603f493ae6bff0daf3fe434c1",
+  "lab/speckle.svg": "4c98597b5cae5e192706166eadefd532a2927c34722d3e09dbbc248132a48c30",
+  "lab/style.css": "62be6fbbf1e1529d8b237e83574ab3bc8c6cf3ea91de1e14543d985455c28f7b",
+  "lab/workbench-data.js": "1039311a1fe30c0a4d21cd77b4f99c3a33a7d86034ff7ef46136c7ba60190001"
 }
