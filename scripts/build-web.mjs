@@ -1,3 +1,4 @@
+import {verifyReleaseDocuments} from './check-release.mjs';
 import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
@@ -5,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+await verifyReleaseDocuments(root);
 const web=path.join(root,'web');
 const manifest=JSON.parse(await readFile(path.join(root,'web-manifest.json'),'utf8'));
 async function inventory(directory,prefix=''){

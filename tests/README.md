@@ -163,3 +163,41 @@ The hidden DB Lab link is a 44 x 44 CSS-pixel hotspot centered at 70% horizontal
 ## Scrollbar thresholds and material entrance
 
 [Disclosure regression instructions](README-disclosure.md) cover 12 fresh native-input journeys, including actual overflow threshold crossings, wide/narrow open/close, rapid keyboard reversal and interrupted bubble formation. Stable outer viewport dimensions alone do not establish stable inner geometry. The pane must expand through visible intermediate geometry; a full-sized fade does not establish the selected bubbly entrance. Existing reading, emphasis and matched exit-paint checks remain required neighbors.
+
+
+## Historical verification records
+
+These prior authoring records describe their own revisions, not certification of
+the current manifest. The 0.1.2 README reported all 14 browser groups, including
+78 layout and 20 Contents states, Copy/local-code-scroll behavior and separate
+controlled Copy-failure recovery. The 0.1.3 README reported all 19 groups,
+including eight Home-to-reader entry states with actual browser Back. The 0.1.4
+README described a 22-group suite covering repeated fragment navigation,
+transient Copy feedback and delayed-registry Resume; that sentence alone is not
+a fresh pass record for later code. These claims are preserved from the README
+at [02a7c42](https://github.com/supplefrog/database-notes/commit/02a7c42).
+
+The historical reports left optional Linux execution, other engines, physical
+input/zoom, screen readers and displayed FPS unverified. No dependency, CI or
+hosting-setting addition was claimed. Existing 0.1.1 recorded observations do not
+certify a later manifest; run fresh affected journeys after UI changes.
+
+## Recorded UI evidence validator
+
+
+The build and static validator do not launch a browser. UI corrections have a
+separate checker for browser observations collected during local QA:
+
+```sh
+python scripts/check-ui-regressions.py "path/to/browser-evidence"
+```
+
+It checks modal controls/background scrolling, same-page search completion,
+pointer/keyboard/restored focus, local vector marks, reader-control alignment,
+responsive header and hero text/art/action/divider clearance, and the exact
+static Practice guidance correction. Evidence is kept outside the public web
+output. Its source stamp must match `web-manifest.json`; a source change requires
+fresh affected browser observations, never just changing the stamp. The checker
+does not rerun browser interactions, certify every layout, or run as part of CI.
+Native zoom, trusted wheel/touch, physical-device, screen-reader and changed-cloud
+coverage remain separately identified when not observed.

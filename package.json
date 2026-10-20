@@ -10,6 +10,8 @@
     "build": "node scripts/build-web.mjs",
     "check": "python scripts/validate-web.py",
     "verify:live": "node scripts/verify-live.mjs",
-    "test:glass": "node tests/contents-glass-all.test.mjs"
+    "test:glass": "node tests/contents-glass-all.test.mjs",
+    "check:release": "node scripts/check-release.mjs",
+    "test:release": "node tests/release-docs.test.mjs"
   }
 }

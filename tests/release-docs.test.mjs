@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {checkReleaseDocuments} from '../scripts/check-release.mjs';
+const readme='Read the [change history](CHANGELOG.md).';
+const current={version:'0.1.10',readme,changelog:'# Changelog\n\n## [Unreleased]\n\n## [0.1.10]\n\n## [0.1.9]\n'};
+const cases=[];const test=(name,fn)=>{fn();cases.push(name);};
+test('current-version-with-unreleased-work-is-valid',()=>assert.equal(checkReleaseDocuments(current),'0.1.10'));
+test('a-package-bump-without-changelog-entry-fails',()=>assert.throws(()=>checkReleaseDocuments({...current,version:'0.1.11'}),/package version 0.1.11/));
+test('an-entry-buried-below-a-stale-current-heading-fails',()=>assert.throws(()=>checkReleaseDocuments({...current,changelog:'## [0.1.9]\n## [0.1.10]\n'}),/package version 0.1.10/));
+test('duplicate-version-blocks-fail',()=>assert.throws(()=>checkReleaseDocuments({...current,changelog:current.changelog+'\n## [0.1.10]\n'}),/duplicate version/));
+test('missing-readme-history-link-fails',()=>assert.throws(()=>checkReleaseDocuments({...current,readme:'# Notes'}),/link to CHANGELOG/));
+test('cumulative-readme-release-narrative-fails',()=>assert.throws(()=>checkReleaseDocuments({...current,readme:readme+'\n\n## 0.1.2 navigation and action polish\n'}),/release-history headings/));
+console.log(JSON.stringify({status:'pass',cases},null,2));
