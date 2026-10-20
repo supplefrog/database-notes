@@ -1,5 +1,6 @@
 import {progressStops,zeroVelocity,labelShape,interpolateShapes,advanceShape,settled,followScroll,anchorTopic,observeTopic} from './contents-glass-math.mjs';
 import {emphasisWeights,blendEmphasis,emphasisStroke} from './contents-glass-emphasis.mjs';
+import {revealStep,revealSettled,revealShape} from './contents-glass-entry.mjs';
 
 // Decorative adapter for the existing native Contents tree. app.js remains the
 // sole owner of reading state, URL/history, focus, Resume and page transport.
@@ -23,6 +24,7 @@ export function attachContentsGlass({entries}){
  let width=250,panelHeight=252,maxHeight=36,anchors=[],rows=[],stops=[],maxScroll=0,readingLine=56,progress={fraction:0,left:0,right:0};
  let dpr=devicePixelRatio||1,output=[0,0],renderSize=[0,0],sourceSize=[0,0],sourceOffset=[0,0],sizeKey='';
  let firstInput=0,inputToDrawCallbackMs=0,activeRafIntervalsMs=[],gl,surface,horizontal,vertical,bgTexture,strongTexture,sceneTexture,resolveTexture,sceneFbo,resolveFbo;
+ let reveal={value:0,velocity:0},surfaceShape=null;
  let emphasis=links.map(()=>0),emphasisGoal=[...emphasis],lastEmphasisTime=0;
  let observed={current:links[0],position:scrollY,readingLine:56,transportActive:false};
  const reduced=()=>motion.matches;
@@ -45,7 +47,7 @@ precision highp float;in vec2 uv;out vec4 color;
 uniform sampler2D background,strongBackground;
 uniform vec3 emphasisRow0,emphasisRow1;
 uniform vec2 viewSize,panelSize,sourceSize,sourceOffset,slabSize,slabCenter;
-uniform float paintLeft;
+uniform float paintLeft,presence;
 uniform float top,slabHeight,thickness,indexOfRefraction,lensScale,gutter;
 float sdf(vec2 p){vec2 q=abs(p)-vec2(slabSize.x*.5-4.,slabHeight*.5)+7.;return length(max(q,0.))+min(max(q.x,q.y),0.)-7.;}
 float surfaceHeight(vec2 p){
@@ -85,7 +87,7 @@ void main(){
  vec3 reflected=mix(vec3(.32,.31,.29),vec3(.98,.98,.96),smoothstep(-.15,.9,normal.y));
  vec3 material=mix(transmitted,reflected,fresnel*.65);
  material=mix(material,vec3(.96,.96,.94),.025)+vec3(spec*.16+rim*.05);
- color=vec4(material*coverage,coverage+shadow*(1.-coverage));
+ color=vec4(material*coverage,coverage+shadow*(1.-coverage))*presence;
 }`;
 const tent=`#version 300 es
 precision highp float;in vec2 uv;out vec4 color;
@@ -194,7 +196,8 @@ function labels(){
 function ensurePaint(){if(!canDraw())return;try{if(geometryDirty)measure();if(storageDirty){storage();storageDirty=false;}if(labelsDirty)labels();}catch(error){fail(error);}}
 function render(){
  if(!canDraw())return;ensurePaint();if(!canDraw()||!glassMode())return;
- emphasisGoal=emphasisWeights(shape,measuredShapes(),owner.kind==='topic'?owner.index:null);
+ surfaceShape=revealShape(shape,reveal.value);
+ emphasisGoal=emphasisWeights(shape,measuredShapes(),owner.kind==='topic'?owner.index:null).map(weight=>weight*surfaceShape.opacity);
  const now=performance.now();emphasis=blendEmphasis(emphasis,emphasisGoal,(now-lastEmphasisTime)/1000,reduced()||!lastEmphasisTime);lastEmphasisTime=now;
  links.forEach((link,index)=>{const value=emphasis[index].toFixed(4);if(link.style.getPropertyValue('--contents-emphasis')!==value)link.style.setProperty('--contents-emphasis',value);});
  const [rw,rh]=renderSize,[ow,oh]=output,cw=ow/dpr,ch=oh/dpr,box=localBox();
@@ -209,7 +212,7 @@ function render(){
  const emphasized=emphasis.map((weight,index)=>({weight,index})).filter(row=>row.weight>0).sort((a,b)=>b.weight-a.weight).slice(0,2);
  for(let i=0;i<2;i++){const entry=emphasized[i],row=entry&&rows[entry.index];gl.uniform3f(u(`emphasisRow${i}`),row?row.top-1:0,row?row.top+row.height+1:-1,entry?.weight||0);}
  gl.uniform2f(u('viewSize'),cw,ch);gl.uniform2f(u('panelSize'),width,panelHeight);gl.uniform2f(u('sourceSize'),...sourceSize);gl.uniform2f(u('sourceOffset'),...sourceOffset);
- gl.uniform1f(u('top'),top);gl.uniform1f(u('gutter'),gutter);gl.uniform1f(u('slabHeight'),shape.h);gl.uniform2f(u('slabSize'),shape.w,shape.h);gl.uniform2f(u('slabCenter'),shape.x+shape.w/2,shape.y+shape.h/2);gl.uniform1f(u('paintLeft'),left);gl.uniform1f(u('thickness'),+thickness.value);gl.uniform1f(u('indexOfRefraction'),mode.value==='ior1'?1:+ior.value);gl.uniform1f(u('lensScale'),+lens.value);gl.drawArrays(gl.TRIANGLES,0,6);
+ gl.uniform1f(u('top'),top);gl.uniform1f(u('gutter'),gutter);gl.uniform1f(u('presence'),surfaceShape.opacity);gl.uniform1f(u('slabHeight'),surfaceShape.h);gl.uniform2f(u('slabSize'),surfaceShape.w,surfaceShape.h);gl.uniform2f(u('slabCenter'),shape.x+shape.w/2,shape.y+shape.h/2);gl.uniform1f(u('paintLeft'),left);gl.uniform1f(u('thickness'),+thickness.value);gl.uniform1f(u('indexOfRefraction'),mode.value==='ior1'?1:+ior.value);gl.uniform1f(u('lensScale'),+lens.value);gl.drawArrays(gl.TRIANGLES,0,6);
  for(const [pass,tex,fbo,w,h,dx,dy,radius] of [[horizontal,sceneTexture,resolveFbo,ow,rh,1/rw,0,rw/ow],[vertical,resolveTexture,null,ow,oh,0,1/rh,rh/oh]]){
   gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.viewport(0,0,w,h);gl.useProgram(pass.program);gl.bindTexture(gl.TEXTURE_2D,tex);gl.uniform1i(pass.u('image'),0);gl.uniform2f(pass.u('stepUV'),dx,dy);gl.uniform1f(pass.u('radius'),Math.max(1,radius));gl.drawArrays(gl.TRIANGLES,0,6);
  }
@@ -229,8 +232,9 @@ function render(){
  function tick(time){
   frame=0;if(!canDraw()){last=0;shapeVelocity=zeroVelocity();return;}
   const dt=last?(time-last)/1000:1/60;last=time;
+  reveal=revealStep(reveal,1,dt,reduced());
   ({shape,velocity:shapeVelocity}=advanceShape(shape,shapeVelocity,aim,dt,reduced()));synchronize();render();
-  if(!settled(shape,shapeVelocity,aim)||emphasis.some((value,index)=>Math.abs(value-emphasisGoal[index])>.001))frame=requestAnimationFrame(tick);else{settleShape();emphasis=[...emphasisGoal];last=0;render();}
+  if(!revealSettled(reveal)||!settled(shape,shapeVelocity,aim)||emphasis.some((value,index)=>Math.abs(value-emphasisGoal[index])>.001))frame=requestAnimationFrame(tick);else{reveal={value:1,velocity:0};settleShape();emphasis=[...emphasisGoal];last=0;render();}
  }
  function request(){if(canDraw()&&!frame){last=0;lastEmphasisTime=performance.now();frame=requestAnimationFrame(tick);}}
  function summary(){}
@@ -244,7 +248,7 @@ function render(){
   if(!visible()){if(contrast.matches||paintFailure||shaderError){panel.classList.remove('contents-glass-ready');glass.hidden=true;}return;}
   setupGL();if(!gl||shaderError){panel.classList.remove('contents-glass-ready');glass.hidden=true;return;}
   effective=true;panel.classList.add('contents-glass-ready');glass.hidden=false;
-  try{targetShape();settleShape();ensurePaint();lastEmphasisTime=0;render();}catch(error){fail(error);}
+  try{targetShape();settleShape();ensurePaint();if(reduced())reveal={value:1,velocity:0};lastEmphasisTime=0;render();request();}catch(error){fail(error);}
  }
  function invalidate(){geometryDirty=storageDirty=labelsDirty=true;sizeKey='';refresh();}
  function read(next){
@@ -266,6 +270,16 @@ function render(){
   link.addEventListener('pointerenter',event=>{if(event.pointerType==='touch')return;hovered=index;labelsDirty=true;request();});
   link.addEventListener('pointerleave',()=>{if(hovered!==index)return;hovered=-1;labelsDirty=true;request();});
  }
+ // Reset only after a disclosure has actually finished hiding. A reversal
+ // during visible exit retains present expansion/velocity and matched ink.
+ function resetHiddenReveal(){
+  if(parents.some(parent=>!parent.open&&(getComputedStyle(parent,'::details-content').contentVisibility==='hidden'||Number(getComputedStyle(parent,'::details-content').opacity)===0)))reveal={value:0,velocity:0};
+ }
+ for(const parent of parents){
+  parent.addEventListener('transitionend',resetHiddenReveal);
+  const summary=parent.querySelector(':scope>summary');
+  for(const type of ['pointerdown','keydown'])summary?.addEventListener(type,resetHiddenReveal,{capture:true});
+ }
  new IntersectionObserver(records=>{const next=records.some(record=>record.isIntersecting);if(next===onscreen)return;onscreen=next;geometryDirty=storageDirty=labelsDirty=true;refresh();}).observe(panel);
  new MutationObserver(()=>{geometryDirty=storageDirty=labelsDirty=true;refresh(true);}).observe(panel.closest('.contents-menu'),{attributes:true,attributeFilter:['open'],subtree:true});
  const resize=new ResizeObserver(invalidate);resize.observe(panel);const article=document.querySelector('.reader');if(article)resize.observe(article);
@@ -273,10 +287,10 @@ function render(){
  window.addEventListener('pageshow',()=>{owner=followScroll();invalidate();});
  window.addEventListener('resize',()=>{dpr=devicePixelRatio||1;invalidate();});
  document.fonts?.ready.then(invalidate);window.addEventListener('load',invalidate);
- motion.addEventListener('change',()=>{if(reduced())settleShape();request();});contrast.addEventListener('change',refresh);
+ motion.addEventListener('change',()=>{if(reduced()){reveal={value:1,velocity:0};settleShape();}request();});contrast.addEventListener('change',refresh);
  let dprQuery;function watchDpr(){dprQuery?.removeEventListener('change',changedDpr);dprQuery=matchMedia(`(resolution:${dpr}dppx)`);dprQuery.addEventListener('change',changedDpr);}
  function changedDpr(){dpr=devicePixelRatio||1;watchDpr();invalidate();}watchDpr();
  window.visualViewport?.addEventListener('resize',()=>{if(dpr!==(devicePixelRatio||1))changedDpr();});
- Object.defineProperty(window,'notesContentsGlass',{configurable:true,get:()=>({revision:'integrated-r3-ink-motion',labelRenderer:'native-outside-refracted-inside',filter:'lanczos2',pixelAligned:true,enabled:effective,onscreen,drawingAllowed:canDraw(),owner:{...owner},current:observed.current?.hash,shape:{...shape},aim:{...aim},shapeVelocity:{...shapeVelocity},progress,frames,labelPaints,allocations,dpr,output:[...output],source:[...sourceSize],shaderError,reduced:reduced(),geometryDirty})});
+ Object.defineProperty(window,'notesContentsGlass',{configurable:true,get:()=>({revision:'local-r4-boxless-bubble',reveal:{...reveal},surface:surfaceShape&&{...surfaceShape},labelRenderer:'native-outside-refracted-inside',filter:'lanczos2',pixelAligned:true,enabled:effective,onscreen,drawingAllowed:canDraw(),owner:{...owner},current:observed.current?.hash,shape:{...shape},aim:{...aim},shapeVelocity:{...shapeVelocity},progress,frames,labelPaints,allocations,dpr,output:[...output],source:[...sourceSize],shaderError,reduced:reduced(),geometryDirty})});
  return {read,select,follow};
 }

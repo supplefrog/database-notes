@@ -63,7 +63,7 @@
   "design/handbook-lab/operating-systems.html": "82b081f0851029b55199032892bfe9129d1c0779b0af34a44ccdc385d35acaa6",
   "design/handbook-lab/registry.json": "6efd35bcccd4c70f1cee28fef9f289ab18c063d254242ff40e6edc98689f9638",
   "design/handbook-lab/search-index.json": "f6ee751ba1b0d281a6871f7de595bfa394ce5197e463f6cc3fc4e8a96e7f50f4",
-  "design/handbook-lab/styles.css": "0658aea8e86cfb318ff41f91481bf41f25e6a1bf19be8396a99cf55b51028173",
+  "design/handbook-lab/styles.css": "fc17f6bc8bec13ee8e52978dcc64430dc877eb4e1ac18b7da35114d1b7a35548",
   "design/handbook-lab/tasks/change.html": "9c698fb88e0186becca26ee0ec71ef1f4d5fab6b35d543ac023d3a121164d6e7",
   "design/handbook-lab/tasks/observe.html": "580852d4e9f44b4b16a72dee0f572fc8328cc399ce4ba42e1da5c884be9caf69",
   "design/handbook-lab/tasks/recover.html": "472d599d7c35d9fe4ed40b9e1998a380c6fc639673598ace9e1f5ccd79c3d95c",
@@ -95,7 +95,8 @@
   "lab/speckle.svg": "4c98597b5cae5e192706166eadefd532a2927c34722d3e09dbbc248132a48c30",
   "lab/style.css": "62be6fbbf1e1529d8b237e83574ab3bc8c6cf3ea91de1e14543d985455c28f7b",
   "lab/workbench-data.js": "1039311a1fe30c0a4d21cd77b4f99c3a33a7d86034ff7ef46136c7ba60190001",
-  "design/handbook-lab/contents-glass.mjs": "46b9fa4f13c8fa4e65b9e5ce554f8b1cba0705a92a9f9ab4909f330154ddc743",
+  "design/handbook-lab/contents-glass.mjs": "6785c4fdb6f7b6dbfbadc2c606b1e252bf8d25f96eb94b0cb8c17fc9ceb072f6",
   "design/handbook-lab/contents-glass-math.mjs": "bbcb33da1659cdfb5d60742cbc554212689326d2423b598f5b498af249353247",
-  "design/handbook-lab/contents-glass-emphasis.mjs": "f41e08247324564fabb121170b6dfbcc095fdc270df73d62dc9c7e5a89d48946"
+  "design/handbook-lab/contents-glass-emphasis.mjs": "f41e08247324564fabb121170b6dfbcc095fdc270df73d62dc9c7e5a89d48946",
+  "design/handbook-lab/contents-glass-entry.mjs": "b263135bfd793ca807fc316bbb6e6366f25ea77610d5a1f3781c06d3361296dd"
 }

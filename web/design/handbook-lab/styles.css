@@ -72,7 +72,7 @@ html:has(dialog[open]){overflow:hidden}
 .reading-layout{grid-template-columns:250px minmax(0,790px);grid-template-areas:"contents intro" "contents article";column-gap:clamp(28px,4vw,64px);row-gap:0;justify-content:center;align-items:start}
 .reader-intro{grid-area:intro;min-width:0}
 .reader{grid-area:article}
-.reading-aside{grid-area:contents;display:block;position:sticky;top:24px;padding:30px 4px 4px;max-height:calc(100dvh - 48px);overflow:auto;overscroll-behavior:contain;font-size:14px}
+.reading-aside{grid-area:contents;display:block;position:sticky;top:24px;padding:30px 4px 4px;max-height:calc(100dvh - 48px);overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;font-size:14px}
 .reader-controls{position:static;display:block;border:0;padding:0;margin:0;background:var(--ground)}
 .reader-controls .contents-menu{position:static;width:100%}
 .reader-controls .contents-menu>summary{display:none}
@@ -237,9 +237,9 @@ a,button,summary{transition:color 140ms ease-out,background-color 140ms ease-out
 .contents-glass-paint{z-index:1}
 /* One reading inset uses the same paper, ink, rules and type as Notes.
    Neutral ink stays constant; paint-only emphasis travels with the glass. */
-.reader-controls .chapter-list>li.current-chapter{background:var(--panel);border:1px solid var(--rule);margin:0 0 10px}
-.reader-controls .chapter-list>li.current-chapter>a{color:var(--ink);background:none;border-left:0;border-bottom:1px solid var(--rule);padding:11px 12px;font-size:14px;line-height:1.4}
-.reader-controls .current-chapter>.chapter-sections{border:0;margin:0;padding:6px 8px 10px}
+.reader-controls .chapter-list>li.current-chapter{background:transparent;border:0;margin:0 0 10px}
+.reader-controls .chapter-list>li.current-chapter>a{color:var(--ink);background:none;border:0;padding:11px 8px;font-size:14px;line-height:1.4}
+.reader-controls .current-chapter>.chapter-sections{border:0;margin:0;padding:4px 8px 10px}
 .reader-controls .chapter-sections a{font-size:14px;line-height:1.4;color:var(--ink);padding:8px;min-height:40px}
 .reader-controls .chapter-sections a.level-3{padding-left:16px}
 .reader-controls .chapter-sections a[aria-current="location"]{color:var(--ink);background:none;box-shadow:inset 2px 0 var(--ink);font-weight:400;-webkit-text-stroke:.35px currentColor}
@@ -250,3 +250,20 @@ a,button,summary{transition:color 140ms ease-out,background-color 140ms ease-out
 .reader-controls .chapter-sections.contents-glass-ready a:focus-visible{outline-offset:0}
 @media(forced-colors:active){.contents-glass-layer{display:none!important}.reader-controls .chapter-sections.contents-glass-ready a{color:LinkText}}
 @media print{.contents-glass-layer{display:none!important}}
+
+/* Disclosure travel belongs to the content as well as its cue. Stable gutter
+   occupancy keeps every label fixed while a group crosses the overflow limit. */
+@supports selector(::details-content){
+ .contents-group::details-content{transition:block-size 220ms cubic-bezier(.2,.8,.2,1),opacity 180ms ease-out,content-visibility 220ms allow-discrete}
+ @media(max-width:1100px){
+  .contents-menu::details-content{transition:opacity 180ms ease-out,content-visibility 220ms allow-discrete}
+  .reader-controls .contents-menu>nav{transform:translateY(-5px);transition:transform 220ms cubic-bezier(.2,.8,.2,1)}
+  .reader-controls .contents-menu.opens-up>nav{transform:translateY(5px)}
+  .reader-controls .contents-menu[open]>nav{transform:translateY(0)}
+  @starting-style{.reader-controls .contents-menu[open]>nav{transform:translateY(-5px)}.reader-controls .contents-menu.opens-up[open]>nav{transform:translateY(5px)}}
+ }
+}
+@media(prefers-reduced-motion:reduce){
+ .contents-group::details-content,.contents-menu::details-content,.reader-controls .contents-menu>nav{transition:none}
+ .reader-controls .contents-menu>nav{transform:none}
+}

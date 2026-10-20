@@ -148,7 +148,7 @@ These incidents are failures to enforce the existing contribution and complete-n
 
 ## Integrated Contents glass
 
-Run `npm run test:glass` for fourteen ownership, motion and emphasis cases, including fractional native landing, control contact, manual takeover, stale authored flags, reversal and reduced motion. app.js remains the only owner of semantic current-section, history, focus, Resume and page transport. The decorative adapter must retain click ownership during its own travel, follow actual manual page movement, size to wrapped/indented labels, pause when closed/offscreen, and retain its last paint during disclosure exit. Browser acceptance must exercise the real rail/overlay at1100/1101 and narrow widths, Search and Back/Resume, focus, reduced motion, high-contrast fallback and paint edges. Pure tests do not certify optics, physical touch or actual zoom filtering.
+Run `npm run test:glass` for nineteen ownership, motion, emphasis and entrance cases, including fractional native landing, control contact, manual takeover, stale authored flags, reversal and reduced motion. app.js remains the only owner of semantic current-section, history, focus, Resume and page transport. The decorative adapter must retain click ownership during its own travel, follow actual manual page movement, size to wrapped/indented labels, pause when closed/offscreen, and retain its last paint during disclosure exit. Browser acceptance must exercise the real rail/overlay at1100/1101 and narrow widths, Search and Back/Resume, focus, reduced motion, high-contrast fallback and paint edges. Pure tests do not certify optics, physical touch or actual zoom filtering.
 
 ## Globe Easter egg hit area
 
@@ -158,3 +158,8 @@ The hidden DB Lab link is a 44 x 44 CSS-pixel hotspot centered at 70% horizontal
 ## Contents emphasis and disclosure continuity
 
 [Motion regression instructions](README-motion.md) document the reproduced text rewrap, early emphasis and narrow-menu flicker, the fresh eight-journey browser runner, and its read-only intermediate-frame observer. Use the test-only loopback server; no observer or reports belong in public output. Pure checks and saved receipts do not replace fresh input or rendered inspection.
+
+
+## Scrollbar thresholds and material entrance
+
+[Disclosure regression instructions](README-disclosure.md) cover 12 fresh native-input journeys, including actual overflow threshold crossings, wide/narrow open/close, rapid keyboard reversal and interrupted bubble formation. Stable outer viewport dimensions alone do not establish stable inner geometry. The pane must expand through visible intermediate geometry; a full-sized fade does not establish the selected bubbly entrance. Existing reading, emphasis and matched exit-paint checks remain required neighbors.

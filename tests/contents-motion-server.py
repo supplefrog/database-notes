@@ -12,14 +12,16 @@ class Handler(SimpleHTTPRequestHandler):
     def translate_path(self,path):
         name=unquote(urlsplit(path).path).lstrip('/')
         if name=='__qc/contents-glass-observer.mjs':return str(root/'contents-glass-observer.mjs')
+        if name=='__qc/disclosure-observer.mjs':return str(root/'disclosure-observer.mjs')
         target=(web/name).resolve()
         return str(target) if target.is_relative_to(web.resolve()) else str(web/'missing')
     def do_GET(self):
         parsed=urlsplit(self.path)
-        if parsed.path.endswith('.html') and parse_qs(parsed.query).get('qc')==['contents-motion']:
+        observer={'contents-motion':'contents-glass-observer.mjs','disclosure':'disclosure-observer.mjs'}.get(parse_qs(parsed.query).get('qc',[''])[0])
+        if parsed.path.endswith('.html') and observer:
             target=Path(self.translate_path(self.path))
             if target.is_file():
-                data=target.read_bytes().replace(b'</body>',b'<script type="module" src="/__qc/contents-glass-observer.mjs"></script></body>')
+                data=target.read_bytes().replace(b'</body>',f'<script type="module" src="/__qc/{observer}"></script></body>'.encode('utf-8'))
                 self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data);return
         super().do_GET()
     def end_headers(self):self.send_header('Cache-Control','no-store');super().end_headers()
