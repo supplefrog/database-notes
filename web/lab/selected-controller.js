@@ -41,7 +41,10 @@ export function createReader({fetcher,location,history,render}) {
     emit();
     try {
       context=validContext(await read('/review/selected/context.json'));
-      if(!location.hash){history.replaceState(null,'',location.pathname+'#run='+context.run_id);}
+      const selection=parseSelection(location.hash),params=new URLSearchParams(location.hash.replace(/^#/,''));
+      if(!location.hash||(!selection.id&&!selection.invalid&&!selection.interrupted&&params.get('view')==='recovery')){
+        params.set('run',context.run_id);history.replaceState(null,'',location.pathname+'#'+params);
+      }
       await refresh();
     }catch(problem){error=problem.message;emit();}
   }

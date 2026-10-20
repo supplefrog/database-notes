@@ -1,0 +1,1 @@
+const target=new URL('../../',location.href);const params=new URLSearchParams(location.hash.replace(/^#/,''));params.set('view','recovery');target.hash=params.toString();location.replace(target.href);

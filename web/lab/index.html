@@ -6,7 +6,9 @@
   <meta name="color-scheme" content="light">
   <title>DB Lab — Query inspection</title>
   <link rel="stylesheet" href="./selected.css">
+  <link rel="stylesheet" href="./recovery.css">
   <script type="module" src="./selected.js"></script>
+  <script type="module" src="./recovery-ui.js"></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to query inspection</a>
@@ -15,16 +17,18 @@
     <span id="engine" class="environment">Local SQLite <span class="separator">/</span> recorded benchmark</span>
     <span id="stage" class="stage">Reading status</span>
     <details id="run-details" class="run-details disclosure">
-      <summary>Run details <span class="chevron" aria-hidden="true"></span></summary>
+      <summary>Recorded run <span class="chevron" aria-hidden="true"></span></summary>
       <div class="disclosure-body"><div class="detail-inner">
         <p>Read-only query inspection</p>
         <dl><dt>Run</dt><dd id="run-id">Not loaded</dd><dt>Stage</dt><dd id="run-stage">Not loaded</dd><dt>Fixture</dt><dd id="fixture">Not loaded</dd></dl>
         <a id="original" hidden>Query inspection</a>
-        <a id="slate" hidden>Recovery evidence</a>
+        <a id="slate" hidden>Recovery exercise</a>
       </div></div>
     </details>
   </header>
   <main id="main" tabindex="-1">
+    <nav class="lab-navigation" aria-label="Lab views"><a id="recorded-view-link" data-lab-view="recorded" href="./">Recorded benchmark</a><a id="recovery-view-link" data-lab-view="recovery" href="./#view=recovery">Recovery exercise</a></nav>
+    <div id="recorded-view">
     <div class="notice" id="status-notice" role="status" aria-live="polite"></div>
     <div class="notice error" id="error-notice" role="alert" hidden></div>
     <div id="empty" class="empty" hidden><h1>Inspect an existing experiment</h1><p id="empty-copy"></p><button id="refresh-empty" type="button">Reload recording</button></div>
@@ -75,7 +79,40 @@
       </section>
       <footer class="footnote"><p id="qualification"></p><button id="refresh" type="button">Reload recording</button></footer>
     </div>
-    <noscript>This recorded inspection requires JavaScript. No database operation is available on this website.</noscript>
+    </div>
+    <section id="recovery-view" aria-labelledby="recovery-title" hidden>
+      <div class="recovery-heading"><div><p class="exercise-kicker">Executable SQLite / synthetic data stays in this tab</p><h1 id="recovery-title" tabindex="-1">Recover tenant 7.</h1><p class="exercise-intro">A checkpoint holds 120,000 incidents. Twenty-four later writes matter. Delete one tenant, choose what to restore, then check every recovered row.</p></div><div class="exercise-start"><button id="lab-start" class="primary" type="button">Start SQLite lab</button><button id="lab-reset" type="button" disabled>Reset lab</button></div></div>
+      <p id="lab-status" class="lab-status" role="status">Start to create the database and checkpoint in browser memory.</p>
+      <p id="lab-error" class="notice error" role="alert" hidden></p>
+      <div class="recovery-workplane">
+        <div class="recovery-plane-heading"><h2>One fixture. Separate copies.</h2><span id="lab-runtime">sql.js 1.15.1 / WebAssembly</span></div>
+        <figure class="recovery-copies" aria-describedby="copies-method">
+          <div class="copy-row"><div class="copy-label"><h3>Checkpoint</h3><p id="checkpoint-count">Not created</p></div><div id="checkpoint-bands" class="copy-bands" role="img" aria-label="Checkpoint not created"></div></div>
+          <div class="copy-row"><div class="copy-label"><h3>Live</h3><p id="live-count">Not created</p></div><div id="live-bands" class="copy-bands" role="img" aria-label="Live database not created"></div></div>
+          <div class="copy-row"><div class="copy-label"><h3>Recovered</h3><p id="recovered-count">Awaiting restore</p></div><div id="recovered-bands" class="copy-bands" role="img" aria-label="Recovered database not created"></div></div>
+          <div class="copy-axis" aria-hidden="true"><span>Tenant</span><div id="recovery-axis" class="tenant-axis"></div></div>
+          <figcaption id="copies-method">Equal-width tenant bands show presence, not row counts. Tenant 7 is outlined. Counts come from SQL; the damaged live copy stays separate.</figcaption>
+        </figure>
+        <div class="recovery-commands">
+          <div class="fault-command"><h2>Controlled fault</h2><code>DELETE … WHERE tenant_id = 7</code><button id="lab-fault" type="button" disabled>Delete tenant 7</button></div>
+          <fieldset class="restore-command"><legend>Recovery method</legend><label><input type="radio" name="recovery-method" value="checkpoint" checked>Checkpoint only <span>Leaves later writes behind</span></label><label><input type="radio" name="recovery-method" value="journal">Checkpoint + application journal <span>Replays 24 committed writes</span></label><button id="lab-restore" type="button" disabled>Restore separate copy</button></fieldset>
+          <div class="verify-command"><h2>Check the outcome</h2><p>Count and content against a separately generated expected state.</p><button id="lab-verify" type="button" disabled>Verify recovered data</button></div>
+        </div>
+      </div>
+      <section id="lab-verdict" class="lab-verdict" aria-labelledby="verdict-title" data-verdict="pending"><div><h2 id="verdict-title">Recovery is not verified</h2><p id="verdict-copy">A successful restore does not establish that the right data came back.</p></div><ul id="verification-checks"></ul><div class="content-fault"><button id="lab-alter" type="button" disabled>Change one recovered severity</button><p>Try the same-count failure: incident 120001 changes from severity 2 to 4. Verify again.</p></div></section>
+      <div class="recovery-evidence-grid">
+        <section class="live-query" aria-labelledby="live-query-title"><h2 id="live-query-title">Query the actual database</h2><form id="lab-query-form"><fieldset><legend>Copy</legend><label><input type="radio" name="query-copy" value="live" checked>Live</label><label><input id="query-recovered" type="radio" name="query-copy" value="recovered" disabled>Recovered</label></fieldset><label class="tenant-input" for="query-tenant">Tenant <input id="query-tenant" type="number" min="1" max="24" step="1" value="7" required aria-describedby="query-input-help"></label><button id="lab-query" type="submit" disabled>Run SELECT</button></form><p id="query-input-help" class="parameters">Tenant 1–24. Returns up to 50 newest open incidents.</p><p id="query-readout" class="query-readout">Start the lab to run the first query.</p><pre id="live-query-sql" tabindex="0"></pre><div class="result-scroll" tabindex="0" role="region" aria-label="Actual SQLite query results"><table class="sql-results"><caption id="query-caption">No SQL results yet</caption><thead><tr><th scope="col">ID</th><th scope="col">Severity</th><th scope="col">Created minute</th></tr></thead><tbody id="live-query-rows"></tbody></table></div><details class="disclosure lab-disclosure"><summary>Actual EXPLAIN QUERY PLAN <span class="chevron" aria-hidden="true"></span></summary><div class="disclosure-body"><div class="detail-inner"><pre id="live-query-plan" tabindex="0">Not executed.</pre></div></div></details></section>
+        <section class="changed-records" aria-labelledby="changed-title"><h2 id="changed-title">The 24 journal records</h2><p id="changed-copy">Compare checkpoint values with the selected working copy after starting.</p><div class="result-scroll" tabindex="0" role="region" aria-label="Checkpoint and working record values"><table class="sql-results changed-table"><caption id="changed-caption">Actual SQL row lookups / state · severity · version</caption><thead><tr><th scope="col">ID</th><th scope="col">Checkpoint</th><th scope="col" id="changed-working">Live</th></tr></thead><tbody id="changed-rows"></tbody></table></div></section>
+      </div>
+      <section class="lab-proof" aria-label="Inspectable recovery evidence">
+        <details class="disclosure lab-disclosure"><summary>Full verification evidence and SHA-256 <span class="chevron" aria-hidden="true"></span></summary><div class="disclosure-body"><div class="detail-inner"><p>The expected counts and digests were generated by the existing independent Python fixture oracle, not by this restore or replay. SQLite computes the actual ordered rows here; Web Crypto hashes their compact JSON arrays plus LF. Verification covers every business row, columns, foreign-key definition/violations, application marker and SQLite structure. It does not compare database-file bytes.</p><pre id="lab-full-verification" tabindex="0">No verification executed.</pre><a href="./recovery-oracle.json">Inspect frozen expected-state oracle</a></div></div></details>
+        <details class="disclosure lab-disclosure"><summary>Executed actions and application journal <span class="chevron" aria-hidden="true"></span></summary><div class="disclosure-body"><div class="detail-inner"><h3>Executed actions</h3><pre id="lab-audit" tabindex="0">No actions executed.</pre><h3>Application journal / ordered SQL and bound parameters</h3><pre id="lab-journal" tabindex="0">Start the lab to inspect its 24 committed writes.</pre></div></div></details>
+        <details class="disclosure lab-disclosure"><summary>Original recorded recovery evidence <span class="chevron" aria-hidden="true"></span></summary><div class="disclosure-body"><div class="detail-inner"><p>This preserved local experiment is historical evidence, separate from the database running in your browser.</p><pre id="lab-recorded-recovery" tabindex="0">Loading recording.</pre><a href="./recording.json">Inspect complete original recording JSON</a></div></div></details>
+      </section>
+      <p class="recovery-footnote">This exercise uses a real in-memory SQLite engine and application-level journal replay. It illustrates recovery concepts; it is not native MySQL binlog or PostgreSQL WAL point-in-time recovery. Reloading or resetting discards this tab’s synthetic databases. The benchmark view retains its original recorded timings.</p>
+    </section>
+
+    <noscript>The query inspector and in-browser SQLite exercise require JavaScript.</noscript>
   </main>
 </body>
 </html>

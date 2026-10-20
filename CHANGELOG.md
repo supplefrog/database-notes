@@ -15,6 +15,20 @@ Browser verification scope and historical QA records live in
 - Check package/changelog consistency in the normal build, with a standalone
   release check and regression cases for stale or duplicated entries.
 
+## [0.1.11]
+
+- Add the reviewed browser SQLite recovery exercise to the existing DB Lab
+  workbench: seed, bounded tenant fault, checkpoint restore, application-journal
+  replay, actual query results and independent count/content verification.
+- Preserve historical benchmark timings and recorded recovery evidence. Forward
+  the old recovery route into the current workbench, and keep recorded metadata
+  correct through recovery/benchmark navigation.
+- Vendor checksum-verified MIT sql.js 1.15.1 for static hosting. Data stays local
+  and synthetic; application replay is explicitly distinct from native engine PITR.
+- The reviewed IAB journeys cover recovery outcomes, navigation, history and
+  mobile reset. Reduced-motion, forced-colors, zoom and injected load-failure
+  checks remain unverified. Notes UI and authored chapter content are unchanged.
+
 ## [0.1.10]
 
 - Reserve Contents scrollbar space so opening or closing a group does not shift

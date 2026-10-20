@@ -39,7 +39,10 @@ def check_ref(source,ref):
  assert target.is_file(),f'Missing destination: {source}: {ref}'
  if url.fragment:
   dest=target.relative_to(web).as_posix()
-  if dest in pages:assert unquote(url.fragment) in pages[dest].ids,f'Missing fragment: {source}: {ref}'
+  if dest=='lab/index.html' and url.fragment=='view=recovery':
+   # This exact static link selects the Lab's fragment-routed recovery view.
+   assert 'recovery-view' in pages[dest].ids,f'Missing recovery view: {source}: {ref}'
+  elif dest in pages:assert unquote(url.fragment) in pages[dest].ids,f'Missing fragment: {source}: {ref}'
  checked+=1
 
 for name,page in pages.items():

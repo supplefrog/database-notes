@@ -26,6 +26,21 @@ The build checks that the package version has a current, unique changelog entry.
 Run that check separately with `npm run check:release`. Keep release history in
 [CHANGELOG.md](CHANGELOG.md), with supporting commits and verification limits.
 
+## DB Lab
+
+[Open DB Lab](https://database-notes.vercel.app/lab/) for the recorded query-plan
+comparison and an executable browser SQLite recovery exercise. Create synthetic
+data, delete one tenant, restore a separate copy, replay the application journal
+and compare every recovered business row with independently generated expected
+counts and hashes. The old recovery URL opens this same workbench.
+
+The bundled sql.js runtime runs in tab memory; no database service, credentials
+or install is needed. This is application-level journal replay, distinct from
+native MySQL binlog or PostgreSQL WAL PITR. Historical benchmark timings remain
+recorded evidence, separate from browser execution. Reset/reload discards local
+exercise data. Runtime provenance and its MIT notice are in
+[ATTRIBUTION.md](ATTRIBUTION.md).
+
 ## Browser verification
 
 [tests/README.md](tests/README.md) owns the executable browser journeys,

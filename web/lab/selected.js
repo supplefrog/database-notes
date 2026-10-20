@@ -3,6 +3,7 @@ import {benchmarkEqual,event,formatMs,ratio,QUERY} from './model.js';
 import {INDEX_FIELDS,canExplainIndex,timingPairs,sharedScale} from './workbench-data.js';
 import {createReader} from './selected-controller.js';
 import {installDisclosures} from './selected-motion.js';
+import {updateRecordedMetadata} from './recorded-header.mjs';
 
 const $=id=>document.getElementById(id), text=(id,value)=>{$(id).textContent=value;};
 const ui={run:null,signature:null,tab:'plans',source:'index',field:'tenant_id',pinned:null,hovered:null,focused:null,pairs:[],benchmark:null,supported:false};
@@ -24,11 +25,13 @@ function element(tag,className,value){const node=document.createElement(tag);if(
 function setLink(id,url,label){const link=$(id);link.hidden=!url;if(url)link.href=url;else link.removeAttribute('href');if(label)link.replaceChildren(document.createTextNode(label),...(id==='recovery'?[element('span','', '→')]:[]));}
 function updateLinks(view){
   const origin=view.context?.source_origin, hash=view.hash||'';
-  setLink('original',origin?origin+'/'+hash:null);
-  setLink('slate',origin?origin+'/review/slate/'+hash:null);
-  const later=view.state&&!['seeded','measured'].includes(view.state.stage);
-  setLink('recovery',origin&&view.id?origin+'/review/slate/'+hash:null,later?'Open recovery evidence':'Continue to recovery');
-  text('recovery-copy',view.interrupted?'Review the unresolved operation in the existing flow before continuing.':later?'Inspect the existing recovery stage and its evidence.':'Inspect the recorded checkpoint, fault, restore and verification.');
+  const recoveryParams=new URLSearchParams(hash.replace(/^#/,''));recoveryParams.set('view','recovery');
+  const recoveryUrl=origin+'/#'+recoveryParams;
+  const recordedParams=new URLSearchParams(hash.replace(/^#/,''));recordedParams.delete('view');
+  setLink('original',origin?origin+'/#'+recordedParams:null);
+  setLink('slate',origin?recoveryUrl:null);
+  setLink('recovery',origin&&view.id?recoveryUrl:null,'Open recovery exercise');
+  text('recovery-copy','Run SQLite locally in your browser. Choose a restore and inspect the outcome.');
 }
 function updateTab(tab,{focus=false}={}){
   ui.tab=tab;
@@ -144,17 +147,13 @@ function render(view){
   text('status-notice',notice);text('error-notice',view.error);$('error-notice').hidden=!view.error;
   $('experiment').hidden=!state;$('empty').hidden=!!state;
   text('empty-copy',view.busy?'Reading the existing experiment.':view.interrupted&&!view.id?'Creation was interrupted without a run identifier. Its outcome is uncertain; no new run will be created here.':view.id?'The experiment could not be read. No operation has been attempted.':'Open this view with an existing run identifier. This inspection never creates experiments.');
-  text('stage',state?(view.fresh?'':'Last confirmed · ')+state.stage.replaceAll('_',' '):view.busy?'Reading status':'Status unavailable');
-  $('stage').dataset.confirmed=String(!!state&&view.fresh&&!view.interrupted&&state.stage!=='verification_failed');
-  $('stage').dataset.failed=String(state?.stage==='verification_failed');
-  text('run-id',state?.run_id||view.id||'No run identifier');text('run-stage',state?state.stage+(view.fresh?'':' · last confirmed'):'Unavailable');text('fixture',state?`${state.seed||'Unnamed fixture'} · ${state.seed_rows.toLocaleString('en-US')} seeded rows`:'Unavailable');
-  text('engine',state?`Recorded ${state.engine} / benchmark`:'Recorded SQLite / benchmark');
+  updateRecordedMetadata(view);
   // Keep the invoking control focusable during a read; stale responses are
   // sequence-guarded by the reader, and the click handlers suppress duplicates.
   for(const id of ['refresh','refresh-empty'])$(id).setAttribute('aria-disabled',String(view.busy));
   if(!state)return;
   renderBenchmark(state);
-  text('qualification',`${view.fresh?'Read-only recording captured from the local lab. No database operations run on this website.':'Last confirmed evidence; current status read failed or is pending.'} ${state.engine}. Single-process fixed fixture; warm-cache timings vary and do not represent production performance. The schematic is explanatory, not a trace of execution or rows read.`);
+  text('qualification',`${view.fresh?'Read-only recording captured from the local lab. The recovery exercise separately runs browser SQLite.':'Last confirmed evidence; current status read failed or is pending.'} ${state.engine}. Single-process fixed fixture; warm-cache timings vary and do not represent production performance. The schematic is explanatory, not a trace of execution or rows read.`);
 }
 
 for(let i=1;i<=24;i++){$('bands').append(element('div','band'));$('tenant-axis').append(element('span','',String(i)));}

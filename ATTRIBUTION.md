@@ -18,3 +18,12 @@ The 720 × 536 pond photograph in `web/design/review-preview/assets/horse-full.p
 The Sanskrit/English passage is retained from the original homepage, where both forms were introduced by `supplefrog` in commit `94886eef71f135f32e260e362a45df0ec4b8f8d4` on 2025-04-16. That establishes the project source, not authorship or a scriptural locator. A historical description associated it with the Garuda Purana; no matching chapter, verse, edition or translator has been verified. The displayed page makes no scriptural attribution, and this project adds none.
 
 The existing expressive WebP artworks are project-generated assets carried forward from the approved site. Newly generated replacement artwork candidates are not included.
+
+## DB Lab browser SQLite
+
+The DB Lab bundles [sql.js](https://github.com/sql-js/sql.js) version 1.15.1 from
+the npm registry. The package SHA-512 was verified before extracting its loader,
+WebAssembly binary and complete [MIT notice](web/lab/vendor/sql.js/LICENSE).
+SQLite itself is public domain. No package-manager install or runtime CDN is
+required. The Lab fixture, application replay, independent expected-state oracle
+and interface are project-authored; the historical recording remains intact.
