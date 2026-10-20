@@ -88,7 +88,7 @@
   "lab/public-reader.js": "e8bdadd4bc4910039efb0ac1a92177972c60c8adced6d907b609a04597ad4fb1",
   "lab/recorded-header.mjs": "dcd4cef428b62fa3bb18bd5101cc48b6d1dc99047bb3dda055cf109d8647a796",
   "lab/recording.json": "f4cd62fce87bba5c7dcf1cb8a2982f149a9e72783f41220674f144b0c4385c22",
-  "lab/recovery-client.mjs": "ee49acbe1a1943bad90a8fd0278607f8a2379014265b9d679b366f573659545f",
+  "lab/recovery-client.mjs": "45881e91c855e1c7e0a14df26e28bcccc8959fb328c9d0523dd16b808f9424b1",
   "lab/recovery-engine.mjs": "c58c9606e4056762ab16013a415a8bdd765056dda61552d5bfa1187a1e04fd36",
   "lab/recovery-oracle.json": "65b010397cf8f5fddf9ceb70f40d36f020c33811ecca6dc26310e03841e1d485",
   "lab/recovery-ui.js": "0fab4a13aa0c24ade014d72397def43d137401dd1e76866797d35b3eaa85a9e5",

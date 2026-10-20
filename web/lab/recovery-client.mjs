@@ -1,12 +1,23 @@
-// One in-flight command; reset terminates the worker and rejects stale promises.
+// One in-flight command. Failed bootstrap is retired so Start can retry fresh.
 export function createLabClient(makeWorker){
   let worker=null,pending=null,sequence=0;
-  function reset(){sequence++;if(pending){const old=pending;pending=null;old.reject(new DOMException('Lab reset cancelled the previous operation.','AbortError'));}worker?.terminate();worker=null;}
+  function retire(target){if(worker!==target)return;worker=null;target?.terminate();}
+  function fail(target,error){if(worker!==target)return;const current=pending;pending=null;retire(target);current?.reject(error);}
+  function reset(){sequence++;const current=pending;pending=null;retire(worker);current?.reject(new DOMException('Lab reset cancelled the previous operation.','AbortError'));}
   function request(action,args={}){
     if(pending)return Promise.reject(new Error('An operation is already running.'));
-    if(!worker){worker=makeWorker();worker.onmessage=({data})=>{if(!pending||data.id!==pending.id)return;const current=pending;pending=null;data.error?current.reject(new Error(data.error)):current.resolve(data.result);};worker.onerror=()=>{if(pending){const current=pending;pending=null;current.reject(new Error('The SQLite worker could not load or stopped. Reset the lab to retry.'));}};}
-    const id=++sequence;
-    return new Promise((resolve,reject)=>{pending={id,resolve,reject};try{worker.postMessage({id,action,...args});}catch(e){pending=null;reject(e);}});
+    if(!worker){
+      const target=worker=makeWorker();
+      target.onmessage=({data})=>{
+        if(worker!==target||!pending||data.id!==pending.id)return;
+        const current=pending;pending=null;
+        if(data.error){if(current.action==='start')retire(target);current.reject(new Error(data.error));}
+        else current.resolve(data.result);
+      };
+      target.onerror=()=>fail(target,new Error('The SQLite worker could not load or stopped.'));
+    }
+    const id=++sequence,target=worker;
+    return new Promise((resolve,reject)=>{pending={id,action,resolve,reject};try{target.postMessage({id,action,...args});}catch(e){fail(target,e);}});
   }
   return {request,reset};
 }
