@@ -1,4 +1,5 @@
 import {progressStops,zeroVelocity,labelShape,interpolateShapes,advanceShape,settled,followScroll,anchorTopic,observeTopic} from './contents-glass-math.mjs';
+import {emphasisWeights,blendEmphasis,emphasisStroke} from './contents-glass-emphasis.mjs';
 
 // Decorative adapter for the existing native Contents tree. app.js remains the
 // sole owner of reading state, URL/history, focus, Resume and page transport.
@@ -8,9 +9,9 @@ export function attachContentsGlass({entries}){
  if(!panel||!entries.length)return null;
  const links=entries.map(entry=>entry.link),layer=document.createElement('li');
  layer.className='contents-glass-layer';layer.setAttribute('aria-hidden','true');layer.setAttribute('role','presentation');
- const base=document.createElement('canvas'),glass=document.createElement('canvas'),source=document.createElement('canvas');
- base.className='contents-label-paint';glass.className='contents-glass-paint';base.hidden=glass.hidden=true;
- layer.append(base,glass);panel.prepend(layer);panel.classList.add('contents-glass-host');
+ const glass=document.createElement('canvas'),source=document.createElement('canvas');
+ glass.className='contents-glass-paint';glass.hidden=true;
+ layer.append(glass);panel.prepend(layer);panel.classList.add('contents-glass-host');
  const parents=[];for(let p=panel.parentElement;p;p=p.parentElement)if(p.tagName==='DETAILS')parents.push(p);
  const motion=matchMedia('(prefers-reduced-motion:reduce)'),contrast=matchMedia('(forced-colors:active)');
  const thickness={value:'9'},ior={value:'1.48',max:'1.65'},lens={value:'1.06',max:'1.15'},quality={value:'3'},samples={value:'2'},mode={value:'glass'};
@@ -21,13 +22,19 @@ export function attachContentsGlass({entries}){
  let effective=false,onscreen=false,geometryDirty=true,storageDirty=true,labelsDirty=true,paintFailure=false,shaderError='',textureScale=1;
  let width=250,panelHeight=252,maxHeight=36,anchors=[],rows=[],stops=[],maxScroll=0,readingLine=56,progress={fraction:0,left:0,right:0};
  let dpr=devicePixelRatio||1,output=[0,0],renderSize=[0,0],sourceSize=[0,0],sourceOffset=[0,0],sizeKey='';
- let firstInput=0,inputToDrawCallbackMs=0,activeRafIntervalsMs=[],gl,surface,horizontal,vertical,bgTexture,sceneTexture,resolveTexture,sceneFbo,resolveFbo;
+ let firstInput=0,inputToDrawCallbackMs=0,activeRafIntervalsMs=[],gl,surface,horizontal,vertical,bgTexture,strongTexture,sceneTexture,resolveTexture,sceneFbo,resolveFbo;
+ let emphasis=links.map(()=>0),emphasisGoal=[...emphasis],lastEmphasisTime=0;
  let observed={current:links[0],position:scrollY,readingLine:56,transportActive:false};
  const reduced=()=>motion.matches;
  const glassMode=()=>effective;
  const rasterMode=()=>false;
  const visible=()=>onscreen&&!document.hidden&&parents.every(parent=>parent.open)&&!contrast.matches&&!paintFailure&&!shaderError;
  const canDraw=()=>effective&&visible();
+ function visibleInScrollports(){
+  const r=panel.getBoundingClientRect();let top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom),left=Math.max(0,r.left),right=Math.min(innerWidth,r.right);
+  for(let parent=panel.parentElement;parent;parent=parent.parentElement){const style=getComputedStyle(parent),box=parent.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(style.overflowY)){top=Math.max(top,box.top+parent.clientTop);bottom=Math.min(bottom,box.top+parent.clientTop+parent.clientHeight);}if(/auto|scroll|hidden|clip/.test(style.overflowX)){left=Math.max(left,box.left+parent.clientLeft);right=Math.min(right,box.left+parent.clientLeft+parent.clientWidth);}}
+  return bottom>top&&right>left;
+ }
  function localBox(){const box=panel.getBoundingClientRect();return {left:box.left+panel.clientLeft,top:box.top+panel.clientTop};}
  function backgroundColor(){for(let el=panel;el;el=el.parentElement){const color=getComputedStyle(el).backgroundColor;if(color!=='transparent'&&color!=='rgba(0, 0, 0, 0)')return color;}return '#e9e9e5';}
 const vertex=`#version 300 es
@@ -35,7 +42,8 @@ layout(location=0) in vec2 position;out vec2 uv;
 void main(){uv=(position+1.)*.5;gl_Position=vec4(position,0.,1.);}`;
 const fragment=`#version 300 es
 precision highp float;in vec2 uv;out vec4 color;
-uniform sampler2D background;
+uniform sampler2D background,strongBackground;
+uniform vec3 emphasisRow0,emphasisRow1;
 uniform vec2 viewSize,panelSize,sourceSize,sourceOffset,slabSize,slabCenter;
 uniform float paintLeft;
 uniform float top,slabHeight,thickness,indexOfRefraction,lensScale,gutter;
@@ -65,7 +73,11 @@ void main(){
  float optical=clamp((indexOfRefraction-1.)/.48,0.,1.4);
  float enlargement=1.+(lensScale-1.)*optical*smoothstep(0.,6.5,-d);
  vec2 sampleAt=center+(global-center)/enlargement+shift;
- vec3 transmitted=texture(background,(sampleAt+sourceOffset)/sourceSize).rgb;
+ vec2 sourceUV=(sampleAt+sourceOffset)/sourceSize;
+ float inkWeight=0.;
+ if(sampleAt.y>=emphasisRow0.x&&sampleAt.y<=emphasisRow0.y)inkWeight=max(inkWeight,emphasisRow0.z);
+ if(sampleAt.y>=emphasisRow1.x&&sampleAt.y<=emphasisRow1.y)inkWeight=max(inkWeight,emphasisRow1.z);
+ vec3 transmitted=mix(texture(background,sourceUV).rgb,texture(strongBackground,sourceUV).rgb,inkWeight);
  float f0=pow((indexOfRefraction-1.)/(indexOfRefraction+1.),2.);
  float fresnel=f0+(1.-f0)*pow(1.-max(0.,dot(-incident,normal)),5.);
  vec3 light=normalize(vec3(-.35,-.65,1.)),halfway=normalize(light-incident);
@@ -78,9 +90,11 @@ void main(){
 const tent=`#version 300 es
 precision highp float;in vec2 uv;out vec4 color;
 uniform sampler2D image;uniform vec2 stepUV;uniform float radius;
+float sinc(float x){if(abs(x)<.0001)return 1.;float a=3.141592653589793*x;return sin(a)/a;}
 void main(){vec4 sum=vec4(0.);float weights=0.;for(int i=-12;i<=12;i++){
- float w=max(0.,1.-abs(float(i))/radius);sum+=texture(image,uv+stepUV*float(i))*w;weights+=w;
-}color=sum/max(weights,.0001);}`;
+ float x=float(i)/max(1.,radius),w=abs(x)<2.?sinc(x)*sinc(x*.5):0.;
+ sum+=texture(image,uv+stepUV*float(i))*w;weights+=w;
+}color=clamp(sum/max(weights,.0001),0.,1.);}`;
 function program(v,f){
  const shader=(type,text)=>{const s=gl.createShader(type);gl.shaderSource(s,text);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s;};
  const p=gl.createProgram(),vs=shader(gl.VERTEX_SHADER,v),fs=shader(gl.FRAGMENT_SHADER,f);
@@ -96,11 +110,11 @@ function setupGL(){if(gl||shaderError)return;try{
  if(!gl)throw Error('WebGL 2 unavailable');
  surface=program(vertex,fragment);horizontal=program(vertex,tent);vertical=program(vertex,tent);
  const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
- bgTexture=texture();sceneTexture=texture();resolveTexture=texture();sceneFbo=gl.createFramebuffer();resolveFbo=gl.createFramebuffer();
+ bgTexture=texture();strongTexture=texture();sceneTexture=texture();resolveTexture=texture();sceneFbo=gl.createFramebuffer();resolveFbo=gl.createFramebuffer();
 }catch(error){shaderError=String(error.message||error);}}
 glass.addEventListener('webglcontextlost',()=>{shaderError='WebGL context lost';stop();refresh();});
 function lineRuns(a,box){
- const style=getComputedStyle(a),font=`400 ${style.fontSize} ${style.fontFamily}`,lines=[];
+ const style=getComputedStyle(a),font=`${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`,lines=[];
  const walker=document.createTreeWalker(a,NodeFilter.SHOW_TEXT);let node;
  while((node=walker.nextNode())){
   const segments=typeof Intl.Segmenter==='function'?[...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(node.data)]:(()=>{let offset=0;return Array.from(node.data).map(segment=>{const entry={segment,index:offset};offset+=segment.length;return entry;});})();
@@ -163,20 +177,39 @@ function labels(){
  const gx=Math.ceil(sourceGutter*textureScale),bw=Math.max(1,Math.round(width*textureScale)),bh=Math.max(1,Math.round(h*textureScale));
  source.width=bw+gx*2;source.height=bh+gx*2;sourceSize=[source.width/textureScale,source.height/textureScale];sourceOffset=[gx/textureScale,gx/textureScale];
  const c=source.getContext('2d');c.setTransform(1,0,0,1,0,0);c.fillStyle=backgroundColor();c.fillRect(0,0,source.width,source.height);c.setTransform(textureScale,0,0,textureScale,gx,gx);
- rows.forEach((row,i)=>{c.fillStyle=getComputedStyle(panel).getPropertyValue(i===hovered?'--ink':'--soft').trim()||(i===hovered?'#292927':'#5b5c56');for(const run of row.lines){c.font=run.font;c.fillText(run.text,run.left,run.baseline);}});
- base.width=bw;base.height=bh;base.style.width=width+'px';base.style.height=h+'px';
- base.getContext('2d').drawImage(source,gx,gx,bw,bh,0,0,bw,bh);
- if(gl&&!shaderError){gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,bgTexture);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,source);gl.generateMipmap(gl.TEXTURE_2D);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);}
+ // Outside the pane, the browser paints the native labels. The optical
+ // source uses those same computed colors/weights, never duplicate DOM ink.
+ rows.forEach((row,i)=>{c.fillStyle=getComputedStyle(links[i]).color;for(const run of row.lines){c.font=run.font;c.fillText(run.text,run.left,run.baseline);}});
+ const upload=(texture,unit)=>{gl.activeTexture(unit);gl.bindTexture(gl.TEXTURE_2D,texture);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,source);gl.generateMipmap(gl.TEXTURE_2D);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);};
+ if(gl&&!shaderError){
+  upload(bgTexture,gl.TEXTURE0);
+  // One stable emphasized source shares the native label's exact line breaks.
+  // Blend cached sources on the GPU; no full text texture upload per frame.
+  c.lineWidth=emphasisStroke;c.lineJoin='round';
+  rows.forEach((row,i)=>{c.strokeStyle=getComputedStyle(links[i]).color;for(const run of row.lines){c.font=run.font;c.strokeText(run.text,run.left,run.baseline);}});
+  upload(strongTexture,gl.TEXTURE1);gl.activeTexture(gl.TEXTURE0);
+ }
  labelsDirty=false;labelPaints++;
 }
 function ensurePaint(){if(!canDraw())return;try{if(geometryDirty)measure();if(storageDirty){storage();storageDirty=false;}if(labelsDirty)labels();}catch(error){fail(error);}}
 function render(){
  if(!canDraw())return;ensurePaint();if(!canDraw()||!glassMode())return;
- const top=shape.y-gutter,cw=paintWidth,ch=maxHeight+gutter*2,[rw,rh]=renderSize,[ow,oh]=output;
+ emphasisGoal=emphasisWeights(shape,measuredShapes(),owner.kind==='topic'?owner.index:null);
+ const now=performance.now();emphasis=blendEmphasis(emphasis,emphasisGoal,(now-lastEmphasisTime)/1000,reduced()||!lastEmphasisTime);lastEmphasisTime=now;
+ links.forEach((link,index)=>{const value=emphasis[index].toFixed(4);if(link.style.getPropertyValue('--contents-emphasis')!==value)link.style.setProperty('--contents-emphasis',value);});
+ const [rw,rh]=renderSize,[ow,oh]=output,cw=ow/dpr,ch=oh/dpr,box=localBox();
+ // Snap only the bitmap viewport to device pixels. The optical surface and
+ // sample coordinates keep their continuous native position inside it.
+ const left=Math.round((box.left+paintLeft)*dpr)/dpr-box.left;
+ const top=Math.round((box.top+shape.y-gutter)*dpr)/dpr-box.top;
+ glass.style.left=left+'px';glass.style.width=cw+'px';glass.style.height=ch+'px';
  glass.style.transform=`translateY(${top}px)`;
  gl.bindFramebuffer(gl.FRAMEBUFFER,sceneFbo);gl.viewport(0,0,rw,rh);gl.useProgram(surface.program);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,bgTexture);
- const u=surface.u;gl.uniform1i(u('background'),0);gl.uniform2f(u('viewSize'),cw,ch);gl.uniform2f(u('panelSize'),width,panelHeight);gl.uniform2f(u('sourceSize'),...sourceSize);gl.uniform2f(u('sourceOffset'),...sourceOffset);
- gl.uniform1f(u('top'),top);gl.uniform1f(u('gutter'),gutter);gl.uniform1f(u('slabHeight'),shape.h);gl.uniform2f(u('slabSize'),shape.w,shape.h);gl.uniform2f(u('slabCenter'),shape.x+shape.w/2,shape.y+shape.h/2);gl.uniform1f(u('paintLeft'),paintLeft);gl.uniform1f(u('thickness'),+thickness.value);gl.uniform1f(u('indexOfRefraction'),mode.value==='ior1'?1:+ior.value);gl.uniform1f(u('lensScale'),+lens.value);gl.drawArrays(gl.TRIANGLES,0,6);
+ const u=surface.u;gl.uniform1i(u('background'),0);gl.uniform1i(u('strongBackground'),1);gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,strongTexture);gl.activeTexture(gl.TEXTURE0);
+ const emphasized=emphasis.map((weight,index)=>({weight,index})).filter(row=>row.weight>0).sort((a,b)=>b.weight-a.weight).slice(0,2);
+ for(let i=0;i<2;i++){const entry=emphasized[i],row=entry&&rows[entry.index];gl.uniform3f(u(`emphasisRow${i}`),row?row.top-1:0,row?row.top+row.height+1:-1,entry?.weight||0);}
+ gl.uniform2f(u('viewSize'),cw,ch);gl.uniform2f(u('panelSize'),width,panelHeight);gl.uniform2f(u('sourceSize'),...sourceSize);gl.uniform2f(u('sourceOffset'),...sourceOffset);
+ gl.uniform1f(u('top'),top);gl.uniform1f(u('gutter'),gutter);gl.uniform1f(u('slabHeight'),shape.h);gl.uniform2f(u('slabSize'),shape.w,shape.h);gl.uniform2f(u('slabCenter'),shape.x+shape.w/2,shape.y+shape.h/2);gl.uniform1f(u('paintLeft'),left);gl.uniform1f(u('thickness'),+thickness.value);gl.uniform1f(u('indexOfRefraction'),mode.value==='ior1'?1:+ior.value);gl.uniform1f(u('lensScale'),+lens.value);gl.drawArrays(gl.TRIANGLES,0,6);
  for(const [pass,tex,fbo,w,h,dx,dy,radius] of [[horizontal,sceneTexture,resolveFbo,ow,rh,1/rw,0,rw/ow],[vertical,resolveTexture,null,ow,oh,0,1/rh,rh/oh]]){
   gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.viewport(0,0,w,h);gl.useProgram(pass.program);gl.bindTexture(gl.TEXTURE_2D,tex);gl.uniform1i(pass.u('image'),0);gl.uniform2f(pass.u('stepUV'),dx,dy);gl.uniform1f(pass.u('radius'),Math.max(1,radius));gl.drawArrays(gl.TRIANGLES,0,6);
  }
@@ -197,18 +230,21 @@ function render(){
   frame=0;if(!canDraw()){last=0;shapeVelocity=zeroVelocity();return;}
   const dt=last?(time-last)/1000:1/60;last=time;
   ({shape,velocity:shapeVelocity}=advanceShape(shape,shapeVelocity,aim,dt,reduced()));synchronize();render();
-  if(!settled(shape,shapeVelocity,aim))frame=requestAnimationFrame(tick);else{settleShape();last=0;render();}
+  if(!settled(shape,shapeVelocity,aim)||emphasis.some((value,index)=>Math.abs(value-emphasisGoal[index])>.001))frame=requestAnimationFrame(tick);else{settleShape();emphasis=[...emphasisGoal];last=0;render();}
  }
- function request(){if(canDraw()&&!frame){last=0;frame=requestAnimationFrame(tick);}}
+ function request(){if(canDraw()&&!frame){last=0;lastEmphasisTime=performance.now();frame=requestAnimationFrame(tick);}}
  function summary(){}
- function refresh(){
+ function refresh(opening=false){
   stop();effective=false;
+  // IntersectionObserver can arrive one painted frame after a disclosure
+  // starts entering. Prepare its new paint synchronously before that frame.
+  if(opening&&parents.every(parent=>parent.open))onscreen=visibleInScrollports();
   // Preserve the last painted material through the native disclosure's exit.
   // It draws no new frames while hidden, closed or outside the scrollport.
-  if(!visible()){if(contrast.matches||paintFailure||shaderError){panel.classList.remove('contents-glass-ready');base.hidden=glass.hidden=true;}return;}
-  setupGL();if(!gl||shaderError){panel.classList.remove('contents-glass-ready');base.hidden=glass.hidden=true;return;}
-  effective=true;panel.classList.add('contents-glass-ready');base.hidden=glass.hidden=false;
-  try{targetShape();settleShape();ensurePaint();render();}catch(error){fail(error);}
+  if(!visible()){if(contrast.matches||paintFailure||shaderError){panel.classList.remove('contents-glass-ready');glass.hidden=true;}return;}
+  setupGL();if(!gl||shaderError){panel.classList.remove('contents-glass-ready');glass.hidden=true;return;}
+  effective=true;panel.classList.add('contents-glass-ready');glass.hidden=false;
+  try{targetShape();settleShape();ensurePaint();lastEmphasisTime=0;render();}catch(error){fail(error);}
  }
  function invalidate(){geometryDirty=storageDirty=labelsDirty=true;sizeKey='';refresh();}
  function read(next){
@@ -231,7 +267,7 @@ function render(){
   link.addEventListener('pointerleave',()=>{if(hovered!==index)return;hovered=-1;labelsDirty=true;request();});
  }
  new IntersectionObserver(records=>{const next=records.some(record=>record.isIntersecting);if(next===onscreen)return;onscreen=next;geometryDirty=storageDirty=labelsDirty=true;refresh();}).observe(panel);
- new MutationObserver(()=>{geometryDirty=storageDirty=labelsDirty=true;refresh();}).observe(panel.closest('.contents-menu'),{attributes:true,attributeFilter:['open'],subtree:true});
+ new MutationObserver(()=>{geometryDirty=storageDirty=labelsDirty=true;refresh(true);}).observe(panel.closest('.contents-menu'),{attributes:true,attributeFilter:['open'],subtree:true});
  const resize=new ResizeObserver(invalidate);resize.observe(panel);const article=document.querySelector('.reader');if(article)resize.observe(article);
  document.addEventListener('visibilitychange',refresh);window.addEventListener('pagehide',()=>{stop();effective=false;});
  window.addEventListener('pageshow',()=>{owner=followScroll();invalidate();});
@@ -241,6 +277,6 @@ function render(){
  let dprQuery;function watchDpr(){dprQuery?.removeEventListener('change',changedDpr);dprQuery=matchMedia(`(resolution:${dpr}dppx)`);dprQuery.addEventListener('change',changedDpr);}
  function changedDpr(){dpr=devicePixelRatio||1;watchDpr();invalidate();}watchDpr();
  window.visualViewport?.addEventListener('resize',()=>{if(dpr!==(devicePixelRatio||1))changedDpr();});
- Object.defineProperty(window,'notesContentsGlass',{configurable:true,get:()=>({revision:'integrated-r1',enabled:effective,onscreen,drawingAllowed:canDraw(),owner:{...owner},current:observed.current?.hash,shape:{...shape},aim:{...aim},shapeVelocity:{...shapeVelocity},progress,frames,labelPaints,allocations,dpr,output:[...output],source:[...sourceSize],shaderError,reduced:reduced(),geometryDirty})});
+ Object.defineProperty(window,'notesContentsGlass',{configurable:true,get:()=>({revision:'integrated-r3-ink-motion',labelRenderer:'native-outside-refracted-inside',filter:'lanczos2',pixelAligned:true,enabled:effective,onscreen,drawingAllowed:canDraw(),owner:{...owner},current:observed.current?.hash,shape:{...shape},aim:{...aim},shapeVelocity:{...shapeVelocity},progress,frames,labelPaints,allocations,dpr,output:[...output],source:[...sourceSize],shaderError,reduced:reduced(),geometryDirty})});
  return {read,select,follow};
 }

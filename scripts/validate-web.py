@@ -49,7 +49,7 @@ for name,page in pages.items():
 for name,f in files.items():
  if f.suffix=='.css':
   for ref in re.findall(r'url\([\'"]?([^\)\'\"]+)',f.read_text('utf-8')):check_ref(name,ref)
- if f.suffix in ['.html','.css','.js','.json']:
+ if f.suffix in ['.html','.css','.js','.mjs','.json']:
   s=f.read_text('utf-8')
   for pat in [r'(?:AKIA|ASIA)[A-Z0-9]{16}',r'gh[pousr]_[A-Za-z0-9]{25,}',r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY',r'\bsk-[A-Za-z0-9_-]{25,}',r'C:[\\/]+Users[\\/]']:
    assert not re.search(pat,s),f'Potential private data: {name}: {pat}'
